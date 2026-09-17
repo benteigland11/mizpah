@@ -1,0 +1,6 @@
+{
+  "installs": {
+    "http-client": 34,
+    "json-parser": 2
+  }
+}

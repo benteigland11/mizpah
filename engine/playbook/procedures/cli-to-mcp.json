@@ -1,0 +1,41 @@
+{
+  "id": "cli-to-mcp",
+  "description": "Turn a verbose JSON CLI into a condensed MCP: small CLI verbs, JSON as the contract, MCP compresses related verbs into one tool.",
+  "tags": [
+    "cli",
+    "mcp",
+    "playbook"
+  ],
+  "steps": [
+    {
+      "id": "ab2622a1dc934c229cc5052eba00a0e7",
+      "title": "Split the CLI into small verbs",
+      "do": "Give each action its own command and flags (create, add-step, edit-step, remove-step). Do not invent a kitchen-sink CLI command."
+    },
+    {
+      "id": "80884ca6ae8243ec93f6aede7184a835",
+      "title": "Put work in ops that return dicts",
+      "do": "Implement file mutations in one ops layer. Every function returns a JSON-serializable dict. CLI and MCP both call this layer."
+    },
+    {
+      "id": "6141c41a86b741e895631882a65380a0",
+      "title": "Print JSON from every CLI command",
+      "do": "stdout is json.dumps of the ops dict (ok, valid, errors, titles, ids). No prose tables as the machine contract. Humans can still read the JSON."
+    },
+    {
+      "id": "b6fbce8049494ff4987e708ac7336c03",
+      "title": "Treat JSON as the MCP contract",
+      "do": "MCP tool results are the same ops dicts, serialized as JSON text. Do not invent a second response shape for MCP."
+    },
+    {
+      "id": "92d1643ac07141a4830dd6514de88f5f",
+      "title": "Add MCP as a thin stdio server",
+      "do": "JSON-RPC over stdio. tools/call runs the same ops as the CLI. Do not reimplement mutations inside the MCP handlers."
+    },
+    {
+      "id": "de6b5b4bb72a43a4803f8e1735ec1c71",
+      "title": "Condense MCP tools",
+      "do": "Do not mirror CLI 1:1. Collapse related verbs into one MCP tool with an op (add|edit|remove). CLI stays verbose; MCP compresses."
+    }
+  ]
+}

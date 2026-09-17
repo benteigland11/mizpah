@@ -1,0 +1,31 @@
+{
+  "meta": {
+    "id": "infra-interprocess-lock-python",
+    "name": "Interprocess Lock",
+    "version": "1.0.0",
+    "domain": "infra",
+    "tags": [
+      "lock",
+      "concurrency",
+      "filelock",
+      "flock",
+      "cross-process"
+    ]
+  },
+  "description": "Cross-process advisory file lock as a context manager, stdlib only (fcntl on POSIX, msvcrt on Windows) - no filelock dependency. Serializes a critical section across processes and threads: blocking=True waits via the OS, blocking=False tries once and raises LockBusy so a caller can time its own retries (the poll/timeout policy stays in the consumer, not the primitive). Reentrant per-thread keyed by lock path, so nested acquires on one call stack don't self-deadlock while other threads/processes still contend through the OS.",
+  "tech_stack": {
+    "language": "python",
+    "dependencies": []
+  },
+  "custom_notes": "",
+  "library_notes": {
+    "general": "Single responsibility - one widget does one thing. No global state. No project-specific code, hardcoded paths, credentials, or environment-specific values. Expose variation points as constructor parameters or function arguments - no hardcoded thresholds, colors, sizes, or behavior flags. URLs and endpoints belong in examples as demonstration data, not in src/ - if a widget needs a URL to operate, it must be a parameter the caller provides. All dependencies must be declared in widget.json tech_stack.dependencies. Widgets cannot depend on other widgets - they must be fully self-contained. If you need logic from another widget, copy it into src/ directly. Examples must run and exit cleanly with no user input, no network calls, and no external services or API keys - use fake/hardcoded data. The widget's own declared dependencies are fine and will be installed by the validator before the example runs. Do not modify library_notes - it is managed by Cartograph and will be restored on checkin.",
+    "language": "No project-specific names, identifiers, or terminology anywhere in src/, tests/, or examples/ - use generic names like 'user', 'item', 'value', 'example_org'. A test that references your project's real entity names is contaminated. Use pytest for all tests - no unittest. Type hints required on all public functions. No __init__.py in tests/. No if __name__ == '__main__' blocks in src/ files. Imports ordered: stdlib, third-party, local. ML domain: framework-free (numpy, scikit-learn, plain Python) and API-based inference (HTTP calls to OpenAI, Anthropic, HuggingFace Inference API) work everywhere. Heavy optional frameworks must be pre-installed - Cartograph will not auto-install them. Declare dependencies in widget.json normally; consumers must also have them installed to validate.",
+    "domain": "Accept all paths and hostnames as parameters - never construct paths from hardcoded roots. Config keys, log formats, and health check endpoints must be configurable. Return structured status objects rather than printing; let the caller handle output. Side effects (file writes, process spawns) must be opt-in, not automatic."
+  },
+  "validation": {
+    "engine_version": 1,
+    "validated_at": "2026-06-25T18:39:51.259604+00:00",
+    "runtime": "python 3.14.5"
+  }
+}

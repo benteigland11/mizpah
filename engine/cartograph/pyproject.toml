@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cartograph-cli"
+version = "0.7.24"
+description = "Widget library manager for AI agents — CLI"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+cartograph = "cartograph.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cartograph", "cg"]
+
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,31 @@
+{
+  "meta": {
+    "id": "universal-block-walker-python",
+    "name": "Block Walker",
+    "version": "1.0.0",
+    "domain": "universal",
+    "tags": [
+      "parsing",
+      "depth-counting",
+      "block-boundaries",
+      "code-analysis",
+      "text-walker"
+    ]
+  },
+  "description": "Depth-counting text walker for finding matching block boundaries in structured text. Handles single-character markers (parentheses, braces, brackets) and keyword markers (begin/end). Skips strings and comments with configurable syntax. Used by language engines to extract function signatures, split parameter lists, find block boundaries, and strip comments.",
+  "tech_stack": {
+    "language": "python",
+    "dependencies": []
+  },
+  "custom_notes": "",
+  "library_notes": {
+    "general": "Single responsibility - one widget does one thing. No global state. No project-specific code, hardcoded paths, credentials, or environment-specific values. Expose variation points as constructor parameters or function arguments - no hardcoded thresholds, colors, sizes, or behavior flags. All dependencies must be declared in widget.json tech_stack.dependencies. Widgets cannot depend on other widgets - they must be fully self-contained. If you need logic from another widget, copy it into src/ directly. Examples must run and exit cleanly with no user input, no network calls, and no external services or API keys - use fake/hardcoded data. The widget's own declared dependencies are fine and will be installed by the validator before the example runs. Do not modify library_notes - it is managed by Cartograph and will be restored on checkin.",
+    "language": "Use pytest for all tests - no unittest. Type hints required on all public functions. No __init__.py in tests/. No if __name__ == '__main__' blocks in src/ files. Imports ordered: stdlib, third-party, local. ML domain: framework-free (numpy, scikit-learn, plain Python) and API-based inference (HTTP calls to OpenAI, Anthropic, HuggingFace Inference API) work everywhere. Heavy frameworks (torch, tensorflow, jax, and similar) are allowed but must be pre-installed - Cartograph will not auto-install them. Declare them in widget.json dependencies normally; consumers must also have them installed to validate.",
+    "domain": "Use this domain when a widget spans multiple domains or has no clear home \u2014 not because it must be pure. A retry utility, a date formatter, a general-purpose HTTP client all belong here. Expose variation points as parameters. Don't force it into a domain just to avoid universal."
+  },
+  "validation": {
+    "engine_version": 1,
+    "validated_at": "2026-04-04T16:44:02.995318+00:00",
+    "runtime": "python 3.14.3"
+  }
+}

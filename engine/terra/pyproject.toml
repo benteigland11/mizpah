@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "terra-map"
+version = "0.2.0"
+description = "Evidence-backed design maps, probes, routes, and agent-first CLI workflows."
+requires-python = ">=3.11"
+authors = [{ name = "Vinscen" }]
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+keywords = ["agents", "cli", "evidence", "engineering", "planning"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+Homepage = "https://github.com/benteigland11/Terra"
+Repository = "https://github.com/benteigland11/Terra"
+Issues = "https://github.com/benteigland11/Terra/issues"
+
+[project.scripts]
+terra = "terra.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src", "."]
+include = [
+  "terra*",
+  "cg.bp_agent_tool_cli_python.src*",
+  "cg.cg_infra_agent_cli_python.src*",
+  "cg.cg_universal_agent_response_python.src*",
+]
+namespaces = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
