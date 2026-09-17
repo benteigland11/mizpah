@@ -1,3 +1,8 @@
 Terra 50ddc414a1176d822b13c384f041d362b86441ed https://github.com/benteigland11/Terra.git
 Cartograph 8e1f860db638f2aa1ee820d413cd3e3ff21d95a1 git@github.com:benteigland11/Cartograph.git
 Playbook 28b1d380a372c2ef5b659e4524eef7d1b68d245b https://github.com/benteigland11/Playbook.git
+
+diverged:
+- terra: build switched from setuptools find (wrong cg include list) to hatchling packages=["src/terra","cg"]; readme line dropped
+- cartograph, playbook: readme line dropped
+- playbook: mcp.py, `mcp` subcommand and MCP tests removed

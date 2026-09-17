@@ -1,0 +1,22 @@
+{
+ "completed": "2026-09-17T02:05:39.811521+00:00",
+ "simulator": {
+  "widget": "ml-context-mixture-simulation-javascript",
+  "version": "1.2.0",
+  "path": "../../../agent-loop-dashboard/cg/ml-context-mixture-simulation-javascript/src/context_mixture_simulation.js",
+  "sha256": "4ef4d55c44df5c1c6f452e31486e0f618073aa9f83df3e825ae5cd6ff7951b20"
+ },
+ "plant_source": "agent-loop-dashboard/public/research/v0.2/selected-configuration.json",
+ "controller": null,
+ "node": "v22.22.2",
+ "files": {
+  "run.mjs": "61b77b361a25a0facd7aefdd26ee87dc46b4b58882b58c7532045a6e673cfe67",
+  "plot.py": "fc3cd951071f1a77c14cc37bdc5d96f18e4944eeb9b276ba8ca23ad96c43a1cf",
+  "results.json": "be0a80cc8fe9f22bc42e57675530d1062eae1310eeea15b979d2509f3cfa4707",
+  "table.tsv": "d89cb8ae283cca3df0d544a4612c93b2a707baa8e08b0a44ab9d1e38bdf10830",
+  "compaction-window-sweep.png": "eea1268b47e84356ab394fe077f02fd9a7ee8d621f6359308d161a7cc44e30f4",
+  "README.md": "c0d41c903bfba6f4e908548019d5f5130bbc6d492658f2a24fc7ca2a6f0cc0c0"
+ },
+ "determinism": "results.json identical across two executions excluding per-row ms field",
+ "note": "No simulator, gain, window or harness setting was changed."
+}

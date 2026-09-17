@@ -1,0 +1,8 @@
+{
+  "widget_id": "backend-streaming-repetition-guard-python",
+  "version": "1.1.0",
+  "source_file": "src/streaming_repetition_guard.py",
+  "bundled_file": "src/repetition_guard.py",
+  "sha256": "3f61c5f72e9b8decd46e0f8bf7bd5f006c8a00b3333d7b5527ad1e7987a4c90b",
+  "reason": "Self-contained leaf policy; copied source and detector tests are byte-equivalent apart from import path."
+}

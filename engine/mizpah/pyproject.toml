@@ -3,12 +3,13 @@ name = "mizpah-engine"
 version = "0.0.1"
 description = "The loop: controller and worker sessions over Terra, Cartograph and Playbook."
 requires-python = ">=3.12"
-dependencies = ["terra-map", "cartograph-cli", "playbook"]
+dependencies = ["terra-map", "cartograph-cli", "playbook", "mizpah-harness"]
 
 [tool.uv.sources]
 terra-map = { workspace = true }
 cartograph-cli = { workspace = true }
 playbook = { workspace = true }
+mizpah-harness = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

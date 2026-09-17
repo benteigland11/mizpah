@@ -3,19 +3,20 @@ name = "mizpah"
 version = "0.0.1"
 description = "Mizpah: a self-improving engineering loop — Terra (reference and map), Cartograph (capabilities), Playbook (methods), driven by a controller/worker harness."
 requires-python = ">=3.12"
-dependencies = ["terra-map", "cartograph-cli", "playbook"]
+dependencies = ["terra-map", "cartograph-cli", "playbook", "mizpah-harness"]
 
 [tool.uv.workspace]
-members = ["engine/terra", "engine/cartograph", "engine/playbook", "engine/mizpah"]
+members = ["engine/terra", "engine/cartograph", "engine/playbook", "engine/harness", "engine/mizpah"]
 
 [tool.uv.sources]
 terra-map = { workspace = true }
 cartograph-cli = { workspace = true }
 playbook = { workspace = true }
 mizpah-engine = { workspace = true }
+mizpah-harness = { workspace = true }
 
 [dependency-groups]
-dev = ["pytest>=8", "coverage>=7", "pytest-cov>=5"]
+dev = ["pytest>=8", "coverage>=7", "pytest-cov>=5", "pytest-asyncio>=0.23"]
 
 [build-system]
 requires = ["hatchling"]

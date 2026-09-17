@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=61"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "terra-map"
@@ -31,15 +31,8 @@ Issues = "https://github.com/benteigland11/Terra/issues"
 [project.scripts]
 terra = "terra.cli:main"
 
-[tool.setuptools.packages.find]
-where = ["src", "."]
-include = [
-  "terra*",
-  "cg.bp_agent_tool_cli_python.src*",
-  "cg.cg_infra_agent_cli_python.src*",
-  "cg.cg_universal_agent_response_python.src*",
-]
-namespaces = true
+[tool.hatch.build.targets.wheel]
+packages = ["src/terra", "cg"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
