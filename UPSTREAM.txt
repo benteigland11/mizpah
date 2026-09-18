@@ -73,3 +73,6 @@ diverged:
 - terra: `known ladder <unknown>` — one call that runs the probe until the evidence meets the bar, links every
   run, graduates, promotes and adopts one hop up from a session map; every rung is the existing call, so
   refusals are unchanged. Replaces ~8 commands / ~5 turns of ceremony per unknown for a worker
+- harness: bp-focused-agent-session gains SessionSettings.command_tools — typed aliases for CLI commands (schema +
+  description the model sees every turn, rendered with shell quoting and run through the sandbox like bash);
+  Mizpah exposes Cartograph search/inspect/install/create/validate/status this way; 0.21.0 → 0.22.0

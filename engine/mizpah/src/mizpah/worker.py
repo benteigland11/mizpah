@@ -59,7 +59,7 @@ def load_config(path: str | Path) -> dict[str, Any]:
     config['worker_policy'] = (path.parent/config['worker_policy_file']).read_text()
     # Scaffolding is method the host imposes; each piece is a toggle so a model that can orchestrate
     # can be run without it and compared. Verification guards are not toggles.
-    scaffolding = dict(bootstrap=True, small_edits=True, checkins=True) | (config.get('scaffolding') or {})
+    scaffolding = dict(bootstrap=True, small_edits=True, checkins=True, cartograph_tools=True) | (config.get('scaffolding') or {})
     config['scaffolding'] = scaffolding
     if not scaffolding['bootstrap']:
         config['worker_policy'] = config['worker_policy'].replace(BOOTSTRAP_WALK, FREE_METHOD, 1)
@@ -752,6 +752,52 @@ def focus_globs(unknowns: list[dict[str, Any]]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(globs))
 
 
+# Cartograph as typed tools: the surface is small and non-obvious (a worker spent nine turns hunting
+# the library on disk because it did not know `inspect` existed). Each renders to the CLI command and
+# runs through the sandbox like bash, so procedures and the journal keep one vocabulary.
+def string(desc: str, **extra: Any) -> dict[str, Any]:
+    return dict(type='string', description=desc, **extra)
+
+
+CARTOGRAPH_TOOLS: tuple[dict[str, Any], ...] = (
+    dict(name='cartograph_search', description='Search the widget library for an existing part before writing one: '
+         'parsers, statistics, checks, tool wrappers. Returns ids with descriptions and relevance. Search is cheap; '
+         'create without a prior search is refused.',
+         command='cartograph search {query} --language {language} --top-k {top_k}',
+         parameters=dict(type='object', properties=dict(query=string('what the part must do, in plain words'),
+                                                        language=string('implementation language', default='python'),
+                                                        top_k=dict(type='integer', description='how many hits', default=3)),
+                         required=['query'])),
+    dict(name='cartograph_inspect', description='Show a widget: its description, API, dependencies and (with source) '
+         'the code and examples, straight from the library. Use it to decide between install and create.',
+         command='cartograph inspect {widget_id} {source}',
+         parameters=dict(type='object', properties=dict(widget_id=string('id from search, e.g. data-csv-mean-python'),
+                                                        source=dict(type='boolean', description='include source files', flag='--source')),
+                         required=['widget_id'])),
+    dict(name='cartograph_install', description='Install a widget into this project under cg/<dir>/; then import it with '
+         'sys.path.insert(0, "cg/<dir>") and from src.<module> import <fn> (read cg/<dir>/examples/ first).',
+         command='cartograph install {widget_id}',
+         parameters=dict(type='object', properties=dict(widget_id=string('id from search')), required=['widget_id'])),
+    dict(name='cartograph_create', description='Scaffold a new widget under cg/ when no library part fits (refused '
+         'without a prior search). Then rm the stub src file, write a skeleton, fill one function per edit, add '
+         'tests and an example, and validate.',
+         command='cartograph create {slug} --language {language} --domain {domain} --description {description} {tags}',
+         parameters=dict(type='object', properties=dict(slug=string('kebab-case name, e.g. csv-column-mean'),
+                                                        language=string('implementation language', default='python'),
+                                                        domain=string('data | backend | frontend | infra | universal | ...', default='data'),
+                                                        description=string('one sentence: what it does'),
+                                                        tags=string('comma-separated tags, 3-5', flag='--tags')),
+                         required=['slug', 'description'])),
+    dict(name='cartograph_validate', description='Run the validation pipeline on a widget directory (tests, examples, '
+         'manifest, rules). Every widget a task touches must pass before the task can close.',
+         command='cartograph validate {widget_dir}',
+         parameters=dict(type='object', properties=dict(widget_dir=string('path such as cg/data_csv_mean_python')),
+                         required=['widget_dir'])),
+    dict(name='cartograph_status', description='List the widgets installed in this project and whether each is '
+         'current with the library.', command='cartograph status', parameters=dict(type='object', properties={})),
+)
+
+
 def build_settings(config: dict[str, Any], assignment: str, reference: str,
                    unknowns: list[dict[str, Any]] = ()) -> SessionSettings:
     # The check-in controller reviews on the v10 cadence against the task reference; routing and
@@ -765,6 +811,7 @@ def build_settings(config: dict[str, Any], assignment: str, reference: str,
         config['review_on_completion'], config['guidance_prefix'],
         maximum_generation_retries=config.get('maximum_generation_retries', 0),
         write_existing_files=not config['mizpah']['scaffolding']['small_edits'], edit_requires_read=config['mizpah']['scaffolding']['small_edits'],
+        command_tools=CARTOGRAPH_TOOLS if config['mizpah']['scaffolding'].get('cartograph_tools', True) else (),
         repeated_failure_rollover=config['mizpah'].get('repeated_failure_rollover'),
         repeated_success_rollover=config['mizpah'].get('repeated_success_rollover'),
         review_focus_globs=focus_globs(list(unknowns)), review_focus_characters=12000,

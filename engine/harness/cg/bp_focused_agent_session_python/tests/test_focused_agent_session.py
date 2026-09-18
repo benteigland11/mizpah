@@ -1396,3 +1396,25 @@ def test_open_drops_a_torn_journal_tail_and_resumes(tmp_path):
     events = [json.loads(line) for line in journal.read_text().splitlines()]
     assert sum(1 for e in events if e['event_type'] == 'torn_tail_dropped') == 1
     assert not any(e['event_id'] == 'evt_torn' for e in events)
+
+
+def test_command_tools_render_to_shell_and_run_like_bash(tmp_path):
+    from src.focused_agent_session import render_command_tool, worker_tools
+    spec = dict(name='cartograph_search', description='Search the widget library.',
+                command='cartograph search {query} --language {language} --top-k {top_k} {local_only}',
+                parameters=dict(type='object', properties=dict(
+                    query=dict(type='string'), language=dict(type='string', default='python'),
+                    top_k=dict(type='integer', default=3), local_only=dict(type='boolean', flag='--local-only')),
+                    required=['query']))
+    assert render_command_tool(spec, dict(query='count csv rows')) == "cartograph search 'count csv rows' --language python --top-k 3"
+    assert render_command_tool(spec, dict(query='x', local_only=True, top_k=1)) == "cartograph search x --language python --top-k 1 --local-only"
+    with pytest.raises(ValueError, match='missing query'):
+        render_command_tool(spec, dict(language='python'))
+    with pytest.raises(ValueError, match='unexpected arguments'):
+        render_command_tool(spec, dict(query='x', nope=1))
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, total=1, enabled=False, rollover=False)
+    settings = replace(settings, command_tools=(spec,))
+    tools = worker_tools(settings.worker_tools, settings)
+    assert tools[-1]['function']['name'] == 'cartograph_search' and tools[-1]['function']['parameters']['additionalProperties'] is False
+    with pytest.raises(ValueError, match='distinct names'):
+        replace(settings, command_tools=(spec, dict(spec, name='bash')))

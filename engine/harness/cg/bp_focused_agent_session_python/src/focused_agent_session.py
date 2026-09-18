@@ -9,6 +9,7 @@ import fcntl
 import fnmatch
 import hashlib
 import json
+import shlex
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -88,6 +89,9 @@ class SessionSettings:
     history_archive_prefix: str = '.session-history'
     maximum_generation_retries: int = 0
     worker_tools: tuple[str, ...] = ('bash',)
+    # Typed aliases for CLI commands: each is a tool with a schema and a description the model sees on
+    # every turn, rendered to a shell command and run exactly like bash. One vocabulary, discoverable.
+    command_tools: tuple[dict[str, Any], ...] = ()
     maximum_tool_argument_characters: int | None = None
     maximum_write_characters: int | None = None
     maximum_edit_characters: int | None = None
@@ -125,6 +129,11 @@ class SessionSettings:
         object.__setattr__(self, 'worker_tools', tools)
         if not tools or 'bash' not in tools or len(set(tools)) != len(tools) or set(tools) - set(WORKER_TOOLS):
             raise ValueError('worker_tools must be distinct names from '+', '.join(WORKER_TOOLS)+' and include bash')
+        names = [t.get('name') for t in self.command_tools]
+        if len(set(names)) != len(names) or set(names) & set(WORKER_TOOLS) or not all(
+                isinstance(t, dict) and isinstance(t.get('name'), str) and t['name'] and isinstance(t.get('command'), str)
+                and isinstance(t.get('parameters'), dict) for t in self.command_tools):
+            raise ValueError('command_tools need distinct names (not bash/read/write/edit), a command template and a parameters schema')
         for name in ('maximum_tool_argument_characters', 'maximum_write_characters', 'maximum_edit_characters'):
             value = getattr(self, name)
             if value is not None and (type(value) is not int or value <= 0):
@@ -227,7 +236,37 @@ def worker_tools(names: tuple[str, ...], settings: 'SessionSettings | None' = No
                                    requires_read=settings.edit_requires_read))
         else:
             tools.append(WORKER_TOOLS[name]())
+    for spec in (settings.command_tools if settings is not None else ()):
+        tools.append(dict(type='function', function=dict(name=spec['name'], description=spec.get('description', ''),
+                                                          parameters=dict(spec['parameters'], additionalProperties=False))))
     return tools
+
+
+def render_command_tool(spec: dict[str, Any], args: dict[str, Any]) -> str:
+    """Fill a command template from typed arguments: strings are shell-quoted, booleans become their flag
+    (or nothing), absent optional parameters become their default or nothing."""
+    schema = spec['parameters']
+    properties = schema.get('properties') or {}
+    required = schema.get('required') or []
+    unknown = set(args)-set(properties)
+    if unknown:
+        raise ValueError(spec['name']+': unexpected arguments '+', '.join(sorted(unknown)))
+    missing = [k for k in required if k not in args]
+    if missing:
+        raise ValueError(spec['name']+': missing '+', '.join(missing))
+    values: dict[str, str] = {}
+    for key, prop in properties.items():
+        value = args.get(key, prop.get('default'))
+        if prop.get('type') == 'boolean':
+            values[key] = str(prop.get('flag', '--'+key.replace('_', '-'))) if value else ''
+        elif value is None or value == '':
+            values[key] = ''
+        elif 'flag' in prop:
+            values[key] = str(prop['flag'])+' '+shlex.quote(str(value))   # optional flag with a value
+        else:
+            values[key] = shlex.quote(str(value))
+    rendered = spec['command'].format(**values)
+    return ' '.join(rendered.split())
 
 
 def controller_tools() -> list[dict[str, Any]]:
@@ -582,7 +621,7 @@ class FocusedSession:
         window = list(self.state.get('recent_calls') or [])[-6:]
         repeats = window.count(signature)
         repeated = repeats > 0
-        if name not in self.settings.worker_tools:
+        if name not in self.settings.worker_tools and name not in {t['name'] for t in self.settings.command_tools}:
             output = dict(status='error', error='Unknown tool: '+name)
         elif bound is not None and len(rendered) > bound:
             # A rejected call never reaches the shell or the workspace. The bound is
@@ -699,6 +738,12 @@ class FocusedSession:
         else:
             try:
                 args = json.loads(arguments) if isinstance(arguments, str) else arguments
+                spec = next((t for t in self.settings.command_tools if t['name'] == name), None)
+                if spec is not None:
+                    if not isinstance(args, dict):
+                        raise ValueError(name+' requires an object of arguments')
+                    args = dict(command=render_command_tool(spec, args))
+                    self._event('command_tool', dict(call_id=call['id'], name=name, command=args['command']))
                 if (not isinstance(args, dict) or set(args) != {'command'}
                         or not isinstance(args['command'], str) or not args['command'].strip()):
                     raise ValueError('bash requires exactly one nonempty command string')
