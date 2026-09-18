@@ -259,8 +259,12 @@ def render_command_tool(spec: dict[str, Any], args: dict[str, Any]) -> str:
         value = args.get(key, prop.get('default'))
         if prop.get('type') == 'boolean':
             values[key] = str(prop.get('flag', '--'+key.replace('_', '-'))) if value else ''
-        elif value is None or value == '':
+        elif value is None or value == '' or value == []:
             values[key] = ''
+        elif prop.get('type') == 'array':
+            items = value if isinstance(value, list) else [value]
+            flag = str(prop.get('flag', ''))
+            values[key] = ' '.join((flag+' ' if flag else '')+shlex.quote(str(v)) for v in items)   # repeated flag
         elif 'flag' in prop:
             values[key] = str(prop['flag'])+' '+shlex.quote(str(value))   # optional flag with a value
         else:

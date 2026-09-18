@@ -59,7 +59,7 @@ def load_config(path: str | Path) -> dict[str, Any]:
     config['worker_policy'] = (path.parent/config['worker_policy_file']).read_text()
     # Scaffolding is method the host imposes; each piece is a toggle so a model that can orchestrate
     # can be run without it and compared. Verification guards are not toggles.
-    scaffolding = dict(bootstrap=True, small_edits=True, checkins=True, cartograph_tools=True) | (config.get('scaffolding') or {})
+    scaffolding = dict(bootstrap=True, small_edits=True, checkins=True, command_tools=True) | (config.get('scaffolding') or {})
     config['scaffolding'] = scaffolding
     if not scaffolding['bootstrap']:
         config['worker_policy'] = config['worker_policy'].replace(BOOTSTRAP_WALK, FREE_METHOD, 1)
@@ -759,7 +759,13 @@ def string(desc: str, **extra: Any) -> dict[str, Any]:
     return dict(type='string', description=desc, **extra)
 
 
-CARTOGRAPH_TOOLS: tuple[dict[str, Any], ...] = (
+# Typed only where bash measurably fails or the surface cannot be discovered (journal tally, 2026-09-18):
+# cartograph search/inspect/install/create were never found (nine turns hunting the library on disk);
+# terra route complete fumbled 6/16, known promote 7/30, unknown link-run 7/33 — `known ladder` replaces
+# those rungs and is new, so it is undiscoverable; route block is the honest exit and must be visible;
+# playbook add-step fumbled 8/26, edit-step 4/18, start 6/59, and `playbook --help` was called seven times.
+# Everything else (probe run 5/61, probe validate, known adopt, cartograph validate, playbook search) stays bash.
+COMMAND_TOOLS: tuple[dict[str, Any], ...] = (
     dict(name='cartograph_search', description='Search the widget library for an existing part before writing one: '
          'parsers, statistics, checks, tool wrappers. Returns ids with descriptions and relevance. Search is cheap; '
          'create without a prior search is refused.',
@@ -780,7 +786,7 @@ CARTOGRAPH_TOOLS: tuple[dict[str, Any], ...] = (
          parameters=dict(type='object', properties=dict(widget_id=string('id from search')), required=['widget_id'])),
     dict(name='cartograph_create', description='Scaffold a new widget under cg/ when no library part fits (refused '
          'without a prior search). Then rm the stub src file, write a skeleton, fill one function per edit, add '
-         'tests and an example, and validate.',
+         'tests and an example, and `cartograph validate cg/<dir>` in bash.',
          command='cartograph create {slug} --language {language} --domain {domain} --description {description} {tags}',
          parameters=dict(type='object', properties=dict(slug=string('kebab-case name, e.g. csv-column-mean'),
                                                         language=string('implementation language', default='python'),
@@ -788,13 +794,44 @@ CARTOGRAPH_TOOLS: tuple[dict[str, Any], ...] = (
                                                         description=string('one sentence: what it does'),
                                                         tags=string('comma-separated tags, 3-5', flag='--tags')),
                          required=['slug', 'description'])),
-    dict(name='cartograph_validate', description='Run the validation pipeline on a widget directory (tests, examples, '
-         'manifest, rules). Every widget a task touches must pass before the task can close.',
-         command='cartograph validate {widget_dir}',
-         parameters=dict(type='object', properties=dict(widget_dir=string('path such as cg/data_csv_mean_python')),
-                         required=['widget_dir'])),
-    dict(name='cartograph_status', description='List the widgets installed in this project and whether each is '
-         'current with the library.', command='cartograph status', parameters=dict(type='object', properties={})),
+    dict(name='terra_known_ladder', description='Take an unknown up the whole ladder in one call: runs its probe until '
+         'the evidence meets the bar, links every run, graduates, promotes to med and adopts to the project map. '
+         'Refusals name the rung that failed. Use after `terra probe validate <probe>` passes.',
+         command='terra known ladder {unknown_id} {to} {confidence}',
+         parameters=dict(type='object', properties=dict(unknown_id=string('the unknown id'),
+                                                        to=string('run target JSON when the probe needs one, e.g. {"kind": "file"}', flag='--to'),
+                                                        confidence=string('bar to reach', default='med', flag='--confidence')),
+                         required=['unknown_id'])),
+    dict(name='terra_route_complete', description='Close the task once every unknown it carries is adopted: cite one '
+         'run id and every known id. Refused while a known is missing.',
+         command='terra route complete {task} --run {run} {knowns}',
+         parameters=dict(type='object', properties=dict(task=string('task id'), run=string('a run id of this task'),
+                                                        knowns=dict(type='array', items=dict(type='string'), flag='--known',
+                                                                    description='every known id the task carries')),
+                         required=['task', 'run', 'knowns'])),
+    dict(name='terra_route_block', description='The honest exit: the source cannot be read as the unknown asks, or '
+         'the question is not answerable from this workspace. Say what you needed and could not read; then stop.',
+         command='terra route block {task} --reason {reason}',
+         parameters=dict(type='object', properties=dict(task=string('task id'), reason=string('what you needed and could not read')),
+                         required=['task', 'reason'])),
+    dict(name='playbook_start', description='Walk a procedure one step at a time; each reply ends with `then`, the '
+         'exact command for the next step. Omit step for the first step.',
+         command='playbook start {id} {step}',
+         parameters=dict(type='object', properties=dict(id=string('procedure id from search'),
+                                                        step=dict(type='integer', description='step number to show', flag='--step')),
+                         required=['id'])),
+    dict(name='playbook_add_step', description='Append one step to a procedure you created or followed: a short title '
+         'and one imperative `do` with the exact commands.',
+         command='playbook add-step {id} --title {title} --do {do}',
+         parameters=dict(type='object', properties=dict(id=string('procedure id'), title=string('short step title'),
+                                                        do=string('one action, with the exact commands')),
+                         required=['id', 'title', 'do'])),
+    dict(name='playbook_edit_step', description='Rewrite one step of a procedure where it fell short of what you '
+         'actually had to do; target it by its current title.',
+         command='playbook edit-step {id} --title {title} --do {do}',
+         parameters=dict(type='object', properties=dict(id=string('procedure id'), title=string('current step title'),
+                                                        do=string('the new imperative, with the exact commands')),
+                         required=['id', 'title', 'do'])),
 )
 
 
@@ -811,7 +848,7 @@ def build_settings(config: dict[str, Any], assignment: str, reference: str,
         config['review_on_completion'], config['guidance_prefix'],
         maximum_generation_retries=config.get('maximum_generation_retries', 0),
         write_existing_files=not config['mizpah']['scaffolding']['small_edits'], edit_requires_read=config['mizpah']['scaffolding']['small_edits'],
-        command_tools=CARTOGRAPH_TOOLS if config['mizpah']['scaffolding'].get('cartograph_tools', True) else (),
+        command_tools=COMMAND_TOOLS if config['mizpah']['scaffolding'].get('command_tools', True) else (),
         repeated_failure_rollover=config['mizpah'].get('repeated_failure_rollover'),
         repeated_success_rollover=config['mizpah'].get('repeated_success_rollover'),
         review_focus_globs=focus_globs(list(unknowns)), review_focus_characters=12000,
