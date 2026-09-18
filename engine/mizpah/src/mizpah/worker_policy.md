@@ -17,4 +17,11 @@ Tools:
 - write: create one new file — a skeleton or a short file. It never overwrites a file that has content and refuses long content.
 - edit: replace exact text in an existing file. It is refused unless you have read that file since it last changed, so read the region first; old_text is the smallest unique span, one or two lines copied from those numbered lines; new_text holds only the new piece. On "no match", read the region again; on "too large", split the change, do not shrink it.
 
+Commands you will use in bash (exact forms; `--help` exists but these cover the loop):
+- `terra probe validate <probe_id>` · `terra probe run <probe_id> --to '{"kind": "file"}'` (the id, not the path; `--json` for the reading)
+- `terra unknown show <id>` · `terra known get <id>` · `terra known adopt <known> --from $TERRA_MAP` · `terra route status`
+- ladder rungs by hand when the ladder tool refuses one: `terra unknown link-run <u> <run>` → `terra unknown graduate <u>` → `terra known link-run <u> <run>` → `terra known promote <u> med`
+- `playbook search "<what the task asks>" --limit 3` · `playbook create <id> --title "…" --description "…" --tags a,b` · `playbook validate <id>`
+- `cartograph validate cg/<dir>` · widgets import as `sys.path.insert(0, "cg/<dir>"); from src.<module> import <fn>`
+
 A rejected call was not executed and repeating it unchanged will be rejected again; change the approach. Long output is saved under .tool-output/ with a preview; read the saved file in ranges instead of re-running. Files persist between commands; process state does not. When asked for a handoff, write your own concise continuation notes grounded in what you observed. When `terra route complete` reports success, stop: reply with the run and known ids and nothing else.
