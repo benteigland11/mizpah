@@ -762,3 +762,32 @@ def test_link_run_is_quiet_when_the_sample_lands(project: Path, monkeypatch, cap
 
     assert (rec.get("stats") or {}).get("n", 0) == 1
     assert "added NO sample" not in capsys.readouterr().err
+
+
+# --- a run linked to a RESOLVED unknown is forwarded to its known ------------
+
+
+def test_link_run_on_a_resolved_unknown_forwards_to_the_known(project: Path, monkeypatch) -> None:
+    """A stderr NOTE said 'linked runs here feed NO known's stats' — a worker
+    missed it and re-ran `known promote` 17 times (2026-09-17). Forward instead."""
+    monkeypatch.chdir(project)
+    from terra.knowns import load_known
+    from terra.unknowns import create_unknown, link_run, load_unknown
+    from test_formula_type import _write_measure_probe
+
+    init_probe(project, "emitter3", purpose="p")
+    _write_measure_probe(project, "emitter3", quantity="s_wing", value=38.0)
+    create_unknown(project, "s_wing", map_type="number", quantity="s_wing", claim="S?", evidence_needed="e")
+    first = run_probe(project, "emitter3", to={"kind": "t", "id": "1"})["id"]
+    link_run(project, "s_wing", first)
+    r = _run(project, "unknown", "graduate", "s_wing")
+    assert r.returncode == 0, r.stdout + r.stderr
+    second = run_probe(project, "emitter3", to={"kind": "t", "id": "2"})["id"]
+    r = _run(project, "unknown", "link-run", "s_wing", second)
+    assert r.returncode == 0, r.stdout + r.stderr
+    payload = json.loads(r.stdout[r.stdout.index("{"):])
+    assert payload["meta"]["forwarded_to"] == "known:s_wing"
+    assert "known promote s_wing" in payload["meta"]["note"]
+    assert payload["data"]["stats"]["n"] == 2
+    assert second in load_known(project, "s_wing")["run_ids"]
+    assert second not in (load_unknown(project, "s_wing").get("run_ids") or [])

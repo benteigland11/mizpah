@@ -82,3 +82,25 @@ def test_validate_all(tmp_path: Path):
     result = validate_all_probes(probes_root(tmp_path))
     assert result["ok"] is True
     assert len(result["probes"]) == 2
+
+
+def test_validate_refuses_a_measure_that_reads_nothing(tmp_path, monkeypatch):
+    """A constant return is an assertion, not a reading (three fake surveys, 2026-09-18)."""
+    from terra.probe_init import init_probe
+    from terra.probe_validate import validate_probe_dir
+
+    monkeypatch.chdir(tmp_path)
+    pdir = init_probe(tmp_path, "survey", purpose="opinions?", kind="run")
+    script = pdir / "probe.py"
+    stub = '    raise NotImplementedError("TODO: implement measure()")  # scaffold stub'
+    assert validate_probe_dir(pdir)["ok"] is True  # untouched scaffold still validates (reported as a stub)
+    script.write_text(script.read_text().replace(stub, '    return {"is_liked": True}'))
+    result = validate_probe_dir(pdir)
+    assert result["ok"] is False and any("reads nothing" in b for b in result["blocks"])
+    script.write_text(script.read_text().replace('    return {"is_liked": True}',
+                                                 '    return {"is_liked": len(ctx.get("to", {})) > 0}'))
+    assert validate_probe_dir(pdir)["ok"] is True
+    script.write_text(script.read_text().replace('    return {"is_liked": len(ctx.get("to", {})) > 0}',
+                                                 '    return {"lines": sum(1 for _ in open("data.txt"))}'))
+    (tmp_path / "data.txt").write_text("1\n")
+    assert validate_probe_dir(pdir)["ok"] is True

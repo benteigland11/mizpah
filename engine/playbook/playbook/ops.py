@@ -144,6 +144,12 @@ def _hit_payload(
         payload["score"] = score
     if snippet is not None:
         payload["snippet"] = snippet
+    # The titles are what `start --title` takes; a hit that hides them costs the
+    # caller a `load` (or several guesses) before it can start.
+    titles = record.get("titles")
+    if isinstance(titles, list) and titles:
+        payload["steps"] = list(titles)
+        payload["start"] = f"playbook start {item_id} --title {titles[0]!r}"
     return payload
 
 
@@ -246,20 +252,31 @@ def load_procedure(procedure_id: str, full: bool = True) -> dict[str, Any]:
     }
 
 
-def start_procedure(procedure_id: str, title: str) -> dict[str, Any]:
-    """Re-read one step by unique title: its do, its position, and the neighbouring titles."""
-    if not isinstance(title, str) or not title.strip():
-        raise ValueError("title must be a non-empty string")
+def start_procedure(procedure_id: str, title: str | None = None, step: int | None = None) -> dict[str, Any]:
+    """Re-read one step by unique title: its do, its position, and the neighbouring titles.
+
+    Without a title, start at the first step: the caller has just found the procedure
+    and cannot know its step titles yet.
+    """
     document = read_document(store.procedure_path(procedure_id))
     _require_valid(document, procedure_id)
     steps = document.get("steps") if isinstance(document.get("steps"), list) else []
-    marker = title.strip()
+    if step is not None:
+        if not isinstance(step, int) or not 1 <= step <= len(steps) or not isinstance(steps[step-1], dict):
+            raise ValueError(f"procedure {procedure_id!r} has steps 1..{len(steps)}; no step {step}")
+        title = steps[step-1].get("title")
+    if title is None or not str(title).strip():
+        if not steps or not isinstance(steps[0], dict) or not isinstance(steps[0].get("title"), str):
+            raise ValueError(f"procedure {procedure_id!r} has no steps to start at")
+        title = steps[0]["title"]
+    marker = str(title).strip()
     index = next(
         (i for i, step in enumerate(steps) if isinstance(step, dict) and step.get("title") == marker),
         None,
     )
     if index is None:
-        raise ValueError(f"no step titled {marker!r}")
+        titles = [step.get("title") for step in steps if isinstance(step, dict)]
+        raise ValueError(f"no step titled {marker!r}; steps are: {titles!r}")
     current = steps[index]
     previous = steps[index - 1] if index > 0 else None
     following = steps[index + 1] if index + 1 < len(steps) else None
@@ -272,6 +289,9 @@ def start_procedure(procedure_id: str, title: str) -> dict[str, Any]:
         "do": current.get("do"),
         "prev": previous.get("title") if isinstance(previous, dict) else None,
         "next": following.get("title") if isinstance(following, dict) else None,
+        # The exact command for the next step, to copy rather than recall.
+        "then": (f"playbook start {procedure_id} --step {index + 2}" if isinstance(following, dict)
+                 else "(last step)"),
     }
 
 

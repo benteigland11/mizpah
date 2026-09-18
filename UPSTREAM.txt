@@ -6,3 +6,70 @@ diverged:
 - terra: build switched from setuptools find (wrong cg include list) to hatchling packages=["src/terra","cg"]; readme line dropped
 - cartograph, playbook: readme line dropped
 - playbook: mcp.py, `mcp` subcommand and MCP tests removed
+- harness (decisions/cg): infra-sandboxed-shell-execution gains ShellConfig.read_only_binds and .environment so the
+  sandbox can carry a toolchain outside /usr (the .venv CLIs); bumped to 1.3.0
+- harness: bp-focused-agent-session gains SessionSettings.write_existing_files (default True; Mizpah sets False so
+  `write` only creates files — overwriting a file is a one-call block replacement); saved shell identity is
+  JSON-normalised so configs with tuples reopen; 0.11.1 → 0.12.0
+- terra: `known adopt` resolves a same-id open unknown on the destination map (the child map's answer closes the
+  parent's question; copied runs become its evidence); `unknown link-run` on a resolved unknown forwards the run to
+  the known that resolved it (meta.forwarded_to) instead of a stderr note nobody reads
+- terra: probe scaffold is now a fixed `run()` around one `measure(ctx)` stub (returns {quantity: value}); an
+  unimplemented probe runs with status error instead of stamping a stub artifact. Reason: ~45% of worker turns
+  were spent gutting and rebuilding the old run() that carried the contract.
+- harness: bp-focused-agent-session gains SessionSettings.repeated_failure_rollover (force the worker's own
+  handoff after N identical failing calls; a fresh window breaks a periodic context); 0.12.0 → 0.13.0
+- terra: `probe validate` refuses a scaffolded `measure()` that references neither ctx nor any world-reading name
+  ("reads nothing") — three constant-return "surveys" reached confidence=med on 2026-09-18
+- playbook: `start --title` optional (defaults to the first step); search hits carry `steps` and a ready `start`
+  command; "no step titled" errors list the titles — workers spent 4–8 turns per task guessing titles
+- harness: bp-focused-agent-session gains repeated_success_rollover and review_focus_globs/characters
+  (decisive workspace files in every review envelope); 0.13.0 → 0.14.0
+- cartograph: PythonEngine.install_deps lets the throwaway venv see the running interpreter's site-packages
+  (.pth) and skips pip for importable deps, so `validate` works offline when deps are present
+- harness: infra-sandboxed-shell-execution gains ShellConfig.share_network (+network_files binds) and the
+  worker drops symlinks that leave the workspace at pack time instead of rejecting the snapshot; 1.3.0 → 1.4.0
+- cartograph: `create --description --tags` fill widget.json at scaffold time (a 26B worker spent ~20 turns
+  failing to edit the [TODO] fields inside the 2.5KB manifest)
+- terra: a probe's `run()` imports `measure(ctx)` from a sibling `measure.py` when present (validate checks that
+  file); the worker writes one new file instead of editing the scaffold — its in-place edits missed ~65 turns
+- terra: `route complete` requires a cited known for every `unknown:<id>` acceptance entry (a task carrying
+  several unknowns cannot close on one of them)
+- harness: bp-focused-agent-session gains discard_pending() (a killed run's uncommitted call, journaled, never
+  replayed) and prune_workspaces(); sandbox gains ShellConfig.snapshot_ignore (.venv, __pycache__, … never
+  persisted); 0.14.0 → 0.15.0 / 1.4.0 → 1.5.0
+- harness: bp-focused-agent-session gains ControllerSettings.plain_review (one tool-less completion per review
+  boundary, no project document; malformed decisions twice → hold) — at 26B the nine-tool reviewer held on
+  everything all night; 0.15.0 → 0.16.0
+- harness: sandbox `edit` forgives the anchor's encoding (one layer of the model's own JSON escapes; per-line
+  whitespace, replacement re-indented to the matched span) but never its content — 20 of 47 failed edits in a
+  night were encoding, not memory; blueprint gains SessionSettings.edit_requires_read (Claude Code's rule: an
+  edit must anchor on a read of the current content); 1.5.0 → 1.6.0 / 0.16.0 → 0.17.0
+- harness: worker tool descriptions now state the session's contract (write: create-only, skeleton-sized; edit: one
+  body per call, anchored on a read) — "create or replace ... complete content" was the prior the model fell back
+  on; repeated oversized attempts at one path force a rollover; 0.17.0 → 0.18.0
+- playbook: `start --step N` and a `then` field carrying the exact next-step command (the 26B invented step
+  titles mid-task instead of copying `next`)
+- terra: `probe create --measure Q[,Q]` declares a probe's quantities; a run reporting others is refused before
+  stamping. Mizpah scaffolds one probe per unknown host-side so a "measure everything" probe cannot exist — the
+  26B would not decompose an aggregation loop under any prompt, refusal or reset.
+- terra: `probe validate` refuses a measure() of a probe that declares map inputs when nothing in the module
+  reads `inputs` — a comparison probe ("do WIND alerts match gale readings") that hardcoded 62 and 13 instead of
+  reading the two knowns reached confidence=med with a wrong value on 2026-09-18
+- harness: bp-focused-agent-session gains interject(message) — host text at a paused turn boundary without
+  withdrawing a final answer (continue_with is for completed sessions only; Mizpah's effort check at the
+  estimate boundary raised "Only a completed session can be continued" on every overrun); 0.18.0 → 0.19.0
+- harness: bp-focused-agent-session gains retune(**policy) — change wire-view policy (reasoning_retention,
+  rollover_threshold, headroom, capacity, recent-result limits) on a saved session, checkpointed; Mizpah syncs a
+  resumed session to its config. Found because reasoning_retention='latest' re-prefilled ~9K tokens per turn on
+  Bonsai (47% of model time on one task); the convention is 'none'; 0.19.0 → 0.20.0
+- cartograph: `create` refuses when no `cartograph search` has been run from the project (marker cg/.searched,
+  written by search; `--unsearched` overrides) — five agent tasks in a row minted overlapping CSV widgets
+  without searching once
+- harness: session-event-log gains drop_torn_tail(); bp-focused-agent-session drops a torn final journal
+  record on open (an append cut by a disk quota) and journals `torn_tail_dropped`; 0.20.0 → 0.21.0, event-log 1.1.0 → 1.2.0
+- terra: `probe validate` warns when measure.py exceeds ~40 lines and calls nothing under cg/ — a reading is a
+  few lines; parsing/statistics/tool-running are parts built as widgets before the reading, not extracted after
+- terra: `known ladder <unknown>` — one call that runs the probe until the evidence meets the bar, links every
+  run, graduates, promotes and adopts one hop up from a session map; every rung is the existing call, so
+  refusals are unchanged. Replaces ~8 commands / ~5 turns of ceremony per unknown for a worker

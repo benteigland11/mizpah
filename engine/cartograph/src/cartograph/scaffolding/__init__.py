@@ -87,7 +87,7 @@ def validate_name_identifier(name_base, kind="widget"):
 
 
 def create_widget(carto, item_id, language, name=None, domain=None, tags=None,
-                  target_dir=None, gpu_targets=None, widget_type=None):
+                  target_dir=None, gpu_targets=None, widget_type=None, description=None):
     """Scaffold a new widget directory. Returns a status dict."""
     if tags is None:
         tags = []
@@ -158,7 +158,8 @@ def create_widget(carto, item_id, language, name=None, domain=None, tags=None,
 
     manifest = {
         "meta": meta,
-        "description": f"[TODO] Describe what {name} does",
+        "description": (description.strip() if isinstance(description, str) and description.strip()
+                        else f"[TODO] Describe what {name} does"),
         "tech_stack": tech_stack,
         "custom_notes": "",
         "library_notes": _library_notes(normalized_lang, domain),

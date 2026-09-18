@@ -854,6 +854,23 @@ def adopt_known(
 
             stamp_deps(project_root, adopted)
         save_known(project_root, adopted)
+        # An open unknown on the destination with this id is the question the
+        # child map was opened to answer: the adopted known resolves it, and
+        # the copied runs become its evidence, so the destination gate sees a
+        # resolved unknown rather than a debt next to its own answer.
+        from .unknowns import load_unknown, save_unknown, unknown_path
+
+        if unknown_path(project_root, known_id).is_file():
+            unk = load_unknown(project_root, known_id)
+            if unk.get("status") in ("open", "probing", "blocked"):
+                unk["status"] = "resolved"
+                unk["resolved_by"] = f"known:{known_id}"
+                unk["run_ids"] = list(dict.fromkeys(
+                    list(unk.get("run_ids") or []) + list(live)
+                ))
+                if unk.get("primary_run_id") is None and live:
+                    unk["primary_run_id"] = live[0]
+                save_unknown(project_root, unk)
 
     with scoped_map(from_map):
         src_rec = load_known(project_root, known_id)
@@ -1294,3 +1311,61 @@ def describe_known(project_root: Path, known_id: str) -> dict[str, Any]:
             rec, project_root=project_root, run_dir_fn=run_dir
         )
     return {"record": rec}
+
+
+def ladder_unknown(
+    project_root: Path,
+    unknown_id: str,
+    *,
+    probe_id: str | None = None,
+    to: Any | None = None,
+    confidence: str = "med",
+    adopt: bool = True,
+    max_runs: int = 6,
+) -> dict[str, Any]:
+    """Walk one unknown up the ladder in one call: run its probe until the evidence meets the bar,
+    link every run, graduate, promote, and adopt one hop up when the active map is a session.
+
+    Each rung is the same call the CLI exposes separately; nothing is skipped and every refusal
+    (validate, ladder, border bar) surfaces as the error it always was. Returns the steps taken.
+    """
+    from .paths import get_active_map_id, map_parent
+    from .probe_run import run_probe
+    from .unknowns import link_run as link_run_unknown, load_unknown
+
+    steps: list[str] = []
+    rec = load_unknown(project_root, unknown_id)
+    probe_id = probe_id or rec.get("probe_id") or (rec.get("probe_ids") or [None])[0] or unknown_id + "_probe"
+    known: dict[str, Any] | None = None
+    resolved = rec.get("resolved_by") or ""
+    if resolved.startswith("known:"):
+        known = load_known(project_root, resolved.split(":", 1)[1])
+    runs = 0
+    while True:
+        stats = (known or rec).get("stats") or {}
+        ok, why = can_claim_confidence(stats, confidence, map_type=(known or rec).get("type"))
+        if ok and known is not None:
+            break
+        if runs >= max_runs:
+            raise ValueError(f"{max_runs} runs taken and the ladder still says: {why}")
+        stamp = run_probe(project_root, probe_id, to=to if to is not None else {"kind": "default"})
+        runs += 1
+        run_id = stamp.get("id")
+        if stamp.get("status") != "ok":
+            raise ValueError(f"run {run_id} finished with status {stamp.get('status')}: {stamp.get('error')}")
+        if known is None:
+            rec = link_run_unknown(project_root, unknown_id, run_id)
+            steps.append(f"run {run_id} linked to unknown {unknown_id}")
+            known = graduate_unknown(project_root, unknown_id)
+            steps.append(f"graduated {unknown_id} -> known {known['id']}")
+        else:
+            known = link_run_known(project_root, known["id"], run_id)
+            steps.append(f"run {run_id} linked to known {known['id']}")
+    known = promote_known(project_root, known["id"], confidence)
+    steps.append(f"promoted {known['id']} to {confidence}")
+    active = get_active_map_id(project_root)
+    if adopt and active != "global" and map_parent(project_root, active):
+        adopted = adopt_known(project_root, known["id"], from_map=active)
+        steps.append(f"adopted {known['id']} {active} -> {map_parent(project_root, active)}")
+        known = adopted
+    return {"known": known, "runs": runs, "steps": steps}

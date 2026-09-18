@@ -1031,6 +1031,27 @@ def complete_task(
                 f"    terra route complete {task_id} --freehand '<reason>'"
             )
 
+    # A task may carry more than the one unknown in map_id: acceptance entries of the
+    # form `unknown:<id>` name the others. Completing it means resolving all of them;
+    # a completion that cites only some would leave the rest open behind a done task.
+    owed = [
+        str(a)[len("unknown:"):]
+        for a in (task.get("acceptance") or [])
+        if isinstance(a, str) and a.startswith("unknown:")
+    ]
+    if task.get("map_id"):
+        owed = [task["map_id"]] + [u for u in owed if u != task["map_id"]]
+    if len(owed) > 1 and not freehand:
+        cited = set(known_ids or [])
+        missing = [u for u in owed if u not in cited]
+        if missing:
+            raise ValueError(
+                f"task {task_id} resolves {len(owed)} unknowns "
+                f"({', '.join(owed)}); completion must cite a known for each "
+                f"— missing: {', '.join(missing)}. Resolve them first, or block "
+                "the task with the reason if one cannot be read."
+            )
+
     for t in rec["tasks"]:
         if t.get("id") == task_id:
             t["status"] = "done"

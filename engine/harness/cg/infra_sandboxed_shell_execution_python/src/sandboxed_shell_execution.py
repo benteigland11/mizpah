@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import io
 import json
 from pathlib import Path, PurePosixPath
@@ -49,6 +49,20 @@ class ShellConfig:
     limits: ShellLimits
     shell_name: str = 'bash'
     python_name: str = 'python3'
+    # Host trees mounted read-only at their own path, for a toolchain that lives
+    # outside the runtime root. Environment entries are added after the fixed
+    # sandbox variables; a PATH entry is prepended to the sandbox PATH.
+    read_only_binds: tuple[str, ...] = ()
+    environment: dict[str, str] = field(default_factory=dict)
+    # Keep the host network namespace (package installs, registries). The name
+    # resolution and trust files the runtime root lacks are bound read-only from
+    # `network_files`; entries that do not exist on the host are skipped.
+    share_network: bool = False
+    # Directory names never persisted in the snapshot: rebuildable, large, and
+    # environment-bound (a venv's symlinks point outside the workspace anyway).
+    snapshot_ignore: tuple[str, ...] = ('.venv', '__pycache__', '.pytest_cache', 'node_modules', '.mypy_cache')
+    network_files: tuple[str, ...] = ('/etc/resolv.conf', '/etc/hosts', '/etc/nsswitch.conf', '/etc/ssl', '/etc/pki',
+                                      '/etc/ca-certificates', '/etc/crypto-policies')
 
     def __post_init__(self) -> None:
         if any(not Path(value).is_absolute() for value in
@@ -56,6 +70,20 @@ class ShellConfig:
             raise ValueError('Host paths must be absolute')
         if any('/' in value or not value for value in (self.shell_name, self.python_name)):
             raise ValueError('Runtime binary names must be basenames')
+        object.__setattr__(self, 'read_only_binds', tuple(self.read_only_binds))
+        reserved = {'/', '/usr', '/bin', '/lib', '/lib64', '/work', '/tmp', '/proc', '/dev', '/input', '/runner'}
+        for bind in self.read_only_binds:
+            if not Path(bind).is_absolute() or Path(bind).as_posix() in reserved:
+                raise ValueError('Read-only binds must be absolute host paths outside the sandbox layout')
+        for name, value in self.environment.items():
+            if not name or '=' in name or not isinstance(value, str):
+                raise ValueError('Environment entries must be NAME -> string value')
+        object.__setattr__(self, 'network_files', tuple(self.network_files))
+        object.__setattr__(self, 'snapshot_ignore', tuple(self.snapshot_ignore))
+        if any('/' in name or not name for name in self.snapshot_ignore):
+            raise ValueError('snapshot_ignore entries are directory basenames')
+        if any(not Path(entry).is_absolute() for entry in self.network_files):
+            raise ValueError('network_files must be absolute host paths')
 
 
 @dataclass(frozen=True)
@@ -185,7 +213,36 @@ def edit_workspace_file(snapshot: bytes, name: str, old_text: str, new_text: str
         original = data.decode('utf-8')
     except UnicodeDecodeError:
         raise WorkspaceEditError('not_text', f'Not UTF-8 text: {name}') from None
+    matched = 'exact'
     count = original.count(old_text)
+    if count == 0:
+        # Two encodings of the same anchor, tried in order: the model's own JSON escapes
+        # left in the text (\\n, \\", \\t), then leading/trailing whitespace per line. The
+        # anchor still has to be the text the model read; only its rendering is forgiven,
+        # and the replacement is applied to the exact span that was found.
+        for label, candidate in (('unescaped', _unescape_literal(old_text)),
+                                 ('whitespace', old_text), ('unescaped_whitespace', _unescape_literal(old_text))):
+            if label == 'unescaped' and candidate != old_text and original.count(candidate):
+                old_text, count, matched = candidate, original.count(candidate), label
+                if label != 'unescaped_whitespace':
+                    new_text = _unescape_literal(new_text) if new_text != _unescape_literal(new_text) else new_text
+                break
+            if label in ('whitespace', 'unescaped_whitespace'):
+                spans = _whitespace_spans(original, candidate)
+                if spans:
+                    if label == 'unescaped_whitespace':
+                        new_text = _unescape_literal(new_text)
+                    count, matched = len(spans), label
+                    found = original[spans[0][0]:spans[0][1]]
+                    # The anchor lost its indentation on the way in; give the replacement the
+                    # indentation the matched span actually has.
+                    have = len(found) - len(found.lstrip(' \t'))
+                    given = len(candidate.strip('\n')) - len(candidate.strip('\n').lstrip(' \t'))
+                    if have > given:
+                        pad = found[:have-given] if given == 0 else found[:have][given:]
+                        new_text = '\n'.join((pad+line if line.strip() else line) for line in new_text.split('\n'))
+                    old_text = found
+                    break
     if count == 0:
         raise WorkspaceEditError('text_not_found', f'old_text not found in {name}')
     if count != expected_occurrences:
@@ -193,7 +250,35 @@ def edit_workspace_file(snapshot: bytes, name: str, old_text: str, new_text: str
                                  f'Expected {expected_occurrences} occurrence(s) of old_text in {name} but found {count}')
     updated = original.replace(old_text, new_text).encode('utf-8')
     output = write_workspace_file(snapshot, name, updated, byte_limit=byte_limit, file_limit=file_limit)
-    return output, dict(path=_name(name), replacements=count, previous_bytes=len(data), bytes_written=len(updated))
+    return output, dict(path=_name(name), replacements=count, previous_bytes=len(data), bytes_written=len(updated),
+                        matched=matched)
+
+
+def _unescape_literal(text: str) -> str:
+    """Undo one layer of JSON-style escaping a model left inside the string itself."""
+    if not any(seq in text for seq in ('\\n', '\\"', '\\t')):
+        return text
+    return text.replace('\\n', '\n').replace('\\t', '\t').replace('\\"', '"')
+
+
+def _whitespace_spans(original: str, anchor: str) -> list[tuple[int, int]]:
+    """Spans of `original` whose lines equal the anchor's lines once each line is stripped."""
+    wanted = [line.strip() for line in anchor.strip('\n').splitlines()]
+    if not wanted or not any(wanted):
+        return []
+    lines = original.splitlines(keepends=True)
+    starts = [0]
+    for line in lines:
+        starts.append(starts[-1]+len(line))
+    spans = []
+    for index in range(len(lines)-len(wanted)+1):
+        window = lines[index:index+len(wanted)]
+        if [line.strip() for line in window] == wanted:
+            end = starts[index+len(wanted)]
+            if window[-1].endswith('\n') and not anchor.endswith('\n'):
+                end -= 1
+            spans.append((starts[index], end))
+    return spans
 
 
 def read_workspace_lines(snapshot: bytes, name: str, *, offset: int = 1, limit: int,
@@ -237,17 +322,27 @@ class SandboxedShell:
             '--property=TasksMax='+str(limits.processes), '--property=CPUQuota='+str(limits.cpu_percent)+'%',
             '--property=RuntimeMaxSec='+str(limits.command_seconds+limits.shutdown_seconds),
             '--property=TimeoutStopSec='+str(limits.shutdown_seconds), '--property=KillMode=control-group',
-            config.bwrap, '--unshare-all', '--unshare-user', '--disable-userns', '--die-with-parent', '--new-session',
+            config.bwrap,
+            *(('--unshare-user', '--unshare-ipc', '--unshare-pid', '--unshare-uts', '--unshare-cgroup')
+              if config.share_network else ('--unshare-all', '--unshare-user')),
+            '--disable-userns', '--die-with-parent', '--new-session',
             '--as-pid-1', '--cap-drop', 'ALL', '--clearenv',
             '--ro-bind', config.runtime_root, '/usr',
             '--symlink', 'usr/bin', '/bin', '--symlink', 'usr/lib', '/lib', '--symlink', 'usr/lib64', '/lib64',
             '--ro-bind', helper, '/runner', '--ro-bind', input_dir, '/input',
+            *[part for bind in config.read_only_binds for part in ('--ro-bind', bind, bind)],
+            *[part for entry in (config.network_files if config.share_network else ())
+              if Path(entry).exists() for part in ('--ro-bind', str(Path(entry).resolve()), entry)],
             '--proc', '/proc', '--remount-ro', '/proc', '--dev', '/dev', '--remount-ro', '/dev',
             '--size', str(limits.workspace_bytes), '--tmpfs', '/work',
             '--size', str(limits.temporary_bytes), '--tmpfs', '/tmp', '--remount-ro', '/',
-            '--setenv', 'PATH', '/usr/bin', '--setenv', 'HOME', '/work', '--setenv', 'TMPDIR', '/tmp',
+            '--setenv', 'PATH', ':'.join(filter(None, (config.environment.get('PATH'), '/usr/bin'))),
+            '--setenv', 'HOME', '/work', '--setenv', 'TMPDIR', '/tmp',
             '--setenv', 'LANG', 'C.UTF-8', '--setenv', 'OPENBLAS_NUM_THREADS', '1',
-            '--setenv', 'OMP_NUM_THREADS', '1', '--chdir', '/work',
+            '--setenv', 'OMP_NUM_THREADS', '1',
+            *[part for name, value in sorted(config.environment.items()) if name != 'PATH'
+              for part in ('--setenv', name, value)],
+            '--chdir', '/work',
             '/usr/bin/'+config.python_name, '-B', '-c',
             'import sys; sys.path.insert(0,"/runner"); from sandbox_worker import execute; execute("/input/request.json")',
         ]
@@ -267,7 +362,8 @@ class SandboxedShell:
             input_dir = Path(directory)
             (input_dir/'workspace.tar').write_bytes(workspace)
             payload = dict(command=command, timeout=timeout, limits=limits.__dict__, shell='/usr/bin/'+config.shell_name,
-                           capture_id=uuid4().hex, workspace_path='/input/workspace.tar')
+                           capture_id=uuid4().hex, workspace_path='/input/workspace.tar',
+                           snapshot_ignore=list(config.snapshot_ignore))
             (input_dir/'request.json').write_text(json.dumps(payload))
             process = subprocess.Popen(self.command_argv(str(input_dir), unit), stdin=subprocess.DEVNULL,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)

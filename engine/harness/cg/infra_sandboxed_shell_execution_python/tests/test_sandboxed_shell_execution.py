@@ -73,6 +73,46 @@ def test_launch_contract_contains_no_writable_host_mount(tmp_path):
         shell.run('true', b'', timeout_seconds=100)
 
 
+def test_launch_contract_adds_read_only_binds_and_environment(tmp_path):
+    config = ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits(),
+                         read_only_binds=('/opt/toolchain', '/home/example_org/project'),
+                         environment={'PATH': '/opt/toolchain/bin', 'EXAMPLE_HOME': '/home/example_org'})
+    argv = SandboxedShell(config).command_argv(str(tmp_path), 'example-unit')
+    assert '--bind' not in argv
+    for bind in config.read_only_binds:
+        index = argv.index(bind)
+        assert argv[index-1] == '--ro-bind' and argv[index+1] == bind
+    assert argv[argv.index('PATH')+1] == '/opt/toolchain/bin:/usr/bin'
+    assert argv[argv.index('EXAMPLE_HOME')+1] == '/home/example_org'
+    assert argv.index('EXAMPLE_HOME') < argv.index('--chdir')
+    for bad in ('relative/path', '/usr', '/work', '/tmp'):
+        with pytest.raises(ValueError):
+            ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits(),
+                        read_only_binds=(bad,))
+    with pytest.raises(ValueError):
+        ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits(),
+                    environment={'A=B': 'x'})
+
+
+def test_launch_contract_keeps_the_network_only_when_asked(tmp_path):
+    base = ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits())
+    assert '--unshare-all' in SandboxedShell(base).command_argv(str(tmp_path), 'example-unit')
+    resolv = tmp_path/'resolv.conf'
+    resolv.write_text('nameserver 127.0.0.53\n')
+    shared = ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits(),
+                         share_network=True, network_files=(str(resolv), str(tmp_path/'absent')))
+    argv = SandboxedShell(shared).command_argv(str(tmp_path), 'example-unit')
+    assert '--unshare-all' not in argv and '--unshare-net' not in argv
+    for flag in ('--unshare-user', '--unshare-ipc', '--unshare-pid', '--unshare-uts', '--unshare-cgroup'):
+        assert flag in argv
+    index = argv.index(str(resolv))
+    assert argv[index-1] == '--ro-bind' and argv[index+1] == str(resolv)
+    assert str(tmp_path/'absent') not in argv and '--bind' not in argv
+    with pytest.raises(ValueError):
+        ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits(),
+                    network_files=('relative',))
+
+
 def test_private_entrypoint_refuses_host_execution():
     with pytest.raises(RuntimeError, match='isolated PID 1'):
         execute('unused.json')
@@ -200,7 +240,7 @@ def test_edit_replaces_exact_text_and_preserves_other_members():
     assert read_workspace_file(updated, 'notes/a.txt', **args) == 'alpha delta\ngamma\n'.encode()
     assert read_workspace_file(updated, 'other.bin', **args) == before
     assert read_workspace_file(state, 'notes/a.txt', **args) == 'alpha beta\ngamma\n'.encode()
-    assert report == dict(path='notes/a.txt', replacements=1, previous_bytes=17, bytes_written=18)
+    assert report == dict(path='notes/a.txt', replacements=1, previous_bytes=17, bytes_written=18, matched='exact')
     assert set(workspace_files(updated, **args)) == set(workspace_files(state, **args))
 
 
@@ -259,3 +299,57 @@ def test_read_lines_refusals(name, offset, limit, code):
     with pytest.raises(WorkspaceEditError) as captured:
         read_workspace_lines(state, name, offset=offset, limit=limit, **args)
     assert captured.value.code == code
+
+
+def test_worker_drops_symlinks_that_leave_the_workspace(tmp_path, monkeypatch, capsys):
+    """A venv's bin/python -> /usr/bin/python3 must not reject the whole snapshot."""
+    import base64
+    import json as _json
+    import os
+    import shutil
+    import signal
+    import subprocess
+    from src import sandbox_worker
+    work = tmp_path/'work'
+    work.mkdir()
+    (tmp_path/'empty.tar').write_bytes(b'')
+    request = tmp_path/'request.json'
+    request.write_text(_json.dumps(dict(
+        command="mkdir -p v/bin .venv/bin pkg/__pycache__ && ln -s /usr/bin/python3 v/bin/python && ln -s ../x v/up && ln -s bin v/here && echo hi > v/file && echo x > .venv/bin/python && echo y > pkg/__pycache__/m.pyc && echo z > pkg/m.py",
+        timeout=5, limits=limits().__dict__, shell=shutil.which('bash'), capture_id='cid', workspace_path=str(tmp_path/'empty.tar'),
+        snapshot_ignore=['.venv', '__pycache__'])))
+    children = []
+    real_popen = subprocess.Popen
+    def launch(*args, **kwargs):
+        child = real_popen(*args, **kwargs)
+        children.append(child)
+        return child
+    monkeypatch.setattr(sandbox_worker.os, 'getpid', lambda: 1)
+    monkeypatch.setattr(sandbox_worker, '_kill_children', lambda: [os.killpg(c.pid, signal.SIGKILL) for c in children if c.poll() is None])
+    monkeypatch.setattr(sandbox_worker.subprocess, 'Popen', launch)
+    monkeypatch.chdir(work)
+    sandbox_worker.execute(str(request))
+    response = _json.loads(capsys.readouterr().out)
+    names = [m.name for m in tarfile.open(fileobj=io.BytesIO(base64.b64decode(response['workspace'])), mode='r:')]
+    assert 'v/file' in names and 'v/here' in names
+    assert 'v/bin/python' not in names and 'v/up' not in names
+    assert 'dropped 2 symlink(s)' in response['detail']
+    assert 'pkg/m.py' in names and not any('.venv' in n or '__pycache__' in n for n in names)
+
+
+def test_edit_forgives_the_anchor_encoding_but_not_its_content():
+    snapshot = write_workspace_file(b'', 'm.py', b'def f(x):\n    """Doc."""\n    return x\n', byte_limit=4096, file_limit=10)
+    # the model's own JSON escapes left in the string: \\n and \\" as literal characters
+    literal = 'def f(x):\\n    \\"\\"\\"Doc.\\"\\"\\"\\n    return x'
+    out, report = edit_workspace_file(snapshot, 'm.py', literal, 'def f(x):\\n    return x * 2', byte_limit=4096, file_limit=10)
+    assert report['matched'] == 'unescaped'
+    assert read_workspace_file(out, 'm.py', byte_limit=4096, file_limit=10) == b'def f(x):\n    return x * 2\n'
+    # leading/trailing whitespace per line forgiven; the exact span is what gets replaced
+    out, report = edit_workspace_file(snapshot, 'm.py', '"""Doc."""\nreturn x', 'return x + 1', byte_limit=4096, file_limit=10)
+    assert report['matched'] == 'whitespace'
+    assert read_workspace_file(out, 'm.py', byte_limit=4096, file_limit=10) == b'def f(x):\n    return x + 1\n'
+    with pytest.raises(WorkspaceEditError) as error:
+        edit_workspace_file(snapshot, 'm.py', 'return y', 'z', byte_limit=4096, file_limit=10)
+    assert error.value.code == 'text_not_found'
+    exact, report = edit_workspace_file(snapshot, 'm.py', '    return x\n', '    return 0\n', byte_limit=4096, file_limit=10)
+    assert report['matched'] == 'exact'

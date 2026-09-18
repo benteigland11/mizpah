@@ -132,6 +132,27 @@ class SessionEventLog:
             "events": [event_to_dict(event) for event in events],
         }
 
+    def drop_torn_tail(self, session_id: str) -> bool:
+        """Remove a final record that has no newline: an append interrupted mid-write (quota, power).
+
+        Only the last line can be torn, and it never committed anywhere else, so dropping it restores
+        the journal to its last complete record. Returns True when something was dropped. Complete
+        records are never touched; the strict reader stays strict about everything else.
+        """
+        resolved = sanitize_identifier(session_id)
+        if resolved != session_id or not resolved:
+            raise ValueError("A canonical session identifier is required")
+        path = self.path_for_session(resolved)
+        if not path.exists():
+            return False
+        raw = path.read_bytes()
+        if not raw or raw.endswith(b"\n"):
+            return False
+        cut = raw.rfind(b"\n")
+        with path.open("r+b") as handle:
+            handle.truncate(cut+1 if cut >= 0 else 0)
+        return True
+
     def read_strict(self, session_id: str) -> tuple[SessionEvent, ...]:
         """Read evidence without skipping, coercing, or inventing missing records.
 

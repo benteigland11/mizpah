@@ -70,7 +70,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     start = sub.add_parser("start", help="re-read one step by title; returns that do plus its neighbours")
     start.add_argument("id")
-    start.add_argument("--title", required=True, help="unique step title to start at")
+    start.add_argument("--title", default=None, help="unique step title to start at (default: the first step)")
+    start.add_argument("--step", type=int, default=None, help="1-based step number to start at (the reply's `then` gives the next one)")
     start.set_defaults(handler=_cmd_start)
 
     validate = sub.add_parser("validate", help="validate a procedure in the global store")
@@ -138,7 +139,7 @@ def _cmd_load(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _cmd_start(args: argparse.Namespace) -> dict[str, Any]:
-    return ops.start_procedure(args.id, args.title)
+    return ops.start_procedure(args.id, args.title, step=args.step)
 
 
 def _cmd_validate(args: argparse.Namespace) -> dict[str, Any]:

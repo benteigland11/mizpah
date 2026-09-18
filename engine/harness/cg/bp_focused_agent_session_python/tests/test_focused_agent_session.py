@@ -9,7 +9,7 @@ from src.focused_agent_session import (
     ControllerSettings, EndpointConfig, FocusedSession, ModelClient, ReviewPolicy,
     SessionEventLog, SessionPolicy, SessionSettings, ShellConfig, ShellLimits,
     ShellResult, UnresolvedOperation, ReviewLimitExceeded, WireResponse, read_workspace_file, workspace_files, write_workspace_file,
-    GenerationRetryExceeded, llama_model_client,
+    GenerationRetryExceeded, llama_model_client, worker_tools,
 )
 
 
@@ -985,6 +985,280 @@ def test_bounded_file_tools_reject_large_actions_and_edit_exactly(tmp_path):
     assert [(r['name'], r['count']) for r in repeats] == [('bash', 2), ('read', 2), ('read', 3), ('bash', 2)]
 
 
+class CreateOnlyTransport(FileToolTransport):
+    """Scripted worker: create, overwrite (refused), edit, empty the file, write the stub, overwrite again."""
+
+    def __init__(self):
+        super().__init__()
+        self.script = [
+            ('write', dict(path='notes.py', content='alpha = 1\n')),
+            ('write', dict(path='notes.py', content='alpha = 2\n')),
+            ('edit', dict(path='notes.py', old_text='alpha = 1', new_text='alpha = 2')),
+            ('edit', dict(path='notes.py', old_text='alpha = 2\n', new_text='')),
+            ('write', dict(path='notes.py', content='def stub():\n    pass\n')),
+            ('write', dict(path='notes.py', content='def stub():\n    return 1\n')),
+        ]
+
+
+def test_write_only_creates_files_when_overwrites_are_disabled(tmp_path):
+    settings, _, shell, controller, _, ct = setup(tmp_path, total=0, enabled=False, rollover=False)
+    settings = replace(settings, worker_tools=('bash', 'read', 'write', 'edit'), write_existing_files=False)
+    transport = CreateOnlyTransport()
+    worker = ModelClient(EndpointConfig('http://example.invalid', 5, 1000000, {}, '/complete', '/template', '/tokenize', False, True), transport=transport)
+    item = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, controller=controller)
+    assert item.run()['status'] == 'complete'
+    outcomes = [json.loads(message['content']) for message in transport.requests[-1]['messages'] if message.get('role') == 'tool']
+    assert [o['status'] for o in outcomes] == ['ok', 'error', 'ok', 'ok', 'ok', 'error']
+    assert 'already has content' in outcomes[1]['error'] and 'rebuild it by refinement' in outcomes[1]['error']
+    assert outcomes[4]['created'] is False
+    assert read_workspace_file(item.workspace(), 'notes.py', byte_limit=1000000, file_limit=1000) == b'def stub():\n    pass\n'
+
+
+def test_completed_session_continues_on_host_text_and_survives_reopen(tmp_path):
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, total=2, enabled=False, rollover=False)
+    item = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, controller=controller)
+    first = item.run()
+    assert first['status'] == 'complete' and first['final_text'] == 'Verified final report.'
+    with pytest.raises(ValueError, match='nonempty'):
+        item.continue_with('  ')
+    wt.total = 4
+    status = item.continue_with('Gate red: the reading is missing its unit; keep the probe, add the unit.')
+    assert status['status'] == 'ready' and status['phase'] == 'worker' and status['final_text'] == ''
+    with pytest.raises(ValueError, match='completed session'):
+        item.continue_with('again')
+    reopened = FocusedSession.open(tmp_path/'session', worker=worker, shell=shell, controller=controller)
+    second = reopened.run()
+    assert second['status'] == 'complete' and second['completed_worker_turns'] == 5
+    request = wt.requests[3]['messages']
+    assert request[-1] == dict(role='user', content='Gate red: the reading is missing its unit; keep the probe, add the unit.')
+    assert request[-2]['role'] == 'assistant' and request[-2]['content'] == 'Verified final report.'
+    events = [json.loads(line) for line in (tmp_path/'session'/'events'/'session.jsonl').read_text().splitlines()]
+    continued = [e['payload'] for e in events if e['event_type'] == 'continued']
+    assert continued == [dict(window=0, characters=72)]
+    turns = [e['payload'] for e in events if e['event_type'] == 'worker_turn']
+    assert turns[3]['applied_input'][-1]['content'].startswith('Gate red')
+
+
+class StuckTransport(FileToolTransport):
+    """Scripted worker: the same failing read four times, then a different action, then completion."""
+
+    def __init__(self):
+        super().__init__()
+        self.script = [('read', dict(path='nope.py'))]*4+[('bash', dict(command='echo moved on'))]
+
+    def __call__(self, path, payload, **kwargs):
+        if path not in ('/template', '/tokenize') and 'tools' not in payload:
+            self.requests.append(deepcopy(payload))
+            return WireResponse(200, json.dumps(response('worker-owned handoff: stop reading nope.py')), 0)
+        return super().__call__(path, payload, **kwargs)
+
+
+def test_repeated_failures_force_a_rollover_that_breaks_the_period(tmp_path):
+    settings, _, shell, controller, _, ct = setup(tmp_path, total=0, enabled=False, rollover=False)
+    settings = replace(settings, worker_tools=('bash', 'read', 'write', 'edit'), repeated_failure_rollover=3)
+    with pytest.raises(ValueError):
+        replace(settings, repeated_failure_rollover=1)
+    transport = StuckTransport()
+    worker = ModelClient(EndpointConfig('http://example.invalid', 5, 1000000, {}, '/complete', '/template', '/tokenize', False, True), transport=transport)
+    item = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, controller=controller)
+    result = item.run()
+    assert result['status'] == 'complete' and result['handoffs'] == 1 and result['window_index'] == 1
+    events = [json.loads(line) for line in (tmp_path/'session'/'events'/'session.jsonl').read_text().splitlines()]
+    forced = [e['payload'] for e in events if e['event_type'] == 'rollover_forced']
+    assert forced == [dict(reason='repeated_failure', name='read', count=3, window=0)]
+    kinds = [e['event_type'] for e in events]
+    # the third identical failure is applied, then the next worker step hands off before the fourth
+    assert kinds.index('rollover_forced') < kinds.index('worker_handoff') if 'worker_handoff' in kinds else True
+    repeats = [e['payload']['count'] for e in events if e['event_type'] == 'tool_repeated_call']
+    assert repeats == [2, 3]  # the fourth read runs in the fresh window with a cleared counter
+    assert item.state['rollover_requested'] is None
+
+
+def test_review_envelope_carries_focus_files_bounded(tmp_path):
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, total=2, enabled=True, rollover=False)
+    settings = replace(settings, review_focus_globs=('probes/*/probe.py',), review_focus_characters=30)
+    seed = write_workspace_file(b'', 'probes/a/probe.py', b'def measure(ctx):\n    return {"x": 1}\n', byte_limit=1000000, file_limit=1000)
+    seed = write_workspace_file(seed, 'probes/b/probe.py', b'def measure(ctx):\n    return {"y": 2}\n', byte_limit=1000000, file_limit=1000)
+    seed = write_workspace_file(seed, 'notes.md', b'not a focus file', byte_limit=1000000, file_limit=1000)
+    item = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, controller=controller,
+                                 initial_workspace=seed)
+    assert item.run()['status'] == 'complete'
+    focus = ct.inputs[0]['proposed_input']['focus_files']
+    assert list(focus) == ['probes/a/probe.py', 'probes/b/probe.py']
+    assert focus['probes/a/probe.py'].startswith('def measure(ctx):') and '[truncated at 30 characters' in focus['probes/a/probe.py']
+    assert focus['probes/b/probe.py'].startswith('[omitted: review focus budget exhausted')
+    plain, plain_worker, plain_shell, plain_controller, _, plain_ct = setup(tmp_path/'plain', total=2, enabled=True, rollover=False)
+    other = FocusedSession.create(tmp_path/'plain'/'session', plain, worker=plain_worker, shell=plain_shell, controller=plain_controller)
+    other.run()
+    assert plain_ct.inputs[0]['proposed_input']['focus_files'] == {}
+    with pytest.raises(ValueError):
+        replace(settings, review_focus_characters=0)
+
+
+class LoopingTransport(FileToolTransport):
+    """Scripted worker: the same successful read six times, then completion."""
+
+    def __init__(self):
+        super().__init__()
+        self.script = [('read', dict(path='notes.py'))]*6
+
+    def __call__(self, path, payload, **kwargs):
+        if path not in ('/template', '/tokenize') and 'tools' not in payload:
+            self.requests.append(deepcopy(payload))
+            return WireResponse(200, json.dumps(response('worker-owned handoff: stop re-reading')), 0)
+        return super().__call__(path, payload, **kwargs)
+
+
+def test_repeated_successes_force_a_rollover_too(tmp_path):
+    settings, _, shell, controller, _, ct = setup(tmp_path, total=0, enabled=False, rollover=False)
+    settings = replace(settings, worker_tools=('bash', 'read', 'write', 'edit'), repeated_success_rollover=4)
+    seed = write_workspace_file(b'', 'notes.py', b'alpha = 1\n', byte_limit=1000000, file_limit=1000)
+    transport = LoopingTransport()
+    worker = ModelClient(EndpointConfig('http://example.invalid', 5, 1000000, {}, '/complete', '/template', '/tokenize', False, True), transport=transport)
+    item = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, controller=controller,
+                                 initial_workspace=seed)
+    result = item.run()
+    assert result['status'] == 'complete' and result['handoffs'] == 1
+    events = [json.loads(line) for line in (tmp_path/'session'/'events'/'session.jsonl').read_text().splitlines()]
+    forced = [e['payload'] for e in events if e['event_type'] == 'rollover_forced']
+    assert forced == [dict(reason='repeated_success', name='read', count=4, window=0)]
+
+
+def test_prune_workspaces_keeps_only_the_current_snapshot(tmp_path):
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, total=3, enabled=False, rollover=False)
+    item = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, controller=controller)
+    assert item.run()['status'] == 'complete'
+    # Every committed turn prunes on its own; only the current snapshot survives the run.
+    remaining = list((tmp_path/'session'/'workspaces').glob('*.sqlite3'))
+    assert [p.stem for p in remaining] == [item.state['workspace']]
+    assert item.prune_workspaces() == 0
+    reopened = FocusedSession.open(tmp_path/'session', worker=worker, shell=shell, controller=controller)
+    assert reopened.workspace() == item.workspace() and reopened.prune_workspaces() == 0
+
+
+def test_discard_pending_lets_an_interrupted_session_continue(tmp_path):
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, total=2, enabled=False, rollover=False)
+    item = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, controller=controller)
+    assert item.discard_pending() is None
+    item.run(maximum_worker_turns=1)
+    with item._locked():
+        item.state['pending_io'] = dict(kind='model', purpose='worker', prompt_tokens=10)
+        item._save()
+    with pytest.raises(UnresolvedOperation):
+        item.step()
+    assert item.discard_pending() == dict(kind='model', purpose='worker', prompt_tokens=10)
+    assert item.run()['status'] == 'complete'
+    events = [json.loads(line) for line in (tmp_path/'session'/'events'/'session.jsonl').read_text().splitlines()]
+    assert [e['payload'] for e in events if e['event_type'] == 'pending_discarded'] == [dict(kind='model', purpose='worker', prompt_tokens=10)]
+
+
+class PlainReviewTransport:
+    """Scripted plain reviewer: hold, then a malformed reply, then a correction, then hold at completion."""
+
+    def __init__(self):
+        self.requests = []
+        self.replies = ['{"correction":"None","evidence":"","warrant":""}',
+                        'not json at all',
+                        '```json\n{"correction":"Measure the mean, not the sum.","evidence":"probe sums","warrant":"reference asks mean"}\n```',
+                        '{"correction":"None","evidence":"","warrant":""}']
+
+    def __call__(self, path, payload, **kwargs):
+        if path == '/template':
+            return WireResponse(200, json.dumps(dict(prompt='x'*100)), 0)
+        if path == '/tokenize':
+            return WireResponse(200, json.dumps(dict(tokens=[1]*len(payload['content']))), 0)
+        self.requests.append(deepcopy(payload))
+        reply = self.replies[min(len(self.requests)-1, len(self.replies)-1)]
+        return WireResponse(200, json.dumps(response(reply)), 0)
+
+
+def test_plain_review_is_one_toolless_call_per_boundary(tmp_path):
+    settings, worker, shell, _, wt, _ = setup(tmp_path, total=25, enabled=True, rollover=False)
+    settings = replace(settings, review_policy=ReviewPolicy(20, 10, 1, 10000, 2000, 200000),
+                       controller=replace(settings.controller, plain_review=True, plain_recent_exchanges=3))
+    transport = PlainReviewTransport()
+    controller = ModelClient(EndpointConfig('http://example.invalid', 5, 1000000, {}, '/complete', '/template', '/tokenize', False, True), transport=transport)
+    item = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, controller=controller)
+    result = item.run()
+    assert result['status'] == 'complete'
+    assert all('tools' not in request for request in transport.requests)
+    first = json.loads(transport.requests[0]['messages'][1]['content'])
+    assert set(first) == {'reference', 'boundary', 'completed_turns', 'held_guidance', 'focus_files', 'recent_turns', 'proposed_completion'}
+    assert first['reference'].startswith('PRIVATE_REFERENCE_SENTINEL') and len(first['recent_turns']) <= 3
+    events = [json.loads(line) for line in (tmp_path/'session'/'events'/'session.jsonl').read_text().splitlines()]
+    reviews = [e['payload'] for e in events if e['event_type'] == 'controller_review']
+    assert [r['boundary'] for r in reviews] == ['periodic', 'periodic', 'completion']
+    assert reviews[1]['decision']['operation'] == 'replace' and reviews[1]['model_calls'] == 2  # after one malformed reply
+    assert any(e['event_type'] == 'controller_decision_rejected' for e in events)
+    assert result['held_guidance']['correction'] == 'Measure the mean, not the sum.'
+    guided = [m for m in wt.requests[-1]['messages'] if m.get('role') == 'user' and m['content'].startswith('Controller guidance:')]
+    assert guided and 'Measure the mean' in guided[-1]['content']
+
+
+class ReadBeforeEditTransport(FileToolTransport):
+    """Scripted worker: edit unread (refused), read, edit (ok), bash changes the file, edit (stale), read, edit (ok)."""
+
+    def __init__(self):
+        super().__init__()
+        self.script = [
+            ('write', dict(path='notes.py', content='alpha = 1\n')),
+            ('bash', dict(command='echo touched')),
+            ('edit', dict(path='notes.py', old_text='alpha = 1', new_text='alpha = 2')),
+        ]
+
+
+def test_edit_requires_a_read_of_current_content(tmp_path):
+    settings, _, shell, controller, _, ct = setup(tmp_path, total=0, enabled=False, rollover=False)
+    settings = replace(settings, worker_tools=('bash', 'read', 'write', 'edit'), edit_requires_read=True)
+    transport = ReadBeforeEditTransport()
+    transport.script = [
+        ('edit', dict(path='absent.py', old_text='a', new_text='b')),
+        ('write', dict(path='notes.py', content='alpha = 1\n')),
+        ('edit', dict(path='notes.py', old_text='alpha = 1', new_text='alpha = 2')),   # authored: counts as read
+        ('bash', dict(command='true')),                                                # fixture shell rewrites result.txt only
+        ('edit', dict(path='notes.py', old_text='alpha = 2', new_text='alpha = 3')),   # unchanged: still ok
+        ('write', dict(path='other.py', content='x = 1\n')),
+        ('edit', dict(path='result.txt', old_text='true', new_text='false')),          # never read: refused
+        ('read', dict(path='result.txt')),
+        ('edit', dict(path='result.txt', old_text='true', new_text='false')),          # read: ok
+    ]
+    worker = ModelClient(EndpointConfig('http://example.invalid', 5, 1000000, {}, '/complete', '/template', '/tokenize', False, True), transport=transport)
+    item = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, controller=controller)
+    assert item.run()['status'] == 'complete'
+    outcomes = [json.loads(m['content']) for m in transport.requests[-1]['messages'] if m.get('role') == 'tool']
+    assert [o['status'] for o in outcomes] == ['error', 'ok', 'ok', 'completed', 'ok', 'ok', 'error', 'ok', 'ok']
+    assert 'requires a read of result.txt first' in outcomes[6]['error']
+    assert outcomes[0]['code'] == 'not_a_file'
+    assert read_workspace_file(item.workspace(), 'notes.py', byte_limit=1000000, file_limit=1000) == b'alpha = 3\n'
+
+
+def test_repeated_oversized_writes_to_one_path_force_a_rollover(tmp_path):
+    settings, _, shell, controller, _, ct = setup(tmp_path, total=0, enabled=False, rollover=False)
+    settings = replace(settings, worker_tools=('bash', 'read', 'write', 'edit'), maximum_tool_argument_characters=300,
+                       repeated_failure_rollover=3)
+    transport = LoopingTransport()
+    transport.script = ([('write', dict(path='big.py', content='x = 0\n' * 80)), ('write', dict(path='big.py', content='y = 1\n'))]
+                        + [('write', dict(path='big.py', content='x = %d\n' % i * 80)) for i in range(3)] + [('bash', dict(command='echo ok'))])
+    worker = ModelClient(EndpointConfig('http://example.invalid', 5, 1000000, {}, '/complete', '/template', '/tokenize', False, True), transport=transport)
+    item = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, controller=controller)
+    result = item.run()
+    assert result['status'] == 'complete' and result['handoffs'] == 1
+    events = [json.loads(line) for line in (tmp_path/'session'/'events'/'session.jsonl').read_text().splitlines()]
+    forced = [e['payload'] for e in events if e['event_type'] == 'rollover_forced']
+    assert forced and forced[0]['reason'] == 'oversized_rewrites' and forced[0]['path'] == 'big.py' and forced[0]['count'] == 3
+
+
+def test_tool_descriptions_state_the_session_contract(tmp_path):
+    settings, *_ = setup(tmp_path, total=0, enabled=False, rollover=False)
+    plain = {t['function']['name']: t['function']['description'] for t in worker_tools(('bash', 'read', 'write', 'edit'), settings)}
+    assert plain['write'].startswith('Create or replace') and 'refused' not in plain['write']
+    strict = replace(settings, write_existing_files=False, maximum_write_characters=1500, maximum_edit_characters=1500,
+                     edit_requires_read=True)
+    bound = {t['function']['name']: t['function']['description'] for t in worker_tools(('bash', 'read', 'write', 'edit'), strict)}
+    assert bound['write'].startswith('Create ONE NEW') and 'short skeleton' in bound['write'] and 'replace' not in bound['write'].lower()
+    assert 'copied from a read' in bound['edit'] and 'one function body' in bound['edit']
+
+
 def test_default_settings_register_only_bash_and_no_bound(tmp_path):
     settings, worker, shell, controller, wt, ct = setup(tmp_path, total=2, enabled=False, rollover=False)
     assert settings.worker_tools == ('bash',) and settings.maximum_tool_argument_characters is None
@@ -1069,3 +1343,56 @@ def test_empty_worker_response_is_retried_within_the_generation_budget(tmp_path)
     with pytest.raises(GenerationRetryExceeded):
         item2.run()
     assert 'empty responses' in item2.status()['blocked_reason']
+
+
+def test_paused_session_takes_an_interjection_at_the_turn_boundary(tmp_path):
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, total=3, enabled=False, rollover=False)
+    item = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, controller=controller)
+    paused = item.run(maximum_worker_turns=1)
+    assert paused['status'] == 'paused' and paused['phase'] == 'worker'
+    with pytest.raises(ValueError, match='nonempty'):
+        item.interject(' ')
+    status = item.interject('Effort check: past the estimate; decide whether to keep going or block.')
+    assert status['phase'] == 'worker' and status['completed_worker_turns'] == 1
+    reopened = FocusedSession.open(tmp_path/'session', worker=worker, shell=shell, controller=controller)
+    assert reopened.run()['status'] == 'complete'
+    request = wt.requests[1]['messages']
+    assert request[-1] == dict(role='user', content='Effort check: past the estimate; decide whether to keep going or block.')
+    assert request[-2]['role'] == 'tool'
+    with pytest.raises(ValueError, match='paused worker session'):
+        reopened.interject('after completion')
+    events = [json.loads(line) for line in (tmp_path/'session'/'events'/'session.jsonl').read_text().splitlines()]
+    assert [e['payload'] for e in events if e['event_type'] == 'interjected'] == [dict(window=0, characters=71)]
+
+
+def test_retune_changes_wire_view_policy_on_a_saved_session(tmp_path):
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, total=3, enabled=False, rollover=False)
+    item = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, controller=controller)
+    item.run(maximum_worker_turns=1)
+    with pytest.raises(ValueError, match='Not retunable'):
+        item.retune(worker_tools=('bash',))
+    with pytest.raises(ValueError):
+        item.retune(rollover_threshold=10**9)  # must stay below the capacity
+    item.retune(reasoning_retention='none', rollover_threshold=settings.session_policy.rollover_threshold-1)
+    reopened = FocusedSession.open(tmp_path/'session', worker=worker, shell=shell, controller=controller)
+    assert reopened.settings.session_policy.reasoning_retention == 'none'
+    assert reopened.session.policy.reasoning_retention == 'none'
+    assert reopened.run()['status'] == 'complete'
+    events = [json.loads(line) for line in (tmp_path/'session'/'events'/'session.jsonl').read_text().splitlines()]
+    assert [e['payload'] for e in events if e['event_type'] == 'retuned'] == [
+        dict(reasoning_retention='none', rollover_threshold=settings.session_policy.rollover_threshold-1)]
+    assert all('reasoning_content' not in m for r in wt.requests[2:] for m in r['messages'] if m.get('role') == 'assistant')
+
+
+def test_open_drops_a_torn_journal_tail_and_resumes(tmp_path):
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, total=3, enabled=False, rollover=False)
+    item = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, controller=controller)
+    item.run(maximum_worker_turns=1)
+    journal = tmp_path/'session'/'events'/'session.jsonl'
+    whole = journal.read_bytes()
+    journal.write_bytes(whole+b'{"created_at": "2026-09-18T19:25:33Z", "event_id": "evt_torn", "event_type": "model_resp')
+    reopened = FocusedSession.open(tmp_path/'session', worker=worker, shell=shell, controller=controller)
+    assert reopened.run()['status'] == 'complete'
+    events = [json.loads(line) for line in journal.read_text().splitlines()]
+    assert sum(1 for e in events if e['event_type'] == 'torn_tail_dropped') == 1
+    assert not any(e['event_id'] == 'evt_torn' for e in events)

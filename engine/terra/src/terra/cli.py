@@ -413,7 +413,10 @@ def cmd_brief_phase(args: argparse.Namespace) -> int:
 
     try:
         root = require_project_root()
-        rec = add_phase(root, args.id, title=args.title or "")
+        rec = add_phase(
+            root, args.id, title=args.title or "",
+            description=getattr(args, "description", "") or "",
+        )
     except (FileNotFoundError, ValueError, FileExistsError, OSError) as e:
         return emit(error(str(e), code="brief_phase"))
     return emit(success(brief_summary(rec), meta={"surface": "terra.brief.phase"}))
@@ -1188,6 +1191,7 @@ def cmd_probe_create(args: argparse.Namespace) -> int:
             duration_s=args.duration,
             force=args.force,
             inputs=parse_map_bindings(args.input or []),
+            measures=[m for group in (args.measure or []) for m in str(group).split(",")],
         )
     except (ValueError, FileExistsError, OSError) as e:
         return emit(error(str(e), code="probe_create"))
@@ -2536,6 +2540,25 @@ def cmd_known_promote(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_known_ladder(args: argparse.Namespace) -> int:
+    from .knowns import ladder_unknown
+
+    try:
+        root = require_project_root()
+        to = json.loads(args.to) if args.to else None
+        result = ladder_unknown(root, args.unknown_id, probe_id=args.probe, to=to,
+                                confidence=args.confidence, adopt=not args.no_adopt)
+    except (ValueError, FileExistsError, FileNotFoundError, OSError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    for step in result["steps"]:
+        print(step)
+    rec = result["known"]
+    print(f"known {rec['id']}  confidence={rec.get('confidence')}  n={rec.get('stats', {}).get('n')}  "
+          f"map={rec.get('map', 'global')}  runs_taken={result['runs']}")
+    return 0
+
+
 def cmd_known_adopt(args: argparse.Namespace) -> int:
     from .knowns import adopt_known
     from .paths import map_parent
@@ -2729,6 +2752,28 @@ def cmd_unknown_link_probe(args: argparse.Namespace) -> int:
 def cmd_unknown_link_run(args: argparse.Namespace) -> int:
     try:
         root = require_project_root()
+        # A run linked to an unknown that a known already resolved feeds nothing
+        # downstream. The stderr NOTE that said so was missed 17 turns in a row
+        # by a worker re-running `known promote` (2026-09-17); forward the run
+        # to the known instead and say where it went.
+        current = load_unknown(root, args.id)
+        resolved_by = str(current.get("resolved_by") or "")
+        if current.get("status") == "resolved" and resolved_by.startswith("known:"):
+            from .knowns import link_run_known
+
+            known_id = resolved_by.removeprefix("known:")
+            known = link_run_known(root, known_id, args.run_id, primary=bool(args.primary))
+            stats = known.get("stats") or {}
+            return emit(success(known, meta={
+                "surface": "terra.unknown.link_run",
+                "forwarded_to": f"known:{known_id}",
+                "note": (
+                    f"unknown {args.id} is already resolved by known:{known_id}; "
+                    f"the run was linked to that known instead (n={stats.get('n')}, "
+                    f"confidence_derived={known.get('confidence_derived')}). "
+                    f"Next: terra known promote {known_id} <confidence>"
+                ),
+            }))
         rec = link_run(
             root, args.id, args.run_id, primary=bool(args.primary),
             allow_no_sample=bool(getattr(args, "allow_no_sample", False)),
@@ -3579,10 +3624,10 @@ def cmd_probe_validate(args: argparse.Namespace) -> int:
             src = (pdir / "probe.py").read_text(encoding="utf-8")
         except OSError:
             src = ""
-        if "TODO: implement" in src or "scaffold stub" in src:
+        if ("TODO: implement" in src or "scaffold stub" in src) and not (pdir / "measure.py").is_file():
             print(
                 "  NOTE: this is still the scaffold stub — it validates but "
-                "measures nothing real; implement run() before trusting runs"
+                "measures nothing real; write measure.py beside probe.py before trusting runs"
             )
         elif "measures" not in src:
             print(
@@ -3784,6 +3829,13 @@ def build_parser() -> argparse.ArgumentParser:
             default=None,
             metavar="NAME=known:ID|assumption:ID",
             help="Declared map input injected as ctx['inputs'][NAME] (repeatable)",
+        )
+        sp.add_argument(
+            "--measure",
+            action="append",
+            default=None,
+            metavar="QUANTITY[,QUANTITY]",
+            help="Quantities this probe measures; a run reporting others is refused (repeatable)",
         )
         sp.set_defaults(func=cmd_probe_create)
 
@@ -4684,6 +4736,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_kad.set_defaults(func=cmd_known_adopt)
 
+    p_kld = kn_sub.add_parser(
+        "ladder",
+        help="One call up the ladder: run the unknown's probe until the evidence meets the bar, "
+        "link every run, graduate, promote, and adopt one hop up from a session map",
+    )
+    p_kld.add_argument("unknown_id")
+    p_kld.add_argument("--probe", default=None, help="Probe id (default: the unknown's probe, or <unknown>_probe)")
+    p_kld.add_argument("--to", default=None, help="Run target JSON (default {\"kind\": \"default\"})")
+    p_kld.add_argument("--confidence", default="med", choices=sorted(CONFIDENCE_SET))
+    p_kld.add_argument("--no-adopt", action="store_true", help="Stop after promote; do not adopt upward")
+    p_kld.set_defaults(func=cmd_known_ladder)
+
     p_kst = kn_sub.add_parser("status", help="Set known status")
     p_kst.add_argument("id")
     p_kst.add_argument("status", choices=sorted(KNOWN_STATUSES))
@@ -4774,6 +4838,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_bph = br_sub.add_parser("phase", help="Add a phase name to the brief")
     p_bph.add_argument("id", help="Phase slug")
     p_bph.add_argument("--title", default="")
+    p_bph.add_argument("--description", default="", help="What the phase delivers")
     p_bph.set_defaults(func=cmd_brief_phase)
 
     p_bpc = br_sub.add_parser(
@@ -5113,7 +5178,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--bucket",
         default=None,
         choices=["low", "medium", "high"],
-        help="low=3 implement, medium=8 validate, high=21 explore",
+        help="low=3 implement (path known, no search); medium=8 validate (a couple of options, then conclude); high=21 explore (several options in parallel)",
     )
     p_rse.add_argument(
         "--points",
@@ -5295,7 +5360,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--bucket",
         default=None,
         choices=["low", "medium", "high"],
-        help="Effort bucket: low=3 (implement), medium=8 (validate), high=21 (explore)",
+        help="Effort bucket = mode of work: low=3 implement (path known, no search); medium=8 validate (a couple of options, then conclude); high=21 explore (several options in parallel)",
     )
     p_ra.add_argument(
         "--points",

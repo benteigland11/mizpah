@@ -94,6 +94,68 @@ def _parse_entry(entry: str) -> tuple[str, str] | None:
     return script, attr
 
 
+_WORLD_NAMES = frozenset({
+    "ctx", "open", "Path", "subprocess", "os", "sys", "socket", "urllib", "requests", "http",
+    "glob", "shutil", "json", "csv", "sqlite3", "time", "datetime", "platform", "psutil", "shlex",
+    "io", "pathlib", "tempfile", "random", "input",
+})
+
+
+def _measure_reads_nothing(tree: ast.AST) -> str | None:
+    """Static floor for a scaffolded probe: measure() must reference ctx or a world-reading name.
+
+    Returns the block text when the function exists and its body references none of
+    them (a bare constant return); None when the check does not apply or passes.
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "measure":
+            body = node.body
+            if body and isinstance(body[0], ast.Expr) and isinstance(getattr(body[0], "value", None), ast.Constant):
+                body = body[1:]  # docstring
+            names: set[str] = set()
+            calls_helper = False
+            for sub in body:
+                for inner in ast.walk(sub):
+                    if isinstance(inner, ast.Name):
+                        names.add(inner.id)
+                    elif isinstance(inner, ast.Attribute):
+                        root = inner
+                        while isinstance(root, ast.Attribute):
+                            root = root.value
+                        if isinstance(root, ast.Name):
+                            names.add(root.id)
+                    elif isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name):
+                        calls_helper = True
+            if names & _WORLD_NAMES or calls_helper:
+                return None
+            if any(isinstance(sub, ast.Raise) for sub in body):
+                return None  # the untouched scaffold stub; validate reports that separately
+            return (
+                "measure() reads nothing: its body references neither ctx nor any file, "
+                "process or network access, so it returns an assertion, not a reading. "
+                "Read the source the unknown names; a constant is not evidence."
+            )
+    return None
+
+
+def _measure_ignores_inputs(tree: ast.AST, inputs: dict[str, str] | None) -> str | None:
+    """A probe that declares map inputs must read them: a comparison unknown ("does A equal B")
+    whose measure() re-derives A and B from scratch, or hardcodes them, is not comparing the map.
+    Returns the block text when inputs are declared and nothing in the module names them."""
+    if not inputs:
+        return None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == "inputs":
+            return None
+        if isinstance(node, ast.Constant) and node.value == "inputs":
+            return None
+    return (
+        "probe declares inputs " + ", ".join(sorted(inputs)) + " but measure() never reads "
+        "ctx[\"inputs\"]: use those values (they are the map's knowns) instead of hardcoding "
+        "or re-measuring them."
+    )
+
+
 def _ast_has_function(tree: ast.AST, name: str) -> bool:
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
@@ -425,6 +487,44 @@ def validate_probe_dir(probe_path: Path) -> dict[str, Any]:
         blocks.append(
             f"probe script must define function {attr!r} (entry {entry!r})"
         )
+
+    # A measure() that touches neither ctx nor the world is an assertion dressed as
+    # a reading. Three "independent surveys" that each did `return {"is_liked": True}`
+    # reached confidence=med and the project map on 2026-09-18. Refuse at validate:
+    # a constant can still be smuggled past this on purpose, but not by accident.
+    sibling = probe_path / "measure.py"
+    if sibling.is_file():
+        try:
+            still = _measure_reads_nothing(ast.parse(sibling.read_text(encoding="utf-8"), filename=str(sibling)))
+        except SyntaxError as e:
+            still = f"measure.py syntax error: {e}"
+        if still:
+            blocks.append(still)
+        elif not _ast_has_function(ast.parse(sibling.read_text(encoding="utf-8")), "measure"):
+            blocks.append("measure.py must define measure(ctx)")
+        else:
+            unused = _measure_ignores_inputs(ast.parse(sibling.read_text(encoding="utf-8")), meta.get("inputs"))
+            if unused:
+                blocks.append(unused)
+            # A reading is a few lines; parsing, statistics and tool-running are parts. Warn (not block): the
+            # loop's own rule is that such logic is built as a widget the probe calls, not extracted afterwards.
+            body = [ln for ln in sibling.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.strip().startswith("#")]
+            if len(body) > 40 and "cg/" not in sibling.read_text(encoding="utf-8"):
+                warnings.append(
+                    f"measure.py is {len(body)} lines and calls no widget under cg/: measurement logic beyond a few "
+                    "lines is a part — search the library (cartograph search), install or create the widget, and "
+                    "call it from measure.py"
+                )
+    else:
+        still = _measure_reads_nothing(tree)
+        if still:
+            blocks.append(still)
+        elif _ast_has_function(tree, "measure") and not any(isinstance(n, ast.Raise) for f in ast.walk(tree)
+                                                            if isinstance(f, ast.FunctionDef) and f.name == "measure"
+                                                            for n in f.body):
+            unused = _measure_ignores_inputs(tree, meta.get("inputs"))
+            if unused:
+                blocks.append(unused)
 
     if not any("syntax error" in b for b in blocks) and _ast_has_function(tree, attr):
         mod_name = f"terra_probe_{dir_name}_{attr}"

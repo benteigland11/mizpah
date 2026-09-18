@@ -1,0 +1,165 @@
+"""The cycle driver: controller routes, workers close tasks, controller evaluates, repeat.
+
+Controller and worker never share context. The driver only sequences them and records
+what each returned; every judgment lives in Terra's files (the gate) or in the person's
+hands (the proposal queue). A worker that runs out of budget leaves its task blocked with
+the gate's delta as the reason, so the next controller step sees it as state, not as a
+transcript.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+import time
+import traceback
+from typing import Any
+
+from . import controller, worker
+from .worker import terra
+
+
+def pickable(config: dict[str, Any], project: Path, root: Path | None = None) -> list[dict[str, Any]]:
+    """Tasks to run next: this agent's own in-progress tasks with a session on disk first (a killed run
+    resumes where it paused), then the route's pickable ones."""
+    tasks = terra(config, project, 'route', 'next')['tasks']
+    resumable = [t for t in tasks if root is not None and t.get('status') == 'in_progress'
+                 and t.get('owner_agent') == config['mizpah']['agent'] and (root/'tasks'/t['id']/'state.sqlite3').exists()]
+    return resumable+[t for t in tasks if t.get('pickable') and t.get('map_id')]
+
+
+def blocked(config: dict[str, Any], project: Path) -> list[dict[str, Any]]:
+    return [t for t in terra(config, project, 'route', 'status')['tasks'] if t['status'] == 'blocked']
+
+
+def failing_step(config: dict[str, Any], project: Path, journal: Path, mode: str, log: Path) -> dict[str, Any]:
+    """A controller step that records its own failure instead of ending the run."""
+    try:
+        return controller.step(config, project, journal, mode)
+    except Exception as error:  # noqa: BLE001 — the run must outlive one bad step
+        with log.open('a') as handle:
+            handle.write(json.dumps(dict(at=time.time(), where='controller:'+mode, error=str(error)[:500],
+                                         trace=traceback.format_exc()[-2000:]))+'\n')
+        return dict(mode=mode, applied=dict(unknowns=[], tasks=[], proposals=[], rebucket=[]), refused=[],
+                    why='', error=str(error)[:300])
+
+
+def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, max_tasks: int,
+        deadline_hours: float | None = None, max_consecutive_errors: int = 3) -> dict[str, Any]:
+    """Unattended-safe: one task's crash blocks that task; repeated crashes stop the run; a deadline ends it."""
+    project, root = project.resolve(), root.resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    journal = root/'controller.jsonl'
+    log = root/'errors.jsonl'
+    started = time.time()
+    deadline = None if deadline_hours is None else started+deadline_hours*3600
+    cycles: list[dict[str, Any]] = []
+    tasks_run = 0
+    errors = 0
+    stop = 'max_cycles'
+
+    def out_of_time() -> bool:
+        return deadline is not None and time.time() > deadline
+
+    for cycle in range(1, max_cycles+1):
+        record: dict[str, Any] = dict(cycle=cycle, tasks=[], evals=[], started_at=time.time())
+        if not pickable(config, project, root):
+            record['route'] = failing_step(config, project, journal, 'route', log)
+            if record['route'].get('error'):
+                errors += 1
+        while tasks_run < max_tasks and not out_of_time():
+            ready = pickable(config, project, root)
+            if not ready:
+                break
+            task = ready[0]
+            tasks_run += 1
+            try:
+                # One session root per task, so a re-bucketed task resumes its own session.
+                result = worker.run_task(config, project, root/'tasks'/task['id'], task['id'])
+            except Exception as error:  # noqa: BLE001
+                errors += 1
+                with log.open('a') as handle:
+                    handle.write(json.dumps(dict(at=time.time(), where='task:'+task['id'], error=str(error)[:500],
+                                                 trace=traceback.format_exc()[-2000:]))+'\n')
+                record['tasks'].append(dict(task=task['id'], verdict='error', error=str(error)[:300]))
+                try:
+                    terra(config, project, 'route', 'block', task['id'], '--reason', 'driver error: '+str(error)[:300])
+                except RuntimeError:
+                    pass
+                if errors >= max_consecutive_errors:
+                    stop = 'driver_failing'
+                    break
+                continue
+            errors = 0
+            record['tasks'].append({k: result[k] for k in ('task', 'unknown', 'unknowns', 'verdict', 'blocked_reason', 'turns',
+                                                           'resumed', 'checkins', 'held_guidance', 'problems', 'playbook', 'widgets')})
+            if result['verdict'] == 'incomplete':
+                reason = ('worker budget exhausted' if result['session'] != 'complete' else 'gate rounds exhausted'
+                          )+' at '+str(result['turns'])+' turns (safety cap; the worker never blocked itself); gate: '+'; '.join(result['problems'])[:400]
+                current = next((t for t in terra(config, project, 'route', 'status')['tasks'] if t['id'] == task['id']), {})
+                if current.get('status') == 'done':
+                    # Terra let it complete but the Mizpah gate is red (typically a known not adopted).
+                    # A done task is terminal; the open unknowns it left behind are unrouted state the
+                    # eval step re-mints, so nothing to do here but record it.
+                    record.setdefault('done_but_red', []).append(dict(task=task['id'], problems=result['problems'][:4]))
+                else:
+                    try:
+                        terra(config, project, 'route', 'block', task['id'], '--reason', reason)
+                    except RuntimeError as error:
+                        with log.open('a') as handle:
+                            handle.write(json.dumps(dict(at=time.time(), where='block:'+task['id'], error=str(error)[:500]))+'\n')
+            # A task the worker blocked itself stays blocked with the worker's reason; the eval sees it.
+            # The controller works between tasks: it sees the new known as state and may
+            # mint the next unknowns while the route still has work. Its writes are safe
+            # against the worker's entitlement writeback.
+            record['evals'].append(failing_step(config, project, journal, 'eval', log))
+            (root/'loop.json').write_text(json.dumps(dict(cycles=cycles+[record], tasks_run=tasks_run), indent=1))
+        if stop == 'driver_failing':
+            cycles.append(record)
+            break
+        if not record['evals']:
+            record['evals'].append(failing_step(config, project, journal, 'eval', log))
+        record['eval'] = record['evals'][-1]
+        cycles.append(record)
+        (root/'loop.json').write_text(json.dumps(dict(cycles=cycles, tasks_run=tasks_run), indent=1))
+        if out_of_time():
+            stop = 'deadline'
+            break
+        minted = record['eval']['applied']
+        if not any(minted[k] for k in ('unknowns', 'tasks', 'rebucket')) and not pickable(config, project, root):
+            if blocked(config, project):
+                stop = 'blocked'
+            elif minted['proposals']:
+                stop = 'proposals_pending'
+            elif record['eval'].get('done') is True:
+                stop = 'nothing_owed'
+            else:
+                # The controller routed nothing but would not say the brief is met: a person decides.
+                stop = 'controller_stalled'
+            break
+        if tasks_run >= max_tasks:
+            stop = 'max_tasks'
+            break
+    result = dict(stop=stop, cycles=cycles, tasks_run=tasks_run, hours=round((time.time()-started)/3600, 2),
+                  blocked=[dict(id=t['id'], reason=t.get('blocked_reason')) for t in blocked(config, project)],
+                  open_proposals=terra(config, project, 'brief', 'show').get('open_proposals'))
+    (root/'loop.json').write_text(json.dumps(result, indent=1))
+    return result
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--config', type=Path, required=True)
+    parser.add_argument('--project', type=Path, required=True)
+    parser.add_argument('--root', type=Path, required=True)
+    parser.add_argument('--max-cycles', type=int, default=3)
+    parser.add_argument('--max-tasks', type=int, default=6, help='Safety cap; the brief budget is what bounds tasks')
+    parser.add_argument('--deadline-hours', type=float, default=None)
+    args = parser.parse_args()
+    result = run(worker.load_config(args.config), args.project, args.root, max_cycles=args.max_cycles,
+                 max_tasks=args.max_tasks, deadline_hours=args.deadline_hours)
+    print(json.dumps(result, indent=2))
+
+
+if __name__ == '__main__':
+    main()

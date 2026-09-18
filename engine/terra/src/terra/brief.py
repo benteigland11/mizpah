@@ -350,6 +350,7 @@ def add_phase(
     phase_id: str,
     *,
     title: str = "",
+    description: str = "",
 ) -> dict[str, Any]:
     if not _SLUG_RE.match(phase_id):
         raise ValueError(f"phase id must match {_SLUG_RE.pattern}")
@@ -361,6 +362,8 @@ def add_phase(
         {
             "id": phase_id,
             "title": (title or phase_id).strip(),
+            # What the phase delivers, for the humans reading the brief.
+            "description": (description or "").strip(),
             "status": "open",
         }
     )
@@ -412,6 +415,19 @@ def close_phase(
     return load_brief(project_root)
 
 
+def _next_proposal_id(proposals: list[dict[str, Any]]) -> str:
+    """CR-001, CR-002, … — a change-request number a human can say aloud.
+
+    Counts every proposal ever queued (rejected ones included) so numbers
+    are never reused, and steps past any id already present.
+    """
+    taken = {p.get("id") for p in proposals}
+    n = len(proposals) + 1
+    while f"CR-{n:03d}" in taken:
+        n += 1
+    return f"CR-{n:03d}"
+
+
 def propose_change(
     project_root: Path,
     *,
@@ -427,7 +443,7 @@ def propose_change(
         raise ValueError("summary required")
     rec = load_brief(project_root)
     proposals = list(rec.get("proposals") or [])
-    pid = f"p{len(proposals) + 1}_{int(datetime.now(timezone.utc).timestamp())}"
+    pid = _next_proposal_id(proposals)
     prop: dict[str, Any] = {
         "id": pid,
         "summary": summary.strip(),

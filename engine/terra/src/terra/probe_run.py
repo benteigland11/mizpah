@@ -307,6 +307,22 @@ def run_probe(
             + "\n  - ".join(output_blocks)
         )
     assert isinstance(raw, dict)
+    declared = meta.get("measures")
+    if isinstance(declared, list) and declared and not dry_run:
+        reported = [
+            str(m.get("quantity")) for m in (raw.get("measures") or []) if isinstance(m, dict)
+        ]
+        extra = [q for q in reported if q not in declared]
+        missing = [q for q in declared if q not in reported]
+        if extra or missing:
+            raise ValueError(
+                f"probe {probe_id!r} declares measures {declared}; this run reported "
+                f"{reported or 'none'}"
+                + (f" — extra: {extra}" if extra else "")
+                + (f" — missing: {missing}" if missing else "")
+                + ". One probe measures its declared quantities only; another quantity "
+                "belongs in its own probe. No run stamped."
+            )
 
     ensure_runs_store(project_root)
     stamp = started_mono.strftime("%Y%m%dT%H%M%SZ")

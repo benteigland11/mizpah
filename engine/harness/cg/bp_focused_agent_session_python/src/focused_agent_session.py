@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 import fcntl
+import fnmatch
 import hashlib
 import json
 from pathlib import Path
@@ -43,8 +44,15 @@ class ControllerSettings:
     recent_review_exchanges: int = 2
     investigation_budgets: dict[str, int] | None = None
     maximum_document_edits_per_review: int | None = None
+    # One tool-less completion per review: the envelope in, the decision out. No project
+    # document, no investigation. For a reviewer whose evidence fits in the envelope
+    # (a small reference, focus files, recent exchanges) the tools were never used.
+    plain_review: bool = False
+    plain_recent_exchanges: int = 6
 
     def __post_init__(self) -> None:
+        if type(self.plain_recent_exchanges) is not int or self.plain_recent_exchanges < 1:
+            raise ValueError('plain_recent_exchanges must be a positive integer')
         if self.investigation_budgets is not None:
             if (not isinstance(self.investigation_budgets, dict) or set(self.investigation_budgets) != {'bootstrap', 'periodic', 'completion'}
                     or any(type(value) is not int or value < 0 for value in self.investigation_budgets.values())):
@@ -84,8 +92,33 @@ class SessionSettings:
     maximum_write_characters: int | None = None
     maximum_edit_characters: int | None = None
     maximum_read_lines: int = 200
+    # When false, write only creates files or fills an emptied one: replacing a file's
+    # content in one call is a block replacement, which the method forbids.
+    write_existing_files: bool = True
+    # An edit must anchor on a read of the file's current content (Claude Code's own rule):
+    # anchors recalled from memory or from a stale read are the bulk of failed edits.
+    edit_requires_read: bool = False
+    # A context that repeats the same failing call is periodic; the counter names it but
+    # the model continues it. After this many identical failures in the recent window the
+    # worker writes its own handoff and continues in a fresh window, which breaks the period.
+    repeated_failure_rollover: int | None = None
+    # Identical successful calls repeated this many times in the window are a loop too
+    # (a probe re-run over and over with nothing linked between); same remedy.
+    repeated_success_rollover: int | None = None
+    # Workspace files the reviewer sees on every review, matched by fnmatch on their
+    # workspace path: the few files where a reference departure would show, so the
+    # decisive evidence is in the envelope rather than behind an investigation budget.
+    review_focus_globs: tuple[str, ...] = ()
+    review_focus_characters: int = 4000
 
     def __post_init__(self) -> None:
+        for name in ('repeated_failure_rollover', 'repeated_success_rollover'):
+            value = getattr(self, name)
+            if value is not None and (type(value) is not int or value < 2):
+                raise ValueError(name+' must be an integer of at least 2 or None')
+        object.__setattr__(self, 'review_focus_globs', tuple(self.review_focus_globs))
+        if type(self.review_focus_characters) is not int or self.review_focus_characters <= 0:
+            raise ValueError('review_focus_characters must be a positive integer')
         if not self.assignment.strip() or not self.worker_system.strip() or not self.guidance_prefix.strip():
             raise ValueError('Explicit worker assignment, system text and guidance prefix are required')
         tools = tuple(self.worker_tools)
@@ -139,19 +172,33 @@ def bash_tool() -> dict[str, Any]:
                         required=['command'], additionalProperties=False)))
 
 
-def write_tool() -> dict[str, Any]:
-    return dict(type='function', function=dict(name='write',
-        description='Create or replace one UTF-8 text file in the workspace with the complete content given. '
-                    'Use for new or short files; use edit to change part of an existing file.',
+def write_tool(create_only: bool = False, bounded: bool = False) -> dict[str, Any]:
+    """The description states the contract this session enforces, so the model never learns it from a refusal."""
+    if create_only:
+        description = ('Create ONE NEW UTF-8 text file in the workspace. Refused if the file already has content '
+                       '(change it with edit, or empty it with bash first)'
+                       + (', and refused if the content is longer than a short skeleton: imports, signatures, '
+                          'docstrings, pass bodies, or a short file. Bodies are added afterwards with edit, one '
+                          'function per call.' if bounded else '.'))
+    else:
+        description = ('Create or replace one UTF-8 text file in the workspace with the complete content given. '
+                       + ('Short files and skeletons only; longer content is refused unexecuted — build the rest '
+                          'with edit, one function per call.' if bounded else
+                          'Use for new or short files; use edit to change part of an existing file.'))
+    return dict(type='function', function=dict(name='write', description=description,
         parameters=dict(type='object', properties=dict(path=dict(type='string'), content=dict(type='string')),
                         required=['path', 'content'], additionalProperties=False)))
 
 
-def edit_tool() -> dict[str, Any]:
-    return dict(type='function', function=dict(name='edit',
-        description='Replace exact text in one existing UTF-8 workspace file. old_text must occur exactly '
-                    'expected_occurrences times (default 1); otherwise nothing changes and the mismatch is reported. '
-                    'Prefer this over rewriting a whole file.',
+def edit_tool(bounded: bool = False, requires_read: bool = False) -> dict[str, Any]:
+    description = ('Replace exact text in one existing UTF-8 workspace file. old_text must occur exactly '
+                   'expected_occurrences times (default 1); otherwise nothing changes and the mismatch is reported. '
+                   + ('old_text is one or two lines copied from a read of the current file (an edit without such a '
+                      'read is refused); ' if requires_read else '')
+                   + ('new_text is one function body, branch or test — a few lines; a longer change is refused '
+                      'unexecuted, so add helpers first, one per call. ' if bounded else '')
+                   + 'Prefer this over rewriting a whole file.')
+    return dict(type='function', function=dict(name='edit', description=description,
         parameters=dict(type='object', properties=dict(path=dict(type='string'), old_text=dict(type='string'),
             new_text=dict(type='string'), expected_occurrences=dict(type='integer', minimum=1)),
             required=['path', 'old_text', 'new_text'], additionalProperties=False)))
@@ -169,8 +216,18 @@ def read_tool() -> dict[str, Any]:
 WORKER_TOOLS = dict(bash=bash_tool, read=read_tool, write=write_tool, edit=edit_tool)
 
 
-def worker_tools(names: tuple[str, ...]) -> list[dict[str, Any]]:
-    return [WORKER_TOOLS[name]() for name in names]
+def worker_tools(names: tuple[str, ...], settings: 'SessionSettings | None' = None) -> list[dict[str, Any]]:
+    tools = []
+    for name in names:
+        if name == 'write' and settings is not None:
+            tools.append(write_tool(create_only=not settings.write_existing_files,
+                                    bounded=settings.maximum_write_characters is not None))
+        elif name == 'edit' and settings is not None:
+            tools.append(edit_tool(bounded=settings.maximum_edit_characters is not None,
+                                   requires_read=settings.edit_requires_read))
+        else:
+            tools.append(WORKER_TOOLS[name]())
+    return tools
 
 
 def controller_tools() -> list[dict[str, Any]]:
@@ -231,6 +288,11 @@ def _identity(client: ModelClient | None) -> dict[str, Any] | None:
     return result
 
 
+def _shell_identity(shell: SandboxedShell) -> dict[str, Any]:
+    # Compared against the saved JSON, so tuples must already be lists.
+    return json.loads(json.dumps(asdict(shell.config)))
+
+
 def _settings(value: dict[str, Any]) -> SessionSettings:
     return SessionSettings(**(value | dict(session_policy=SessionPolicy(**value['session_policy']),
         review_policy=ReviewPolicy(**value['review_policy']),
@@ -270,11 +332,11 @@ class FocusedSession:
             result.session = PersistentSession([
                 dict(role='system', content=settings.worker_system),
                 dict(role='user', content=settings.assignment),
-            ], worker_tools(settings.worker_tools), settings.generation, settings.session_policy)
+            ], worker_tools(settings.worker_tools, settings), settings.generation, settings.session_policy)
             result.progress = ControllerProgress(settings.review_policy, initial_project_document)
             result.state = dict(schema=2, settings=asdict(settings), worker_identity=_identity(worker),
                 controller_identity=_identity(controller) if settings.reference is not None else None,
-                shell_config=asdict(shell.config), phase='worker', pending_io=None,
+                shell_config=_shell_identity(shell), phase='worker', pending_io=None,
                 workspace=result._put_workspace(initial_workspace), input_cursor=0,
                 active_turn=None, proposed_final=None, final_text='', handoffs=0, review=None, blocked_reason=None)
             result._save()
@@ -285,9 +347,11 @@ class FocusedSession:
              controller: ModelClient | None = None) -> FocusedSession:
         result = cls(root, worker, shell, controller)
         with result._locked():
+            if result.journal.drop_torn_tail('session'):
+                result.journal.append(session_id='session', event_type='torn_tail_dropped', payload={})
             result._restore()
             if (result.state['worker_identity'] != _identity(worker)
-                    or result.state['shell_config'] != asdict(shell.config)
+                    or result.state['shell_config'] != _shell_identity(shell)
                     or result.state['controller_identity'] != (
                         _identity(controller) if result.settings.reference is not None else None)):
                 raise ValueError('Reopen requires the saved model and shell bindings')
@@ -453,10 +517,24 @@ class FocusedSession:
         self.state['phase'] = 'review' if review else ('complete' if final else 'worker')
         if final and not review:
             self.state['final_text'] = self.state['proposed_final']
+        # Snapshots the saved state no longer references are history nobody reads; a full /work tarball
+        # per turn (5 MB with a few widgets in cg/) filled a RAM-backed scratch disk in an afternoon.
+        keep = {self.state['workspace']}
+        for path in (self.root/'workspaces').glob('*.sqlite3'):
+            if path.stem not in keep:
+                path.unlink(missing_ok=True)
 
     def _worker(self) -> None:
         payload = self.worker_payload()
         count = self._client(self.worker).count(payload, 'worker')['tokens']
+        requested = self.state.get('rollover_requested')
+        if requested and len(self.session.messages) > len(self.session.base_messages)+1:
+            self._event('rollover_forced', dict(requested, window=self.session.window_index))
+            self.state['rollover_requested'] = None
+            self.state['recent_calls'] = []
+            self.state['phase'] = 'handoff'
+            self._save()
+            return
         if self.session.needs_rollover(count):
             # A just-reset window must leave room for actual work.
             if self.session.window_index and len(self.session.messages) <= len(self.session.base_messages)+1:
@@ -516,10 +594,30 @@ class FocusedSession:
                       'This call is too large to execute. Nothing was executed. Split the change rather than '
                       'shrinking it: write a skeleton first, then fill in one function, branch, test or section '
                       'per edit, and keep bash commands brief.')
+            if name == 'edit' and not repeated:
+                # The usual oversized edit is one function that does everything; name the split.
+                advice = ('This edit is too large to execute; nothing was executed. A single function is doing '
+                          'several jobs. Split it by responsibility: one small function per quantity or step '
+                          '(each reads its input and returns one value), added one per edit; then a short '
+                          'function that only calls them. Shrinking the same function will be refused again.')
             output = dict(status='rejected', code='arguments_too_large', characters=len(rendered), bound=bound,
                           repeated=repeated, error=advice)
             self._event('tool_rejected', dict(call_id=call['id'], name=name, characters=len(rendered), bound=bound,
                                               repeated=repeated))
+            # Oversized attempts at one file are the same loop whether or not the bytes match:
+            # a whole-file rewrite refused, deleted, tried again. Count them per path.
+            try:
+                target = (json.loads(rendered) if isinstance(arguments, str) else arguments).get('path')
+            except (ValueError, AttributeError, TypeError):
+                target = None
+            threshold = self.settings.repeated_failure_rollover
+            if target and threshold is not None:
+                counts = self.state.setdefault('oversized_by_path', {})
+                counts[target] = counts.get(target, 0)+1
+                if counts[target] >= threshold:
+                    self.state['rollover_requested'] = dict(reason='oversized_rewrites', name=name, count=counts[target],
+                                                            path=target)
+                    counts[target] = 0
         elif name in ('read', 'write', 'edit'):
             try:
                 args = json.loads(arguments) if isinstance(arguments, str) else arguments
@@ -531,6 +629,9 @@ class FocusedSession:
                     limit = min(int(args.get('limit', self.settings.maximum_read_lines)), self.settings.maximum_read_lines)
                     report = read_workspace_lines(self.workspace(), args['path'], offset=int(args.get('offset', 1)),
                         limit=limit, **options)
+                    # Remember what the worker saw: an edit must anchor on a read of the current content.
+                    self.state.setdefault('read_hashes', {})[args['path']] = hashlib.sha256(
+                        read_workspace_file(self.workspace(), args['path'], **options)).hexdigest()
                     snapshot = None
                 elif name == 'write':
                     if set(args) != {'path', 'content'} or not all(isinstance(args[k], str) for k in args):
@@ -540,12 +641,28 @@ class FocusedSession:
                         raise ValueError('write content is too long for one call; write the skeleton first and fill it in with edit')
                     existing = set(workspace_files(self.workspace(), **options))
                     data = args['content'].encode('utf-8')
+                    if (not self.settings.write_existing_files and args['path'] in existing
+                            and read_workspace_file(self.workspace(), args['path'], **options).strip()):
+                        raise ValueError('write only creates files; '+args['path']+' already has content. Change it with '
+                                         'edit one piece at a time, or delete the block with bash first and rebuild it by refinement')
                     snapshot = write_workspace_file(self.workspace(), args['path'], data, **options)
                     report = dict(path=args['path'], created=args['path'] not in existing, bytes_written=len(data))
                 else:
                     keys = {'path', 'old_text', 'new_text'}
                     if not keys <= set(args) <= keys | {'expected_occurrences'} or not all(isinstance(args[k], str) for k in keys):
                         raise ValueError('edit requires path, old_text and new_text strings and an optional expected_occurrences integer')
+                    if self.settings.edit_requires_read:
+                        try:
+                            current = hashlib.sha256(read_workspace_file(self.workspace(), args['path'], **options)).hexdigest()
+                        except FileNotFoundError:
+                            current = None
+                        seen = self.state.get('read_hashes', {}).get(args['path'])
+                        if current is not None and seen is None:
+                            raise ValueError('edit requires a read of '+args['path']+' first: read the region you are '
+                                             'changing and copy old_text from those numbered lines')
+                        if current is not None and seen != current:
+                            raise ValueError(args['path']+' has changed since you last read it: read the region again '
+                                             'and copy old_text from the current lines')
                     limit = self.settings.maximum_edit_characters
                     size = len(args['old_text'])+len(args['new_text'])
                     if limit is not None and size > limit:
@@ -572,6 +689,11 @@ class FocusedSession:
             else:
                 if snapshot is not None:
                     self.state['workspace'] = self._put_workspace(snapshot)
+                    # Progress on the file: oversized attempts before it were not a stuck loop.
+                    self.state.get('oversized_by_path', {}).pop(args['path'], None)
+                    # The worker authored this content; count it as read.
+                    self.state.setdefault('read_hashes', {})[args['path']] = hashlib.sha256(
+                        read_workspace_file(self.workspace(), args['path'], **options)).hexdigest()
                 output = dict(status='ok', tool=name, **report)
             self._event('tool_outcome', dict(call_id=call['id'], **{key:value for key,value in output.items() if key != 'tool'}, tool=name))
         else:
@@ -610,6 +732,11 @@ class FocusedSession:
                          'Do not repeat it. Continue with the next step: read the file if unsure of its current content.')
             self._event('tool_repeated_call', dict(call_id=call['id'], name=name, count=count,
                                                    status=output.get('status'), code=output.get('code')))
+            failed = output.get('status') in ('rejected', 'error')
+            threshold = self.settings.repeated_failure_rollover if failed else self.settings.repeated_success_rollover
+            if threshold is not None and count >= threshold:
+                self.state['rollover_requested'] = dict(reason='repeated_failure' if failed else 'repeated_success',
+                                                        name=name, count=count)
         # Arguments longer than the wire excerpt go to a workspace file, like large
         # command output: the transcript keeps a path, the worker can read it in ranges.
         archive = None
@@ -690,6 +817,28 @@ class FocusedSession:
         self.state.update(phase='worker', pending_io=None, input_cursor=0, handoffs=self.state['handoffs']+1)
         self._save()
 
+    def _focus_files(self) -> dict[str, str]:
+        """Bounded content of the workspace files the settings mark as decisive for review."""
+        globs = self.settings.review_focus_globs
+        if not globs:
+            return {}
+        limits = self.shell.config.limits
+        options = dict(byte_limit=limits.workspace_bytes, file_limit=limits.max_files)
+        snapshot = self.workspace()
+        result: dict[str, str] = {}
+        budget = self.settings.review_focus_characters
+        for name in workspace_files(snapshot, **options):
+            if any(fnmatch.fnmatch(name, pattern) for pattern in globs):
+                if budget <= 0:
+                    result[name] = '[omitted: review focus budget exhausted; read it with workspace_read]'
+                    continue
+                text = read_workspace_file(snapshot, name, **options).decode('utf-8', errors='replace')
+                if len(text) > budget:
+                    text = text[:budget]+'\n[truncated at '+str(budget)+' characters; read the rest with workspace_read]'
+                budget -= len(text)
+                result[name] = text
+        return result
+
     def _review_payload(self, session: PersistentSession, review: dict[str, Any]) -> tuple[dict[str, Any], int]:
         """Fit each request from archived originals and the latest project state."""
         settings = self.settings.controller
@@ -767,15 +916,82 @@ class FocusedSession:
         payload['messages'] = fitted['messages']
         return payload, fitted['prompt_tokens']
 
+    def _plain_review(self, boundary: str, final: bool) -> None:
+        """One completion, no tools: reference, held guidance, focus files, recent exchanges → decision."""
+        settings = self.settings.controller
+        recent = []
+        for item in self.progress.recent_turns[-settings.plain_recent_exchanges:]:
+            calls = []
+            for call, result in zip(item['response'].get('tool_calls') or [], item.get('tool_results') or []):
+                arguments = call['function']['arguments']
+                text = arguments if isinstance(arguments, str) else json.dumps(arguments, ensure_ascii=False)
+                outcome = result['result']
+                shown = (outcome.get('stdout') or outcome.get('error') or outcome.get('content') or '')
+                calls.append(dict(tool=call['function']['name'], arguments=text[:600], status=outcome.get('status'),
+                                  exit_code=outcome.get('exit_code'), output=str(shown)[:600]))
+            recent.append(dict(turn=item['turn'], said=(item['response'].get('content') or '')[:600], calls=calls))
+        envelope = dict(reference=self.settings.reference, boundary=boundary, completed_turns=self.progress.turns,
+                        held_guidance=self.progress.guidance, focus_files=self._focus_files(),
+                        recent_turns=recent, proposed_completion=self.state['proposed_final'] if final else None)
+        payload = dict(settings.generation, messages=[dict(role='system', content=settings.system_prompt),
+                                                       dict(role='user', content=json.dumps(envelope, ensure_ascii=False))],
+                       max_tokens=settings.output_tokens)
+        review = self.state['review'] or dict(model_calls=0, tool_calls=0, boundary=boundary, kind='plain', plain=True,
+                                              rejections=[])
+        self.state['review'] = review
+        self._save()
+        response = self._complete(self.controller_client, payload, 'controller', settings.context_capacity,
+                                  output_headroom=settings.output_headroom_tokens)
+        if response is None:
+            return
+        review['model_calls'] += 1
+        turn = parse_turn(response)
+        content = (turn.message.get('content') or '').strip()
+        start, end = content.find('{'), content.rfind('}')
+        raw = content[start:end+1] if start >= 0 and end > start else content
+        if not self.progress.document.strip():
+            # A plain reviewer keeps no document; the acceptance rule still wants one to exist.
+            self.progress.edit_document(self.progress.document_revision, '', 'Plain review: no project document.')
+        try:
+            decision = self.progress.accept(raw)
+        except ValueError as error:
+            review['rejections'].append(str(error)[:300])
+            self._event('controller_decision_rejected', dict(turn=self.progress.turns, model_call=review['model_calls'],
+                                                              error=str(error), content=content[:2000]))
+            if review['model_calls'] >= 2:
+                # Two malformed decisions: hold rather than stall the worker.
+                decision = self.progress.accept(json.dumps(dict(correction='None', evidence='', warrant='')))
+                self._event('controller_review', dict(boundary=boundary, turn=self.progress.turns, decision=decision,
+                    document_revision=self.progress.document_revision, model_calls=review['model_calls'], tool_calls=0,
+                    termination='malformed_decisions_held'))
+            else:
+                self.state.update(phase='review', pending_io=None)
+                self._save()
+                return
+        else:
+            self._event('controller_review', dict(boundary=boundary, turn=self.progress.turns, decision=decision,
+                document_revision=self.progress.document_revision, model_calls=review['model_calls'], tool_calls=0,
+                termination='voluntary_decision'))
+        self.state.update(pending_io=None, review=None)
+        if final and decision['operation'] != 'replace':
+            self.state.update(phase='complete', final_text=self.state['proposed_final'])
+        else:
+            self.state.update(phase='worker', proposed_final=None)
+        self._save()
+
     def _review(self) -> None:
         settings = self.settings.controller
         if settings is None or self.controller_client is None or self.settings.reference is None:
             raise ValueError('Missing controller binding for a saved review boundary')
         final = self.state['proposed_final'] is not None
         boundary = 'completion' if final else 'periodic'
+        if settings.plain_review:
+            self._plain_review(boundary, final)
+            return
         prompt_tokens = None
         if self.state['review'] is None:
             proposed = dict(assignment=self.settings.assignment, incoming=self._incoming(),
+                            focus_files=self._focus_files(),
                 proposed_completion=self.state['proposed_final'], review_budget=dict(
                     maximum_model_calls=settings.maximum_model_calls,
                     maximum_tool_calls=settings.maximum_tool_calls))
@@ -896,6 +1112,117 @@ class FocusedSession:
         else:
             self.state.update(phase='worker', proposed_final=None)
         self._save()
+
+    def discard_pending(self) -> dict[str, Any] | None:
+        """Drop an operation whose outcome was never committed, so a killed session can continue.
+
+        A pending model call applied nothing, so the next step simply asks again. A pending
+        shell command may or may not have run, but the saved workspace is the one from
+        before it, so discarding it loses that command's effects rather than doubling them.
+        Either way the decision is explicit and journaled; nothing is replayed.
+        """
+        with self._locked():
+            if self.store.read()['revision'] != self.revision:
+                raise RuntimeError('Session changed; reopen before discarding')
+            pending = self.state.get('pending_io')
+            if pending is None:
+                return None
+            self._event('pending_discarded', dict(pending))
+            self.state['pending_io'] = None
+            if pending.get('kind') == 'tool':
+                # The turn's response is kept; the call gets an explicit failed result.
+                turn = self.state.get('active_turn')
+                if turn is not None:
+                    call = turn['response']['tool_calls'][len(turn['tool_results'])]
+                    output = dict(status='error', error='This command was interrupted before its outcome was recorded; '
+                                                          'its effects were discarded. Run it again if still needed.')
+                    self.session.append_tool_result(call['id'], call['function']['name'], json.dumps(output, ensure_ascii=False))
+                    turn['tool_results'].append(dict(call_id=call['id'], name=call['function']['name'], result=output))
+                    if not self.session.pending_tools:
+                        self._finish_turn()
+            self._save()
+            return pending
+
+    def prune_workspaces(self) -> int:
+        """Delete snapshot stores the saved state no longer references; returns how many.
+
+        Every applied command stores a full content-addressed snapshot. Only the current
+        one is needed to continue; the rest are history a session never reads back.
+        """
+        with self._locked():
+            if self.store.read()['revision'] != self.revision:
+                raise RuntimeError('Session changed; reopen before pruning')
+            keep = {self.state['workspace']}
+            removed = 0
+            for path in (self.root/'workspaces').glob('*.sqlite3'):
+                if path.stem not in keep:
+                    path.unlink()
+                    removed += 1
+            return removed
+
+    def continue_with(self, message: str) -> dict[str, Any]:
+        """Resume a completed session on new user text; the accepted final answer is withdrawn.
+
+        The host judged the outcome outside the model (a gate, a check) and states what
+        is still missing. Nothing is replayed: the text lands as the next user message
+        after the worker's final answer, and the cursor makes it the new incoming input.
+        """
+        if not isinstance(message, str) or not message.strip():
+            raise ValueError('Continuation requires nonempty text')
+        with self._locked():
+            if self.store.read()['revision'] != self.revision:
+                raise RuntimeError('Session changed; reopen before continuing')
+            if self.state['phase'] != 'complete':
+                raise ValueError('Only a completed session can be continued')
+            self.session.append_guidance(message)
+            self.state.update(phase='worker', proposed_final=None, final_text='')
+            self._event('continued', dict(window=self.session.window_index, characters=len(message)))
+            self._save()
+            return self.status()
+
+    def interject(self, message: str) -> dict[str, Any]:
+        """Hand the worker host text at a paused turn boundary, without withdrawing anything.
+
+        A session paused by `run(maximum_worker_turns=...)` sits in the worker phase with no
+        tool call open; the host may speak there (an effort check, a note) and the text lands
+        as the next user message. Refused mid-call, mid-review or after completion, where
+        `continue_with` is the right door.
+        """
+        if not isinstance(message, str) or not message.strip():
+            raise ValueError('Interjection requires nonempty text')
+        with self._locked():
+            if self.store.read()['revision'] != self.revision:
+                raise RuntimeError('Session changed; reopen before interjecting')
+            if self.state['phase'] != 'worker' or self.state['pending_io'] is not None:
+                raise ValueError('Only a paused worker session can take an interjection')
+            self.session.append_guidance(message)
+            self._event('interjected', dict(window=self.session.window_index, characters=len(message)))
+            self._save()
+            return self.status()
+
+    RETUNABLE = ('reasoning_retention', 'rollover_threshold', 'output_headroom_tokens', 'context_capacity',
+                 'recent_result_count', 'recent_result_characters')
+
+    def retune(self, **changes: Any) -> dict[str, Any]:
+        """Change wire-view policy on a saved session without replaying anything.
+
+        Only fields that shape how the next request is rendered or bounded may change
+        (`RETUNABLE`); the assignment, tools and model bindings stay what they were. The
+        change is checkpointed like any other state, so a reopen sees it.
+        """
+        unknown = sorted(set(changes)-set(self.RETUNABLE))
+        if unknown:
+            raise ValueError('Not retunable: '+', '.join(unknown))
+        with self._locked():
+            if self.store.read()['revision'] != self.revision:
+                raise RuntimeError('Session changed; reopen before retuning')
+            policy = replace(self.settings.session_policy, **changes)  # __post_init__ validates the limits
+            self.settings = replace(self.settings, session_policy=policy)
+            self.session.policy = policy
+            self.state['settings'] = asdict(self.settings)
+            self._event('retuned', dict(changes))
+            self._save()
+            return self.status()
 
     def project_document(self) -> str:
         """Return the controller-owned full-project document."""

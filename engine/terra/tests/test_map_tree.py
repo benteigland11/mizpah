@@ -162,6 +162,25 @@ def test_adopt_copies_runs_and_stamps_provenance(tmp_path: Path, monkeypatch):
         assert load_known(tmp_path, "span")["adopted_to"]["map"] == "global"
 
 
+def test_adopt_resolves_the_destination_open_unknown(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from terra.unknowns import create_unknown, load_unknown
+
+    with scoped_map("global"):
+        create_unknown(tmp_path, "span", claim="span is unknown", evidence_needed="a run",
+                       map_type="number", quantity="span")
+    create_session_map(tmp_path, "exp")
+    _grow_known(tmp_path, "span", map_id="exp")
+    rec = adopt_known(tmp_path, "span", from_map="exp")
+    with scoped_map("global"):
+        unk = load_unknown(tmp_path, "span")
+        assert unk["status"] == "resolved" and unk["resolved_by"] == "known:span"
+        assert unk["run_ids"] == rec["run_ids"] and unk["primary_run_id"] == rec["run_ids"][0]
+    from terra.gate import check_gate
+
+    assert check_gate(tmp_path)["ok"] is True
+
+
 def test_adopt_refuses_low_confidence(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     create_session_map(tmp_path, "exp")

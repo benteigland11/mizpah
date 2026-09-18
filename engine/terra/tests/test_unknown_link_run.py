@@ -110,6 +110,7 @@ def test_link_run_to_resolved_unknown_warns(tmp_path, monkeypatch, capsys):
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "success"
-    note = payload["meta"]["note"]
-    assert "this unknown is resolved by known:fact" in note
-    assert f"terra known link-run fact {r2}" in note
+    # Since 2026-09-17 the run is forwarded to the known rather than noted.
+    assert payload["meta"]["forwarded_to"] == "known:fact"
+    assert "already resolved by known:fact" in payload["meta"]["note"]
+    assert payload["data"]["stats"]["n"] == 2

@@ -797,12 +797,12 @@ class Cartograph:
                        show_all_versions=show_all_versions,
                        show_reviews=show_reviews, version=version)
     def create(self, item_id, language=None, name=None, domain="backend", tags=None,
-                target_dir=None, gpu_targets=None, widget_type=None):
+                target_dir=None, gpu_targets=None, widget_type=None, description=None):
         from .scaffolding import create_widget
         item_id = normalize_widget_id(item_id)
         return create_widget(self, item_id, language=language, name=name, domain=domain,
                              tags=tags, target_dir=target_dir, gpu_targets=gpu_targets,
-                             widget_type=widget_type)
+                             widget_type=widget_type, description=description)
 
     def create_blueprint(self, name, language, target_dir=None,
                           description=None, tags=None):

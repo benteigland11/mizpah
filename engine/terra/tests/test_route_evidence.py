@@ -172,3 +172,38 @@ def test_route_log_done_without_evidence_still_logged(proj):
     assert [e["task"] for e in out["events"]] == ["bare"]
     assert out["events"][0]["kind"] == "complete"
     assert "note" not in out["events"][0]
+
+
+
+
+def test_complete_requires_a_known_for_every_unknown_the_task_carries(proj):
+    """`unknown:<id>` acceptance entries name further unknowns; the completion must cite each."""
+    for uid in ("a", "b"):
+        create_unknown(proj, uid, claim=uid+"?", evidence_needed="e", map_type="number", quantity="q")
+        link_run(proj, uid, _run(proj))
+        graduate_unknown(proj, uid, known_id=uid)
+    add_task(proj, "both", title="Both", skill="terra-probe", bucket="low", map_id="a", acceptance=["unknown:b"])
+    with pytest.raises(ValueError, match="missing: b"):
+        complete_task(proj, "both", known_ids=["a"])
+    t = complete_task(proj, "both", known_ids=["a", "b"])
+    assert t["status"] == "done" and t["evidence"][0]["knowns"] == ["a", "b"]
+
+
+def test_known_ladder_walks_an_unknown_to_an_adopted_known_in_one_call(tmp_path, monkeypatch):
+    """runs until the bar, links, graduates, promotes, adopts one hop up — every rung the CLI has, in one go."""
+    from terra.knowns import ladder_unknown, load_known
+    from terra.paths import create_session_map
+
+    monkeypatch.chdir(tmp_path)
+    init_probe(tmp_path, "q_probe", purpose="p")
+    _write_measure_probe(tmp_path, "q_probe", quantity="q", value=2.5)
+    from terra.paths import scoped_map
+    create_session_map(tmp_path, "sess", purpose="s")
+    with scoped_map("sess"):
+        create_unknown(tmp_path, "q", claim="q?", evidence_needed="e", map_type="number", quantity="q")
+        result = ladder_unknown(tmp_path, "q")
+    assert result["runs"] >= 2 and result["known"]["confidence"] == "med"
+    assert any(s.startswith("graduated q") for s in result["steps"])
+    assert any(s.startswith("adopted q sess -> global") for s in result["steps"])
+    with scoped_map("global"):
+        assert load_known(tmp_path, "q")["stats"]["n"] == result["runs"]   # on the global map now

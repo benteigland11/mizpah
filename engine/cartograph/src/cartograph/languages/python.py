@@ -425,6 +425,39 @@ class PythonEngine(LanguageEngine):
         """Return the venv python path if a venv was created, else sys.executable."""
         return getattr(self, "_venv_py", sys.executable)
 
+    @staticmethod
+    def _inherit_parent_site_packages(venv_dir: str) -> None:
+        """When cartograph itself runs inside a venv, let the throwaway venv see that
+        venv's packages too (system_site_packages only reaches the base interpreter)."""
+        import sys
+        import site
+        if sys.prefix == getattr(sys, "base_prefix", sys.prefix):
+            return
+        try:
+            parents = [p for p in site.getsitepackages() if os.path.isdir(p)]
+        except Exception:  # noqa: BLE001
+            return
+        for lib in (os.path.join(venv_dir, "lib"), os.path.join(venv_dir, "Lib")):
+            if not os.path.isdir(lib):
+                continue
+            for entry in os.listdir(lib):
+                target = os.path.join(lib, entry, "site-packages")
+                if os.path.isdir(target) and parents:
+                    with open(os.path.join(target, "_cartograph_parent.pth"), "w", encoding="utf-8") as handle:
+                        handle.write("\n".join(parents) + "\n")
+
+    def _importable(self, py: str, dep_name: str) -> bool:
+        base = dep_name.split("[")[0].split("==")[0].split(">=")[0].split("<=")[0].split("!=")[0].split("~=")[0].strip()
+        candidates = {base.replace("-", "_"), base.replace("-", "_").lower()}
+        if base.lower() == "pytest-cov":
+            candidates = {"pytest_cov"}
+        code = "import importlib.util,sys; sys.exit(0 if all(importlib.util.find_spec(n) for n in %r) else 1)" % (sorted(candidates),)
+        try:
+            res = self._run([py, "-c", code], cwd=os.getcwd(), timeout=30)
+        except Exception:  # noqa: BLE001
+            return False
+        return res.returncode == 0
+
     def install_deps(self, path: str, dependencies: list) -> None:
         import shutil
         import venv
@@ -479,9 +512,16 @@ class PythonEngine(LanguageEngine):
         all_deps = list(dependencies) + ["pytest", "pytest-cov"]
         log.debug("Installing %d Python package(s) into venv...", len(all_deps))
         py = self._venv_python()
+        self._inherit_parent_site_packages(venv_dir)
         for dep in all_deps:
             dep_name = dep
             if not dep_name:
+                continue
+            # A dependency the venv can already import (inherited from the running
+            # interpreter or the system) needs no network round trip; sandboxes
+            # without network validate offline as long as the deps are present.
+            if self._importable(py, dep_name):
+                log.debug("Dependency '%s' already importable - skipping install.", dep_name)
                 continue
             # Normalise: strip version specifiers to get the base package name
             base_name = dep_name.split("[")[0].split("==")[0].split(">=")[0].split("<=")[0].split("!=")[0].strip().lower()

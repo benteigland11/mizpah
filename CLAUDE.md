@@ -25,7 +25,12 @@ Brief ──► Unknown ──► Route ──► Procedure ──► Probe+run 
 - **Unknowns** are the error signal `r − y`, made discrete and nameable. The controller
   mints them; each must cite a brief need or deliverable id, or it is refused.
 - **Route** (Terra) is the only interface between controller and worker. A task carries
-  the unknown it resolves and a bucket (low 3 / med 8 / high 21); nothing about method.
+  the unknowns it resolves and a bucket; nothing about method. A bucket is the *mode* of
+  work, priced in points: **low** (3) implement — path known, no search space; **medium**
+  (8) validate — a couple of options considered, then conclude; **high** (21) explore —
+  parallel exploration of several options. The numbers mean nothing without the mode; the
+  controller buckets by how much is unknown about the method, the worker reads it as how
+  wide to look.
 - **Procedure** (Playbook) is the method. The worker's first act on any task is
   `playbook search`, then `start` — one step at a time, never the whole procedure.
 - **Widget** (Cartograph) is the instrument a probe calls; a widget is never itself a

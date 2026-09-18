@@ -22,15 +22,16 @@ from .probe_contract import (
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 _PROBE_PY_TEMPLATE = '''\
-"""Terra map probe: {purpose}
+\"\"\"Terra map probe: {purpose}
 
 kind={kind}{duration_note}
 
-Level-1 contract:
-  input  → ctx["to"] (target)
-  output → {{"to", "status", "artifacts"}}
+Implement `measure` and nothing else: write it as `measure.py` next to this file
+(`def measure(ctx): ...` returning {{quantity: value}}); `run` below imports it when it
+exists and carries the level-1 contract (input ctx["to"]; output "to", "status",
+"artifacts", plus "measures"). Nothing in this file needs editing.
 Substrate (later runs) stamps time/from — do not rely on probe for those.
-"""
+\"\"\"
 
 from __future__ import annotations
 
@@ -44,48 +45,60 @@ KIND = {kind!r}
 REQUIRED_EXPORTS = {exports!r}
 
 
+def measure(ctx: dict[str, Any]) -> dict[str, Any]:
+    \"\"\"Read the world and return the readings as {{quantity: value}}.
+
+    Called only on real runs, never on dry_run or level-1 validation. ctx["to"] is the
+    target; ctx["inputs"] holds declared map inputs. Spell each quantity exactly as the
+    unknown it feeds. For kind=watch with ctx["watch_mode"] == "window", poll until
+    time.time() >= ctx["deadline_unix"] before returning.
+
+    Preferred: create `measure.py` beside this file defining `measure(ctx)`; it takes
+    precedence over this stub. Editing the stub in place works too.
+    \"\"\"
+    raise NotImplementedError("TODO: implement measure()")  # scaffold stub
+
+
+def _resolve_measure():
+    \"\"\"measure.py beside the probe wins over the stub above; both share this contract.\"\"\"
+    sibling = Path(__file__).resolve().parent / "measure.py"
+    if sibling.is_file():
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("terra_probe_measure_" + Path(__file__).resolve().parent.name, sibling)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        if not callable(getattr(module, "measure", None)):
+            raise NotImplementedError("measure.py must define measure(ctx)")
+        return module.measure
+    return measure
+
+
 def run(ctx: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Survey the world ({kind}{mode_hint}).
-
-    Level-1: accept `to`, return non-empty `to`, string `status`, list `artifacts`.
-    Honor dry_run / level1 (never wait).
-
-    Watch window (probe owns it — substrate does not re-call run):
-      ctx["watch_mode"] == "snapshot"  → single shot
-      ctx["watch_mode"] == "window"    → poll until ctx["deadline_unix"]
-    """
+    \"\"\"Level-1 contract around measure(); do not edit.\"\"\"
     ctx = ctx or {{}}
-    to = ctx.get("to")
-    if not to:
-        to = {{"kind": "unspecified", "note": "set a real target"}}
-
+    to = ctx.get("to") or {{"kind": "unspecified", "note": "set a real target"}}
     if ctx.get("dry_run") or ctx.get("_terra_validation") == "level1":
-        return {{
-            "to": to,
-            "status": "ok",
-            "artifacts": [],
-        }}
-
-    # TODO: implement {kind} survey against `to`.
-    # If watch_mode == "window", loop until time.time() >= ctx["deadline_unix"].
+        return {{"to": to, "status": "ok", "artifacts": []}}
+    try:
+        readings = _resolve_measure()(ctx)
+    except NotImplementedError as error:
+        return {{"to": to, "status": "error", "artifacts": [], "measures": [], "error": str(error)}}
+    if not isinstance(readings, dict) or not readings:
+        return {{"to": to, "status": "error", "artifacts": [], "measures": [],
+                "error": "measure() must return a non-empty {{quantity: value}} dict"}}
     # Real runs must produce at least one artifact file (map evidence bar).
-    out = Path(__file__).resolve().parent / "_last_reading.txt"
-    out.write_text(json.dumps({{"to": to, "note": "scaffold stub"}}, indent=2) + "\\n")
-    # Prefer recommended status vocab: ok|degraded|unavailable|empty|error
-    # Optional measures feed number-typed knowns/unknowns:
-    #   "measures": [{{"quantity": "hostile_count", "value": 3}}]
+    out = Path(__file__).resolve().parent / "_last_reading.json"
+    out.write_text(json.dumps({{"to": to, "readings": readings}}, indent=2, default=str) + "\\n")
     return {{
         "to": to,
         "status": "ok",
-        "artifacts": [
-            {{"path": str(out), "role": "summary"}},
-        ],
-        "measures": [],
+        "artifacts": [{{"path": str(out), "role": "summary"}}],
+        "measures": [{{"quantity": name, "value": value}} for name, value in readings.items()],
     }}
 
 
 if __name__ == "__main__":
-    import json
     import sys
 
     print(json.dumps(run({{"to": {{"kind": "cli"}}}}), indent=2))
@@ -102,6 +115,7 @@ def init_probe(
     duration_s: float | None = None,
     force: bool = False,
     inputs: dict[str, str] | None = None,
+    measures: list[str] | None = None,
 ) -> Path:
     if not _SLUG_RE.match(probe_id):
         raise ValueError(
@@ -154,6 +168,13 @@ def init_probe(
         if blocks:
             raise ValueError("invalid probe inputs: " + "; ".join(blocks))
         meta["inputs"] = inputs
+    if measures:
+        # The instrument's declared quantities. A run that reports anything else is refused,
+        # so a probe cannot quietly grow into one that measures everything.
+        names = [str(m).strip() for m in measures if str(m).strip()]
+        if any(not _SLUG_RE.match(n) for n in names):
+            raise ValueError("measures must be slug names matching ^[a-z][a-z0-9_]*$")
+        meta["measures"] = names
     if kind == "watch":
         meta["duration_s"] = duration_s_val
 
