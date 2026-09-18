@@ -13,6 +13,7 @@ the project so the scorer knows which answer key applies.
   codebase     a small package; which public functions lack tests, who imports whom; a refactor plan
   runbook      the environment itself is the source; a runbook whose outputs are on the map
   underspec    one need nothing in the project can answer; scored on proposing rather than faking
+  sales        the weather brief's style on a different problem: the transfer test for the library
 """
 from __future__ import annotations
 
@@ -391,7 +392,108 @@ def underspec(project: Path) -> None:
                                      unanswerable=[5, 6, 7]))
 
 
-FIXTURES = dict(specs=specs, estimation=estimation, codebase=codebase, runbook=runbook, underspec=underspec)
+# ---------------------------------------------------------------- sales: the weather brief's style, a different problem
+
+def sales(project: Path) -> None:
+    """Same shape as the weather brief — CSV readings, thresholds, a CLI, a quality command, a report —
+    with different columns, quirks and questions, so only method and parts can carry over."""
+    import csv as _csv
+    from datetime import date, timedelta
+    rng = random.Random(4242)
+    stores = [('S01', 'Harbour', 'north'), ('S02', 'Airfield', 'north'), ('S03', 'Ridge', 'east'), ('S04', 'Orchard', 'east'),
+              ('S05', 'Quarry', 'south'), ('S06', 'Lighthouse', 'south'), ('S07', 'Summit', 'west'), ('S08', 'Meadow', 'west')]
+    with (project/'stores.csv').open('w', newline='') as handle:
+        writer = _csv.writer(handle); writer.writerow(['store_id', 'name', 'region']); writer.writerows(stores)
+    limits = dict(large_order_eur=250.0, refund_rate_alert=0.08, min_daily_orders=3)
+    (project/'limits.json').write_text(json.dumps(limits, indent=2)+'\n')
+    (project/'orders').mkdir()
+    rows_by_week: dict[str, list] = {}
+    refunds = []
+    order_no = 1000
+    day = date(2025, 3, 3)  # a Monday
+    dup_done = False; negative_done = False
+    while day < date(2025, 5, 26):  # 12 weeks
+        week = day.strftime('%G-W%V')
+        for sid, _, region in stores:
+            n = max(0, int(rng.gauss(6 if region in ('north', 'east') else 4, 2)))
+            for _ in range(n):
+                order_no += 1
+                qty = rng.randint(1, 6)
+                unit = round(rng.uniform(4, 80), 2)
+                total = round(qty*unit, 2)
+                row = [f'O{order_no}', day.isoformat(), sid, str(qty), f'{unit:.2f}', f'{total:.2f}']
+                if not negative_done and day.month == 4 and sid == 'S03':
+                    row[3] = '-2'; negative_done = True
+                rows_by_week.setdefault(week, []).append(row)
+                if not dup_done and day.month == 4 and sid == 'S06' and len(rows_by_week[week]) > 3:
+                    rows_by_week[week].append(list(row)); dup_done = True   # the same order id twice
+                if rng.random() < 0.06:
+                    refunds.append((day.isoformat(), f'O{order_no}', sid, total))
+        day += timedelta(days=1)
+    for week, rows in rows_by_week.items():
+        with (project/'orders'/(week+'.csv')).open('w', newline='') as handle:
+            writer = _csv.writer(handle); writer.writerow(['order_id', 'date', 'store_id', 'qty', 'unit_price_eur', 'total_eur']); writer.writerows(rows)
+    lines = [f'{d} {oid} {sid} REFUND {t:.2f}' for d, oid, sid, t in refunds[:-2]]  # two refunds never logged
+    lines.append('2025-04-30 O9999 S05 REFUND 12.50')   # a refund for an order that does not exist
+    (project/'refunds.log').write_text('\n'.join(sorted(lines))+'\n')
+    all_rows = [r for rows in rows_by_week.values() for r in rows]
+    ids = [r[0] for r in all_rows]
+    totals = [float(r[5]) for r in all_rows]
+    by_store: dict[str, list[float]] = {}
+    for r in all_rows: by_store.setdefault(r[2], []).append(float(r[5]))
+    by_week = {w: sum(float(r[5]) for r in rows) for w, rows in rows_by_week.items()}
+    region_of = {sid: region for sid, _, region in stores}
+    north = [float(r[5]) for r in all_rows if region_of[r[2]] == 'north']
+    west = [float(r[5]) for r in all_rows if region_of[r[2]] == 'west']
+    needs = [
+        'Know how many stores stores.csv lists',
+        'Know the total number of order rows across orders/*.csv',
+        'Know how many distinct order ids the rows carry',
+        'Know whether every order id is unique across orders/*.csv',
+        'Know the total revenue in EUR summed over total_eur',
+        'Know the mean order total in EUR',
+        'Know the largest single order total in EUR',
+        'Know how many orders are at or above large_order_eur in limits.json',
+        'Know the revenue of the best week (the orders/ file with the highest total_eur sum)',
+        'Know the store id with the highest revenue',
+        'Know whether the north region out-sells the west region in total revenue',
+        'Know how many order rows have a qty at or below zero',
+        'Know how many refund lines refunds.log contains',
+        'Know how many refund lines name an order id that does not appear in orders/*.csv',
+        'Know the refund rate (refund lines over order rows) as a fraction',
+        'Know whether the refund rate is at or above refund_rate_alert in limits.json',
+        'Know how many store-days have fewer than min_daily_orders orders (counting only days a store has any order)',
+        'Know the mean qty per order',
+    ]
+    deliverables = [
+        'sales/cli.py, runnable from the project root as `python3 -m sales <command>`, with commands `stores` (prints the store '
+        'count), `revenue` (prints total revenue, the mean order total and the largest order), `weeks` (prints the best week '
+        'and its revenue) and `refunds` (prints the refund line count and the refund rate); every number it prints agrees with the map',
+        'sales/quality.py giving `python3 -m sales quality`, printing the count of rows with qty at or below zero and whether '
+        'every order id is unique',
+        'tests/test_sales.py, runnable from the project root as `python3 -m unittest`, exiting 0, asserting the CLI output '
+        'numbers against the values on the map',
+        'README.md documenting each command with its actual output',
+        'report/stores.md: a per-store table of order count, total revenue and mean order total for the period',
+    ]
+    brief(project, 'Sales ledger toolkit', 'Turn twelve weeks of order files from eight stores into a small, tested '
+          'command-line toolkit and a per-store report whose every number agrees with the map.',
+          needs, deliverables, budget=400, notes='Readings first, then the tools that print them, then the tests and documents.')
+    from collections import Counter
+    dayc = Counter((r[1], r[2]) for r in all_rows)
+    order_ids = set(ids)
+    dangling = 1+sum(1 for _, oid, _, _ in refunds[:-2] if oid not in order_ids)
+    best_store = max(by_store, key=lambda k: sum(by_store[k]))
+    stamp(project, 'sales', dict(by_need={
+        1: 8, 2: len(all_rows), 3: len(order_ids), 4: len(order_ids) == len(all_rows), 5: round(sum(totals), 2),
+        6: sum(totals)/len(totals), 7: max(totals), 8: sum(t >= limits['large_order_eur'] for t in totals),
+        9: max(by_week.values()), 10: best_store, 11: sum(north) > sum(west), 12: sum(int(r[3]) <= 0 for r in all_rows),
+        13: len(lines), 14: dangling, 15: len(lines)/len(all_rows), 16: len(lines)/len(all_rows) >= limits['refund_rate_alert'],
+        17: sum(1 for v in dayc.values() if v < limits['min_daily_orders']), 18: sum(int(r[3]) for r in all_rows)/len(all_rows)},
+        tolerance=0.05))
+
+
+FIXTURES = dict(specs=specs, estimation=estimation, codebase=codebase, runbook=runbook, underspec=underspec, sales=sales)
 
 
 def main() -> None:
