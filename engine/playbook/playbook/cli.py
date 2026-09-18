@@ -74,6 +74,11 @@ def _build_parser() -> argparse.ArgumentParser:
     start.add_argument("--step", type=int, default=None, help="1-based step number to start at (the reply's `then` gives the next one)")
     start.set_defaults(handler=_cmd_start)
 
+    open_ = sub.add_parser("open", help="write the whole procedure to .playbook/open/<id>.md in the working tree; read it once, follow it")
+    open_.add_argument("id")
+    open_.add_argument("--dir", default=".", help="working tree to write under (default: .)")
+    open_.set_defaults(handler=_cmd_open)
+
     validate = sub.add_parser("validate", help="validate a procedure in the global store")
     validate.add_argument("id")
     validate.set_defaults(handler=_cmd_validate)
@@ -136,6 +141,10 @@ def _cmd_load(args: argparse.Namespace) -> dict[str, Any]:
     if args.titles and args.full:
         raise ValueError("pass --titles or --full, not both")
     return ops.load_procedure(args.id, full=not args.titles)
+
+
+def _cmd_open(args: argparse.Namespace) -> dict[str, Any]:
+    return ops.open_procedure(args.id, args.dir)
 
 
 def _cmd_start(args: argparse.Namespace) -> dict[str, Any]:

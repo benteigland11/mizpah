@@ -1223,7 +1223,7 @@ class FocusedSession:
                 raise RuntimeError('Session changed; reopen before continuing')
             if self.state['phase'] != 'complete':
                 raise ValueError('Only a completed session can be continued')
-            self.session.append_guidance(message)
+            self.session.append_guidance(message, standing=True)   # the current objective; survives a handoff
             self.state.update(phase='worker', proposed_final=None, final_text='')
             self._event('continued', dict(window=self.session.window_index, characters=len(message)))
             self._save()

@@ -293,6 +293,7 @@ class PersistentSession:
         self.messages = deepcopy(base_messages)
         self.argument_archives: dict[str, str] = {}
         self.recent_results: list[dict[str, Any]] = []
+        self.standing: str = ''
         self.pending_tools: list[str] = []
         self.seen_tool_ids: list[str] = []
         self.window_index = 0
@@ -409,18 +410,26 @@ class PersistentSession:
                        continuation_boundary=self.continuation_boundary())
         if source_archive:
             resumed['source_archive'] = source_archive
-        self.messages = deepcopy(self.base_messages)+[dict(role='user', content=self.policy.resume_prefix+'\n'+json.dumps(resumed, ensure_ascii=False))]
+        fresh = deepcopy(self.base_messages)
+        if self.standing:
+            # The host's current instruction outlives the window it was given in: a worker told "gate green,
+            # record the method" must not wake up in a window whose assignment still says "take the readings".
+            fresh.append(dict(role='user', content='The host\'s current instruction, given after your earlier completion '
+                                                   '(it supersedes the assignment\'s "done" condition):\n'+self.standing))
+        self.messages = fresh+[dict(role='user', content=self.policy.resume_prefix+'\n'+json.dumps(resumed, ensure_ascii=False))]
         self.window_index += 1
         return dict(window_index=self.window_index, old_messages=old, new_messages=deepcopy(self.messages), handoff=handoff)
 
-    def append_guidance(self, content: str) -> None:
+    def append_guidance(self, content: str, *, standing: bool = False) -> None:
         if self.pending_tools or not content.strip():
             raise ValueError('Guidance requires a completed tool boundary and nonempty text')
         self.messages.append(dict(role='user', content=content))
+        if standing:
+            self.standing = content   # the latest host continuation is the current objective across windows
 
     def export_state(self) -> dict[str, Any]:
         return deepcopy(dict(base_messages=self.base_messages, tools=self.tools, generation=self.generation,
-            policy=asdict(self.policy), messages=self.messages, recent_results=self.recent_results,
+            policy=asdict(self.policy), messages=self.messages, recent_results=self.recent_results, standing=self.standing,
             pending_tools=self.pending_tools, seen_tool_ids=self.seen_tool_ids, window_index=self.window_index,
             argument_archives=self.argument_archives))
 
@@ -430,6 +439,7 @@ class PersistentSession:
         for name in ('messages', 'recent_results', 'pending_tools', 'seen_tool_ids', 'window_index'):
             setattr(result, name, deepcopy(state[name]))
         result.argument_archives = deepcopy(state.get('argument_archives', {}))
+        result.standing = str(state.get('standing') or '')
         if len(set(result.seen_tool_ids)) != len(result.seen_tool_ids) or any(i not in result.seen_tool_ids for i in result.pending_tools) or result.window_index < 0:
             raise ValueError('Inconsistent serialized tool or window identities')
         return result

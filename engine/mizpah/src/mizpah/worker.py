@@ -41,9 +41,10 @@ BOOTSTRAP_PROCEDURES = ('mizpah-resolve-unknown',)
 BUCKET_MODES = {'low': 'implement, the path is known', 'medium': 'validate, weigh a couple of options then conclude',
                 'high': 'explore, several options in parallel before choosing'}
 # The forced bootstrap walk (scaffolding); with it off, the worker is told where method and parts live and left to it.
-BOOTSTRAP_WALK = ('Your first act on every task is `playbook start mizpah-resolve-unknown`. It is the method, one step at a time: '
-                  'each reply ends with `then`, the exact command for the next step — copy it when the step is done. Do not '
-                  'invent step titles. It tells you where domain procedures and Cartograph parts come in.')
+BOOTSTRAP_WALK = ('Your first act on every task is `playbook open mizpah-resolve-unknown`: it writes the whole method to '
+                  '`.playbook/open/mizpah-resolve-unknown.md`. Read that file once and follow it in order; it tells you '
+                  'where domain procedures and Cartograph parts come in. Open a domain procedure the same way; '
+                  '`playbook start <id> --step N` re-reads one step if you need it.')
 FREE_METHOD = ('Method lives in the playbook (`playbook search <words>`, then `playbook start <id>` walks a procedure one step '
                'at a time; `mizpah-resolve-unknown` is the generic one) and parts live in Cartograph (`cartograph search '
                '<words>`; a widget you build is checked in after green). Look before you build; how you order the work is yours.')
@@ -814,12 +815,18 @@ COMMAND_TOOLS: tuple[dict[str, Any], ...] = (
          command='terra route block {task} --reason {reason}',
          parameters=dict(type='object', properties=dict(task=string('task id'), reason=string('what you needed and could not read')),
                          required=['task', 'reason'])),
-    dict(name='playbook_start', description='Walk a procedure one step at a time; each reply ends with `then`, the '
-         'exact command for the next step. Omit step for the first step.',
-         command='playbook start {id} {step}',
-         parameters=dict(type='object', properties=dict(id=string('procedure id from search'),
-                                                        step=dict(type='integer', description='step number to show', flag='--step')),
-                         required=['id'])),
+    dict(name='playbook_open', description='Write a whole procedure to .playbook/open/<id>.md in the workspace; read '
+         'that file once and follow it in order. Use for the bootstrap and for any domain procedure a search finds.',
+         command='playbook open {id}',
+         parameters=dict(type='object', properties=dict(id=string('procedure id from search')), required=['id'])),
+    dict(name='playbook_create', description='Create a new procedure (after the gate is green, when your method was '
+         'specific to this kind of source or artifact and no existing procedure captures it). Then add its steps one '
+         'at a time with playbook_add_step, each one action with the exact commands, and `playbook validate <id>`.',
+         command='playbook create {id} --title {title} --description {description} {tags}',
+         parameters=dict(type='object', properties=dict(id=string('kebab-case procedure id'), title=string('short title'),
+                                                        description=string('when to use it and what it produces, one or two sentences'),
+                                                        tags=string('comma-separated tags, 3-5', flag='--tags')),
+                         required=['id', 'title', 'description'])),
     dict(name='playbook_add_step', description='Append one step to a procedure you created or followed: a short title '
          'and one imperative `do` with the exact commands.',
          command='playbook add-step {id} --title {title} --do {do}',

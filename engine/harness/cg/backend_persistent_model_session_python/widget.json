@@ -2,7 +2,7 @@
   "meta": {
     "id": "backend-persistent-model-session-python",
     "name": "Persistent Model Session",
-    "version": "1.7.0",
+    "version": "1.8.0",
     "domain": "backend",
     "tags": [
       "model-session",

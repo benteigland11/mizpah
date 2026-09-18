@@ -399,3 +399,31 @@ def write_document(path: str | Path, document: Mapping[str, Any]) -> None:
     tmp = target.with_name(f".{target.name}.tmp")
     tmp.write_text(payload, encoding="utf-8")
     os.replace(tmp, target)
+
+
+OPEN_DIR = ".playbook/open"
+
+
+def open_procedure(procedure_id: str, target_dir: str | Path = ".") -> dict[str, Any]:
+    """Materialise a whole procedure as a markdown file in the working tree, to be read once and followed.
+
+    `start --step` drips one step per call, which a small-window model needed; a capable model spends a
+    turn per step for nothing. The file carries every step with its exact commands and a checkbox.
+    """
+    document = read_document(store.procedure_path(procedure_id))
+    _require_valid(document, procedure_id)
+    steps = [s for s in (document.get("steps") or []) if isinstance(s, dict)]
+    lines = [f"# {document.get('title') or procedure_id}", "", f"procedure: `{procedure_id}`", ""]
+    if document.get("description"):
+        lines += [str(document["description"]).strip(), ""]
+    if document.get("tags"):
+        lines += ["tags: " + ", ".join(str(t) for t in document["tags"]), ""]
+    lines += ["Follow the steps in order; tick a box (`[x]`) when a step is done. Improve the procedure afterwards "
+              "with `playbook edit-step` / `add-step` where a step fell short.", ""]
+    for i, step in enumerate(steps, 1):
+        lines += [f"- [ ] **{i}. {step.get('title', '')}**", "", f"  {str(step.get('do', '')).strip()}", ""]
+    out_dir = Path(target_dir) / OPEN_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{procedure_id}.md"
+    path.write_text("\n".join(lines))
+    return {"ok": True, "id": procedure_id, "title": document.get("title"), "steps": len(steps), "path": str(path)}

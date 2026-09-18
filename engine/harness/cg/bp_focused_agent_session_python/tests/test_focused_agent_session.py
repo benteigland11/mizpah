@@ -1418,3 +1418,21 @@ def test_command_tools_render_to_shell_and_run_like_bash(tmp_path):
     assert tools[-1]['function']['name'] == 'cartograph_search' and tools[-1]['function']['parameters']['additionalProperties'] is False
     with pytest.raises(ValueError, match='distinct names'):
         replace(settings, command_tools=(spec, dict(spec, name='bash')))
+
+
+def test_a_continuation_survives_the_next_handoff(tmp_path):
+    """The host's text after a completion is the current objective; a fresh window must see it, not only the assignment."""
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, total=2, enabled=False, rollover=False)
+    item = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, controller=controller)
+    assert item.run()['status'] == 'complete'
+    wt.total = 6
+    item.continue_with('Gate green: record the method as a procedure; nothing else is owed.')
+    with item._locked():
+        item.state['rollover_requested'] = dict(reason='test', name='bash', count=1, window=0)
+        item._save()
+    reopened = FocusedSession.open(tmp_path/'session', worker=worker, shell=shell, controller=controller)
+    reopened.run(maximum_worker_turns=3)
+    fresh = next(r['messages'] for r in wt.requests if any('current instruction' in (m.get('content') or '') for m in r['messages'] if m.get('role') == 'user'))
+    standing = next(m for m in fresh if m.get('role') == 'user' and 'current instruction' in m['content'])
+    assert 'Gate green: record the method' in standing['content']
+    assert fresh.index(standing) < max(i for i, m in enumerate(fresh) if m.get('role') == 'user')  # before the resume memory
