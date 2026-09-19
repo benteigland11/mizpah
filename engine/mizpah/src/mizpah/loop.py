@@ -236,8 +236,6 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                             handle.write(json.dumps(dict(at=time.time(), where='settle:'+task['id'], error=str(error)[:500]))+'\n')
                     if settled:
                         record.setdefault('settled', []).append(settled)
-                # A phase whose entries are all met closes here, so the eval that follows sees the next phase.
-                close_phase(config, project, record, log)
                 # The controller works between tasks: it sees the new known as state and may
                 # mint the next unknowns while the route still has work. Its writes are safe
                 # against the worker's entitlement writeback.
@@ -258,7 +256,9 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
             minted = record['eval']['applied']
             if not any(minted[k] for k in ('unknowns', 'tasks', 'rebucket')) and not pickable(config, project, root):
                 if close_phase(config, project, record, log):
-                    # The eval judged the phase met and the map agrees: the next cycle routes the next phase.
+                    # The eval looked and minted nothing (a suite resolved false would have drawn a repair task) and
+                    # the map says every entry is resolved: the phase is met and the next cycle routes the next one.
+                    # Closing before the eval let improve's change phase shut on a failing suite (2026-09-19).
                     stalled_evals = 0
                     continue
                 if blocked(config, project):
