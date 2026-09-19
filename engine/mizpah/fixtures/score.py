@@ -128,16 +128,36 @@ def meets(found, target) -> bool:
     return False
 
 
+def resolve_target(target, by_need_value: dict) -> object:
+    """A target may name another need's reading: '<=0.75*need:5', '>=need:7'."""
+    if not isinstance(target, str) or 'need:' not in target:
+        return target
+    match = re.fullmatch(r'\s*(>=|<=|>|<)\s*(?:([0-9.]+)\*)?need:(\d+)\s*', target)
+    if not match:
+        return target
+    op, factor, need = match.group(1), match.group(2), int(match.group(3))
+    base = by_need_value.get(need)
+    if base is None or isinstance(base, (bool, str)):
+        return None
+    return op+str(float(base)*(float(factor) if factor else 1.0))
+
+
 def target_rows(project: Path, key: dict) -> list[dict]:
     """A known citing need N is judged against the target for N: a design property met or missed, not a truth."""
     targets = {int(k): v for k, v in (key.get('targets') or {}).items()}
     rows = []
+    known_by_need: dict[int, object] = {}
+    for kid, rec in knowns(project).items():
+        need = cited_need(project, kid)
+        if need is not None and not re.search(r'(^|_)after(_|$)', kid):
+            known_by_need.setdefault(need, rec['value'])
     for kid, rec in knowns(project).items():
         need = cited_need(project, kid)
         # A design brief measures before and after the change; the target is for after.
         if need in targets and not re.search(r'(^|_)before(_|$)', kid):
-            rows.append(dict(kind='target', id=kid, need=need, target=targets[need], found=rec['value'],
-                             ok=meets(rec['value'], targets[need])))
+            target = resolve_target(targets[need], known_by_need)
+            rows.append(dict(kind='target', id=kid, need=need, target=target if target is not None else targets[need],
+                             found=rec['value'], ok=target is not None and meets(rec['value'], target)))
     return rows
 
 
