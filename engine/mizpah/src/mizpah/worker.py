@@ -220,7 +220,9 @@ def render_assignment(task: dict[str, Any], unknowns: list[dict[str, Any]], map_
                      'several terms): an installed widget that does the job is the instrument — install it at the path the '
                      'unknown names and the unknown reads true when its validate passes. Only when nothing fits, create it, '
                      'give it tests, and it is checked in after green. The instrument is never itself a finding: the reading '
-                     'is that it exists at its path and validates.')
+                     'is that it exists at its path and validates. An enabler is packed as a small repo from its path: leave '
+                     'a README there that is its interface (what to call, with what, what comes back) — the next project '
+                     'installs the directory and reads only that.')
     lines.append('Your map is `'+map_id+'` (TERRA_MAP is set): probes are shared, but the unknowns, your runs and '
                  'the knowns you graduate live there.')
     ids = [u['id'] for u in unknowns]

@@ -242,6 +242,7 @@ def write_report(config: dict[str, Any], project: Path, root: Path, cycles: list
         lines += ['', '## Enablers']
         for e in enabler_rows:
             lines.append('- `'+str(e.get('enabler'))+'` '+str(e.get('status'))+(' → widget '+str(e['widget']) if e.get('widget') else '')
+                         +(' (graduated by '+str(e['by'])+')' if e.get('by') else '')
                          +(' (error: '+str(e['error'])[:200]+')' if e.get('error') else ''))
     score = _score(project)
     if score:

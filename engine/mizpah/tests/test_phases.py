@@ -236,3 +236,38 @@ def test_registry_records_a_graduation_and_shows_it_to_the_next_brief(instrument
     terra(p, 'route', 'init')
     text = controller.render_observation(controller.observe(config, p), 'route')
     assert 'registry: page_readings Headless page readings — widget frontend-headless-page-cli-python, graduated by instrumented, used 1×' in text
+
+
+def test_a_graduated_enabler_is_packed_and_installed_into_the_next_project(instrumented: Path, tmp_path: Path) -> None:
+    from mizpah import capabilities, loop
+    config = dict(CONFIG, mizpah=dict(CONFIG['mizpah'], capability_store=str(tmp_path/'registry2')))
+    tool = instrumented/'cg'/'frontend-headless-page-cli-python'
+    (tool/'src').mkdir(parents=True)
+    (tool/'README.md').write_text('# page reader\n\n`python src/page.py text <url>` prints the page text.\n')
+    (tool/'src'/'page.py').write_text('print("hi")\n')
+    (tool/'__pycache__').mkdir()
+    (tool/'__pycache__'/'x.pyc').write_bytes(b'')
+    outcome = loop.advance_enabler(config, instrumented, dict(enabler_id='page_readings'),
+                                  dict(widgets=dict(checked_in=['frontend-headless-page-cli-python'])), tmp_path/'errors.jsonl')
+    assert outcome['status'] == 'graduated'
+    pack = Path(config['mizpah']['capability_store'])/'page_readings'/'pack'
+    assert (pack/'src'/'page.py').exists() and (pack/'README.md').exists() and not (pack/'__pycache__').exists()
+    man = json.loads((pack/'enabler.json').read_text())
+    assert man['id'] == 'page_readings' and man['interface'][0] == '# page reader' and 'src/page.py' in man['files']
+    # The next project declares the same enabler: the loop installs the pack and it is graduated before any route step.
+    p = tmp_path/'next2'
+    p.mkdir()
+    terra(p, 'init')
+    terra(p, 'brief', 'init', '--title', 'Next', '--mission', 'measure another page')
+    terra(p, 'brief', 'set', '--status', 'active', '--budget-points', '50', '--need', 'Know contrast (page_readings)',
+          '--enabler', 'page_readings:Headless page readings:cg/frontend-headless-page-cli-python')
+    terra(p, 'route', 'init')
+    installed = loop.install_registered_enablers(config, p, tmp_path/'errors.jsonl')
+    assert installed == [dict(enabler='page_readings', status='installed_from_registry', widget='frontend-headless-page-cli-python', by='instrumented')]
+    assert (p/'cg'/'frontend-headless-page-cli-python'/'src'/'page.py').read_text() == 'print("hi")\n'
+    brief = terra(p, 'brief', 'show')
+    assert brief['enablers'][0]['status'] == 'graduated'
+    assert capabilities.registered(config)[0]['uses'] == 2
+    # And the need that names it is mintable straight away.
+    observation = controller.observe(config, p)
+    assert '(waits for enabler' not in controller.render_observation(observation, 'route')

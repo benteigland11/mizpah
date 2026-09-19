@@ -94,6 +94,37 @@ def _loop_alive(root: Path) -> bool:
     return probe.returncode == 0
 
 
+def install_registered_enablers(config: dict[str, Any], project: Path, log: Path) -> list[dict[str, Any]]:
+    """A declared enabler the registry holds packed is installed at its path and ready before the first route step."""
+    outcomes = []
+    try:
+        brief = terra(config, project, 'brief', 'show')
+    except RuntimeError:
+        return outcomes
+    for enabler in brief.get('enablers') or []:
+        if not isinstance(enabler, dict) or str(enabler.get('status') or 'needed') in ('ready', 'graduated'):
+            continue
+        try:
+            doc = capabilities.install(config, project, enabler)
+        except (OSError, KeyError, ValueError) as error:
+            with log.open('a') as handle:
+                handle.write(json.dumps(dict(at=time.time(), where='enabler-install:'+str(enabler.get('id')), error=str(error)[:500]))+'\n')
+            continue
+        if doc is None:
+            continue
+        try:
+            args = ['brief', 'enabler', enabler['id'], 'graduated' if doc.get('graduates_to') else 'ready', '--path', str(enabler.get('path') or doc.get('path'))]
+            if doc.get('graduates_to'):
+                args += ['--graduates-to', str(doc['graduates_to'])]
+            terra(config, project, *args)
+        except RuntimeError as error:
+            with log.open('a') as handle:
+                handle.write(json.dumps(dict(at=time.time(), where='enabler-install:'+str(enabler.get('id')), error=str(error)[:500]))+'\n')
+            continue
+        outcomes.append(dict(enabler=enabler['id'], status='installed_from_registry', widget=doc.get('graduates_to'), by=doc.get('project')))
+    return outcomes
+
+
 def advance_enabler(config: dict[str, Any], project: Path, task: dict[str, Any], result: dict[str, Any], log: Path) -> dict[str, Any]:
     """A complete enabler task makes its enabler ready at its path; a widget harvested from the task graduates it."""
     eid = str(task['enabler_id'])
@@ -198,8 +229,11 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
         return deadline is not None and time.time() > deadline
 
     try:
+        installed = install_registered_enablers(config, project, log)
         for cycle in range(1, max_cycles+1):
             record = dict(cycle=cycle, tasks=[], evals=[], started_at=time.time())
+            if installed:
+                record['enablers'], installed = installed, []
             if not pickable(config, project, root):
                 record['route'] = failing_step(config, project, journal, 'route', log)
                 if record['route'].get('error'):
