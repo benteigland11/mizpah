@@ -74,8 +74,9 @@ def _build_parser() -> argparse.ArgumentParser:
     start.add_argument("--step", type=int, default=None, help="1-based step number to start at (the reply's `then` gives the next one)")
     start.set_defaults(handler=_cmd_start)
 
-    open_ = sub.add_parser("open", help="write the whole procedure to .playbook/open/<id>.md in the working tree; read it once, follow it")
+    open_ = sub.add_parser("open", help="write the whole procedure as a checklist to .playbook/open/<id>--<for>.md; read it once, follow it")
     open_.add_argument("id")
+    open_.add_argument("--for", dest="purpose", required=True, help="what this walk is for (an unknown, an artifact, a source); names the file")
     open_.add_argument("--dir", default=".", help="working tree to write under (default: .)")
     open_.set_defaults(handler=_cmd_open)
 
@@ -144,7 +145,7 @@ def _cmd_load(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _cmd_open(args: argparse.Namespace) -> dict[str, Any]:
-    return ops.open_procedure(args.id, args.dir)
+    return ops.open_procedure(args.id, args.purpose, args.dir)
 
 
 def _cmd_start(args: argparse.Namespace) -> dict[str, Any]:

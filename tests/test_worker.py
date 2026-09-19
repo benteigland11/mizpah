@@ -464,3 +464,16 @@ def test_a_task_this_agent_started_is_resumed_not_restarted(config: dict, projec
     (tmp_path/'tasks'/task['id']).mkdir(parents=True)
     (tmp_path/'tasks'/task['id']/'state.sqlite3').write_bytes(b'')
     assert [t['id'] for t in pickable(config, project, tmp_path)] == [task['id']]
+
+
+def test_open_checklists_hold_the_gate_until_every_step_is_ticked(tmp_path: Path):
+    from mizpah.worker import open_checklists
+    files = {'.playbook/open/mizpah-resolve-unknown--means.md': (
+        '# Resolve\n\n- [x] **1. Find a method**\n\n  do\n\n- [ ] **2. Find the parts**\n\n  do\n\n- [-] **3. Make a widget**\n\n  do\n').encode(),
+        '.playbook/open/csv-counting--rows.md': b'- [x] **1. Scaffold**\n\n- [x] **2. Run**\n',
+        '.playbook/playbook/procedures/csv-counting.json': b'{}'}
+    problems = open_checklists(snapshot_of(files))
+    assert problems == ['checklist .playbook/open/mizpah-resolve-unknown--means.md has 1 unticked step(s): 2. Find the parts'
+                        ' — tick each `[x]` (done) or `[-]` (not needed)']
+    files['.playbook/open/mizpah-resolve-unknown--means.md'] = files['.playbook/open/mizpah-resolve-unknown--means.md'].replace(b'- [ ]', b'- [x]')
+    assert open_checklists(snapshot_of(files)) == []

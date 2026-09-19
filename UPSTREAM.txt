@@ -76,7 +76,7 @@ diverged:
 - harness: bp-focused-agent-session gains SessionSettings.command_tools — typed aliases for CLI commands (schema +
   description the model sees every turn, rendered with shell quoting and run through the sandbox like bash);
   Mizpah exposes Cartograph search/inspect/install/create/validate/status this way; 0.21.0 → 0.22.0
-- playbook: `open <id>` writes the whole procedure to .playbook/open/<id>.md in the working tree (read once, follow;
+- playbook: `open <id> --for "<walk>"` writes the whole procedure as a checklist to .playbook/open/<id>--<walk>.md, one copy per walk (read once, follow, tick `[x]` done or `[-]` not needed; Mizpah gates on every opened checklist being fully ticked;
   `start --step` remains the one-step drip) — a capable model spent a turn per step for nothing
 - harness: persistent-model-session keeps the host's standing continuation and puts it in every rolled-over
   window ahead of the resume memory; bp-focused-agent-session marks continue_with text as standing. A fresh

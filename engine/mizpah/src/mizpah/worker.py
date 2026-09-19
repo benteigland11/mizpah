@@ -41,10 +41,10 @@ BOOTSTRAP_PROCEDURES = ('mizpah-resolve-unknown',)
 BUCKET_MODES = {'low': 'implement, the path is known', 'medium': 'validate, weigh a couple of options then conclude',
                 'high': 'explore, several options in parallel before choosing'}
 # The forced bootstrap walk (scaffolding); with it off, the worker is told where method and parts live and left to it.
-BOOTSTRAP_WALK = ('Your first act on every task is `playbook open mizpah-resolve-unknown`: it writes the whole method to '
-                  '`.playbook/open/mizpah-resolve-unknown.md`. Read that file once and follow it in order; it tells you '
-                  'where domain procedures and Cartograph parts come in. Open a domain procedure the same way; '
-                  '`playbook start <id> --step N` re-reads one step if you need it.')
+BOOTSTRAP_WALK = ('Your first act on every task is `playbook open mizpah-resolve-unknown --for "<the task>"`: it writes '
+                  'the whole method as a checklist under `.playbook/open/`. Read that file once and follow it in order, '
+                  'ticking steps off; it tells you where domain procedures and Cartograph parts come in. Open a domain '
+                  'procedure the same way, one copy per thing you walk it for.')
 FREE_METHOD = ('Method lives in the playbook (`playbook search <words>`, then `playbook start <id>` walks a procedure one step '
                'at a time; `mizpah-resolve-unknown` is the generic one) and parts live in Cartograph (`cartograph search '
                '<words>`; a widget you build is checked in after green). Look before you build; how you order the work is yours.')
@@ -505,6 +505,22 @@ def widget_problems(config: dict[str, Any], project: Path, root: Path) -> list[s
     return problems
 
 
+def open_checklists(snapshot: bytes) -> list[str]:
+    """Every procedure the worker opened is a commitment: each step ticked `[x]` (done) or `[-]` (not needed)
+    before the gate can be green. Checklists live under .playbook/open/ in the workspace, one per walk."""
+    problems: list[str] = []
+    for name, data in sorted(_members(snapshot).items()):
+        if not name.startswith(PLAYBOOK_PREFIX+'/open/') or not name.endswith('.md'):
+            continue
+        text = data.decode('utf-8', errors='replace')
+        open_steps = [ln.strip()[6:].strip('* ') for ln in text.splitlines() if ln.strip().startswith('- [ ]')]
+        if open_steps:
+            problems.append('checklist '+name+' has '+str(len(open_steps))+' unticked step(s): '+
+                            '; '.join(o[:60] for o in open_steps[:4])+(' …' if len(open_steps) > 4 else '')+
+                            ' — tick each `[x]` (done) or `[-]` (not needed)')
+    return problems
+
+
 def task_gate(config: dict[str, Any], project: Path, task: dict[str, Any], map_id: str,
               root: Path | None = None) -> dict[str, Any]:
     """Mechanical verdict: the route, the project map, Terra's gate, and every widget the task touched."""
@@ -815,10 +831,13 @@ COMMAND_TOOLS: tuple[dict[str, Any], ...] = (
          command='terra route block {task} --reason {reason}',
          parameters=dict(type='object', properties=dict(task=string('task id'), reason=string('what you needed and could not read')),
                          required=['task', 'reason'])),
-    dict(name='playbook_open', description='Write a whole procedure to .playbook/open/<id>.md in the workspace; read '
-         'that file once and follow it in order. Use for the bootstrap and for any domain procedure a search finds.',
-         command='playbook open {id}',
-         parameters=dict(type='object', properties=dict(id=string('procedure id from search')), required=['id'])),
+    dict(name='playbook_open', description='Write a whole procedure as a checklist to .playbook/open/<id>--<for>.md '
+         'in the workspace; read that file once, follow it in order, tick steps off. One copy per walk: say what '
+         'this walk is for. Use for the bootstrap and for any domain procedure a search finds.',
+         command='playbook open {id} --for {purpose}',
+         parameters=dict(type='object', properties=dict(id=string('procedure id from search'),
+                                                        purpose=string('what this walk is for: the unknown(s), artifact or source')),
+                         required=['id', 'purpose'])),
     dict(name='playbook_create', description='Create a new procedure (after the gate is green, when your method was '
          'specific to this kind of source or artifact and no existing procedure captures it). Then add its steps one '
          'at a time with playbook_add_step, each one action with the exact commands, and `playbook validate <id>`.',
@@ -948,6 +967,9 @@ def run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | N
             session.interject(effort_message(task, estimate, status['completed_worker_turns'], overruns))
             continue
         gate = task_gate(config, project, task, map_id, root)
+        unticked = open_checklists(session.workspace())
+        if unticked:
+            gate = dict(gate, ok=False, problems=gate['problems']+unticked)
         previous = rounds[-1].get('problems') if rounds else None
         # A red round that changed nothing counts against gate_rounds; a red round with fewer
         # problems is progress and costs nothing. The worker keeps deciding.
