@@ -463,6 +463,16 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
                             'names as a non-goal; a non-goal is respected, not delivered'); continue
         if creates and not source:
             source = creates
+        if project is not None and not source and not creates and cites.startswith('deliverable:') and item.get('type') == 'boolean':
+            # A boolean about a deliverable-named file that does not exist yet builds it (index_html_built with no
+            # `creates` was refused as a reading of a missing file, and its measurements ran unbuilt — docs_page2).
+            index = int(cites.split(':')[1])-1
+            deliverables = observation['brief'].get('deliverables') or []
+            text = deliverables[index] if 0 <= index < len(deliverables) else ''
+            for path in re.findall(r'[\w./-]+\.[A-Za-z0-9]+', text):
+                if path.lower() in claim.lower() and relative_path(path) and not source_exists(project, path):
+                    source = path
+                    break
         if project is not None and source and not creates and not source_exists(project, source) and cites.startswith('deliverable:') \
                 and relative_path(source) and item.get('type') == 'boolean':
             # An unknown about a deliverable names the file it is about; when that file does not exist yet, the

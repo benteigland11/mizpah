@@ -438,3 +438,16 @@ def test_a_task_is_released_once_per_evidence(project: Path) -> None:
     controller.record_release(project, 'ta', 'tb')
     accepted, refusals = controller.guard(dict(unblock=[dict(task='ta', after='tb')]), observation, project)
     assert not accepted['unblock'] and any('already released after tb' in r for r in refusals)
+
+
+def test_a_boolean_about_an_unbuilt_deliverable_file_builds_it(project: Path) -> None:
+    observation = controller.observe(CONFIG, project)
+    accepted, refusals = controller.guard(dict(unknowns=[
+        dict(id='survey_built', cites='deliverable:1', type='boolean', claim='report/survey.md is written with line_count stated',
+             evidence_needed='read it'),
+        dict(id='line_count', cites='need:1', type='number', claim='lines under src', evidence_needed='wc')],
+        tasks=[dict(id='count', unknowns=['line_count'], bucket='low', title='count'),
+               dict(id='build', unknowns=['survey_built'], bucket='low', title='build', deps=['count'])]), observation, project)
+    built = next(u for u in accepted['unknowns'] if u['id'] == 'survey_built')
+    assert built['creates'] == 'report/survey.md', (built, refusals)
+    assert [t['id'] for t in accepted['tasks']] == ['count', 'build'], refusals
