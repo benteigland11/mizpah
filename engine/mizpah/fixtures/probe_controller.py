@@ -128,7 +128,7 @@ def check(project: Path, root: Path) -> list[tuple[str, bool, str]]:
                              or enabler_tasks[0].get('created_at') == first_task.get('created_at'), first_task['id']))
             rows.append(('enabler '+eid+' reached ready or graduated', str(en.get('status')) in ('ready', 'graduated'), str(en.get('status'))))
     rows.append(('related briefs shown to the controller', bool(related), ', '.join(str(d.get('title')) for d in related)))
-    minted = [u['id'] for s in steps for u in ((s.get('applied') or {}).get('unknowns') or [])]
+    minted = [str(u) for s in steps for u in ((s.get('applied') or {}).get('unknowns') or [])]
     unknown_docs = {p.stem: json.loads(p.read_text()) for p in (project/'.terra'/'map'/'unknowns').glob('*.json')}
     deliverable_cited = [u for u, d in unknown_docs.items() if 'cites deliverable:' in str(d.get('notes') or '')]
     library_words = ('contrast', 'line_length', 'text_size', 'overflow')
