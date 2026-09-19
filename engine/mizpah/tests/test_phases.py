@@ -416,3 +416,22 @@ def test_a_reading_of_an_unbuilt_deliverable_path_waits_for_a_builder(project: P
     accepted, refusals = controller.guard(decision, observation, project)
     by_id = {t['id']: t for t in accepted['tasks']}
     assert by_id['count']['deps'] == ['write'], (accepted['tasks'], refusals)
+
+
+def test_a_task_is_released_once_per_evidence(project: Path) -> None:
+    observation = controller.observe(CONFIG, project)
+    accepted, _ = controller.guard(dict(unknowns=[
+        dict(id='a', cites='need:1', type='number', claim='a', evidence_needed='count'),
+        dict(id='b', cites='need:2', type='number', claim='b', evidence_needed='count')],
+        tasks=[dict(id='ta', unknowns=['a'], bucket='low', title='a'), dict(id='tb', unknowns=['b'], bucket='low', title='b')]),
+        observation, project)
+    controller.apply(CONFIG, project, accepted)
+    terra(project, 'route', 'cancel', 'tb', '--reason', 'done for the test')
+    terra(project, 'route', 'block', 'ta', '--reason', 'the file is absent')
+    observation = controller.observe(CONFIG, project)
+    observation['tasks'] = [dict(t, status='done') if t['id'] == 'tb' else t for t in observation['tasks']]
+    accepted, refusals = controller.guard(dict(unblock=[dict(task='ta', after='tb')]), observation, project)
+    assert accepted['unblock'] == [dict(task='ta', after='tb')], refusals
+    controller.record_release(project, 'ta', 'tb')
+    accepted, refusals = controller.guard(dict(unblock=[dict(task='ta', after='tb')]), observation, project)
+    assert not accepted['unblock'] and any('already released after tb' in r for r in refusals)

@@ -671,6 +671,11 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         if waited is None or waited['status'] != 'done':
             # A release needs a reason the map can check: the task whose completion changed the source.
             refusals.append('unblock '+tid+': "after" must name a task that has since completed (the one that built what was missing)'); continue
+        # Released once on this evidence and blocked again: the reason stands. Ten releases of the same task after
+        # the same done task ran a worker in a circle (logo_mark, 2026-09-19).
+        if (tid, after) in released_before(project):
+            refusals.append('unblock '+tid+': it was already released after '+after+' and blocked again, so that reason stands — '
+                            'mint the readings its block names as unknowns, propose the change, or leave it'); continue
         unblock.append(dict(task=tid, after=after))
     done = decision.get('done')
     done = bool(done) if isinstance(done, bool) else None
@@ -748,8 +753,26 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
         done['rebucket'].append(r['task']+'→'+r['bucket'])
     for r in accepted.get('unblock') or []:
         terra(config, project, 'route', 'unblock', r['task'])
+        record_release(project, r['task'], r['after'])
         done.setdefault('unblock', []).append(r['task']+' after '+r['after'])
     return done
+
+
+def released_before(project: Path | None) -> set[tuple[str, str]]:
+    """(task, after) pairs the loop has already released, from the project's own record."""
+    if project is None:
+        return set()
+    path = project/'.terra'/'.mizpah-unblocks.json'
+    try:
+        return {tuple(p) for p in json.loads(path.read_text())}
+    except (OSError, ValueError):
+        return set()
+
+
+def record_release(project: Path, task: str, after: str) -> None:
+    path = project/'.terra'/'.mizpah-unblocks.json'
+    pairs = released_before(project) | {(task, after)}
+    path.write_text(json.dumps(sorted(pairs))+'\n')
 
 
 def close_ready_phase(config: dict[str, Any], project: Path) -> dict[str, Any] | None:
