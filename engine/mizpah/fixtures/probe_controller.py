@@ -70,7 +70,7 @@ def docs_page(project: Path) -> None:
           enablers=[('page_readings', 'Headless page readings', 'cg/frontend_headless_page_cli_python',
                      'A command-line instrument over headless chromium: serve or open a page, read its text, element '
                      'boxes, computed styles and requests, take a screenshot at a viewport width.')])
-    key_path(project).write_text(json.dumps(dict(fixture='docs_page', key=dict(by_need={1: 3, 2: True}, targets={4: False})), indent=1)+'\n')
+    key_path(project).write_text(json.dumps(dict(fixture='docs_page', key=dict(by_need={1: 3, 2: True, 4: True})), indent=1)+'\n')
 
 
 def catalog_pick(project: Path) -> None:
