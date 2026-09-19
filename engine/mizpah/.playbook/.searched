@@ -370,3 +370,11 @@ the page weight in kilobytes   site index html plus every file it references   i
 the number of distinct font families the rendered page uses is not known 
 the number of distinct margin and padding values site style css declares is not known 
 the number of  img  elements without alt text is not known 
+Write report/design.md with all 16 measured-property rows and the closing target count
+content design json meets need report stating targets
+report design md has a row for need 1 stating its reading and whether it meets content targets json 
+report design md has a row for need 2 stating its reading and whether it meets content targets json 
+report design md has a row for need 3 stating its reading and whether it meets content targets json 
+report design md has a row for need 4 stating its reading and whether it meets content targets json 
+report design md has a row for need 5 stating its reading and whether it meets content targets json 
+report design md has a row for need 6 stating its reading and whether it meets content targets json 

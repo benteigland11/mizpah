@@ -323,3 +323,27 @@ def test_non_goals_reach_the_worker_and_refuse_artifacts_that_build_them(tmp_pat
     assignment = worker.render_assignment(dict(id='count', bucket='low', title='count', map_id='external_request_count'),
                                           [dict(id='external_request_count', claim='c', type='number', evidence_needed='e')], 'm')
     assert 'framework' not in assignment
+
+
+def test_proposals_say_whether_they_block_and_keep_the_project_open(project: Path) -> None:
+    from mizpah import loop
+    observation = controller.observe(CONFIG, project)
+    accepted, refusals = controller.guard(dict(proposals=[
+        dict(summary='need 2 is unmeasurable as written', need='Know the branch count before, by ast', evidence='the worker blocked'),
+    ], done=True), observation, project)
+    assert accepted['proposals'][0]['blocking'] is False   # omitted means the work goes on around it
+    accepted, refusals = controller.guard(dict(proposals=[
+        dict(summary='need 2 is unmeasurable as written (again)', need='Know the branch count before, by ast', evidence='the worker blocked',
+             blocking=False),
+    ], done=True), observation, project)
+    assert accepted['proposals'][0]['blocking'] is False and accepted['done'] is False
+    assert any('done refused: a proposal is open' in r for r in refusals)
+    controller.apply(CONFIG, project, accepted)
+    assert loop.open_proposals(project) and not loop.blocking_proposal_open(project)
+    observation = controller.observe(CONFIG, project)
+    accepted, _ = controller.guard(dict(proposals=[dict(summary='the mission cannot be met', mission='x', evidence='e', blocking=True)]),
+                                   observation, project)
+    controller.apply(CONFIG, project, accepted)
+    assert loop.blocking_proposal_open(project)
+    text = controller.render_observation(controller.observe(CONFIG, project), 'eval')
+    assert '[blocking] the mission cannot be met' in text

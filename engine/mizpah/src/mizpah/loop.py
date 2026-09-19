@@ -157,6 +157,18 @@ def advance_enabler(config: dict[str, Any], project: Path, task: dict[str, Any],
     return outcome
 
 
+def open_proposals(project: Path) -> list[dict[str, Any]]:
+    try:
+        return [p for p in json.loads((project/'.terra'/'brief.json').read_text()).get('proposals') or []
+                if p.get('status') in (None, 'open', 'pending')]
+    except (OSError, ValueError):
+        return []
+
+
+def blocking_proposal_open(project: Path) -> bool:
+    return any(str(p.get('summary') or '').startswith('[blocking]') for p in open_proposals(project))
+
+
 def phase_open(config: dict[str, Any], project: Path) -> bool:
     """A phase the map has not met is still open: the controller's "done" is not the brief's."""
     from . import phases
@@ -248,6 +260,10 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                 if ops.stop_requested(root):
                     stop = 'stopped_by_operator'
                     break
+                if blocking_proposal_open(project):
+                    # The controller judged the brief's flaw fatal to the remaining work: a person decides first.
+                    stop = 'proposals_pending'
+                    break
                 ready = pickable(config, project, root)
                 if not ready:
                     break
@@ -310,7 +326,7 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                 record['evals'].append(failing_step(config, project, journal, 'eval', log))
                 (root/'loop.json').write_text(json.dumps(dict(cycles=cycles+[record], tasks_run=tasks_run), indent=1))
                 report()
-            if stop in ('driver_failing', 'disk_high', 'stopped_by_operator'):
+            if stop in ('driver_failing', 'disk_high', 'stopped_by_operator', 'proposals_pending'):
                 cycles.append(record)
                 break
             if not record['evals']:
@@ -331,7 +347,8 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                     continue
                 if blocked(config, project):
                     stop = 'blocked'
-                elif minted['proposals']:
+                elif minted['proposals'] or open_proposals(project):
+                    # Open proposals keep a project from wrapping up: what was done is done, but the brief is not met.
                     stop = 'proposals_pending'
                 elif record['eval'].get('done') is True and not phase_open(config, project):
                     stop = 'nothing_owed'

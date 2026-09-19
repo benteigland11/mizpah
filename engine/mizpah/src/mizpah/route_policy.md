@@ -9,7 +9,7 @@ A task lists the unknowns it resolves (several that are naturally done together 
 If the project-files section is not enough to route or bucket well, look first: reply {"look": ["path/or/glob", ...], "why": "one sentence"} (up to 6 paths, twice per step) and the heads of those files are added to what you see before you decide.\n\nReply with one JSON object and nothing else:
 {"unknowns": [{"id": "snake_case", "claim": "...", "evidence_needed": "...", "type": "number|boolean|label", "unit": "...", "cites": "need:1 | deliverable:1 (one, or several joined by |; the first is primary)"}],
  "tasks": [{"id": "snake_case", "title": "...", "unknowns": ["..."], "bucket": "low|medium|high", "deps": []}],
- "proposals": [{"summary": "...", "need": "new need text", "deliverable": "...", "non_goal": "...", "evidence": "..."}],
+ "proposals": [{"summary": "...", "need": "new need text", "deliverable": "...", "non_goal": "...", "evidence": "...", "blocking": false}],
  "why": "one sentence on what the map owes the brief"}
 Ids match ^[a-z][a-z0-9_]*$.
 
@@ -30,4 +30,12 @@ until then. Route the enabler first: one boolean unknown with "enabler": "<id>" 
 and validates) and a task for it, bucketed by how much is unknown about building it — the worker searches the widget
 library before building, so an instrument another project graduated is an install. When it is ready, mint the
 readings that name it.
+
+## Proposals and the rest of the work
+
+A proposal does not stop the work: nine times in ten the rest of the brief can proceed around it (one need of sixteen
+is unmeasurable as written), so route what can still be measured in the same reply and the loop keeps going with the
+proposal pending. Only when the flaw makes the remaining work meaningless until a person decides (the deliverable
+depends on the need that cannot be met as written) mark it `"blocking": true`, and the loop stops at once. A project is never judged met while a proposal is open, so "done": true with a proposal
+open is refused; the honest reply is the proposal and what can still be routed.
 

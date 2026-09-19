@@ -178,7 +178,8 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
         lines.append('Budget points: '+str(brief['budget_points']))
     proposals = brief.get('proposals') or []
     if proposals:
-        lines.append('Open proposals (queued for the person; the map\'s record that a need cannot be met as written):')
+        lines.append('Open proposals (queued for the person; the map\'s record that a need cannot be met as written; '
+                     'the project cannot be judged met while one is open):')
         for p in proposals:
             lines.append('  '+str(p.get('id'))+' '+str(p.get('summary') or '').split(' \u2014 evidence:')[0][:200])
     lines.append('')
@@ -574,7 +575,13 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             refusals.append(label+': a proposal carries the new text of the need or deliverable, not its number'); continue
         if str(item['summary']).strip().lower() in open_summaries:
             refusals.append(label+': an open proposal already says this; wait for the person to decide'); continue
-        proposals.append(dict(summary=str(item['summary']).strip(), evidence=str(item['evidence']).strip(), **fields))
+        # A proposal says whether the work can go on around it. Blocking: the brief's flaw makes the rest of the
+        # work meaningless until a person decides, and the loop stops now. Otherwise the loop finishes what it
+        # can and ends proposals_pending — a project never wraps up as met while a proposal is open.
+        blocking = item.get('blocking', False)
+        if not isinstance(blocking, bool):
+            refusals.append(label+': "blocking" is true or false (omit it when the rest of the work can go on)'); continue
+        proposals.append(dict(summary=str(item['summary']).strip(), evidence=str(item['evidence']).strip(), blocking=blocking, **fields))
         open_summaries.add(str(item['summary']).strip().lower())
     by_id = {t['id']: t for t in observation['tasks']}
     for item in decision.get('rebucket') or []:
@@ -605,6 +612,10 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         unblock.append(dict(task=tid, after=after))
     done = decision.get('done')
     done = bool(done) if isinstance(done, bool) else None
+    if done is True and (observation['brief'].get('proposals') or proposals):
+        done = False
+        refusals.append('done refused: a proposal is open — the brief is not met until a person decides it; '
+                        'route what can still be measured, or leave it pending')
     if done is True:
         uncovered = uncovered_deliverable_terms(observation, unknowns, open_phases_only=True)
         if uncovered:
@@ -657,7 +668,7 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
         if t.get('enabler'):
             terra(config, project, 'brief', 'enabler', t['enabler'], 'building')
     for p in accepted['proposals']:
-        args = ['brief', 'propose', '--summary', p['summary']+' — evidence: '+p['evidence']]
+        args = ['brief', 'propose', '--summary', ('[blocking] ' if p.get('blocking') else '')+p['summary']+' — evidence: '+p['evidence']]
         for key in ('need', 'deliverable', 'non_goal', 'mission'):
             if p.get(key):
                 args += ['--'+key.replace('_', '-'), p[key]]
