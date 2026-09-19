@@ -220,7 +220,80 @@ def brand_kit(project: Path, *, chosen_mark: str = '') -> None:
     key_path(project).write_text(json.dumps(dict(fixture='brand_kit', key=dict(by_need={1: True, 2: True, 3: 4, 4: True, 5: True}, targets={6: '<=400'})), indent=1)+'\n')
 
 
-FIXTURES = dict(logo_mark=logo_mark, palette=palette, type_system=type_system, social_card=social_card, brand_kit=brand_kit)
+FACTS = [
+    'a brief says what is owed', 'unknowns are typed questions', 'a worker answers by a probe that reads the source',
+    'readings go on a map', 'a gate checks the map against the brief mechanically', 'methods are written to a playbook only after green',
+    'the next project starts from the playbook', 'local models on one GPU run it unattended', 'nothing is claimed that was not read off something',
+]
+
+BANNED = ['revolutionary', 'ai-powered', 'seamless', 'cutting-edge', 'game-changing', 'unlock', 'supercharge', 'effortless',
+          'next-generation', 'best-in-class', 'leverage', 'empower', '!']
+
+
+def _seed_copy(project: Path) -> None:
+    _seed(project)
+    (project/'content'/'facts.json').write_text(json.dumps(FACTS, indent=2)+'\n')
+    (project/'content'/'banned.json').write_text(json.dumps(BANNED, indent=2)+'\n')
+    (project/'content'/'README.md').write_text((project/'content'/'README.md').read_text()+
+        'facts.json: the facts a piece of copy must carry (coverage is counted against it). banned.json: words and marks '
+        'that may not appear. Every sentence of copy traces to a line of product.md or name.md; every number to evidence.json.\n')
+
+
+def headline(project: Path) -> None:
+    _seed_copy(project)
+    needs = [
+        'Know the number of candidates in copy/headlines.json (each a headline and a subhead)',                                    # 1
+        'Know the length in characters of the longest headline and of the longest subhead',                                        # 2
+        'Know the number of banned words or marks (content/banned.json) across all candidates',                                     # 3
+        'Know, for each candidate, how many of the facts in content/facts.json its headline plus subhead carry, and the best count',  # 4
+        'Know whether every number any candidate states appears as a value in content/evidence.json',                               # 5
+        'Know whether every candidate names the product ("Mizpah") in the headline or the subhead',                                 # 6
+        'Know whether copy/headlines.md shows every candidate with its readings and a one-line note on what it leads with',        # 7
+    ]
+    deliverables = [
+        'copy/headlines.json: ten candidates, each {"headline": ..., "subhead": ..., "leads_with": ...}, headlines at most 60 '
+        'characters, subheads at most 140, from content/product.md and content/name.md, no banned word',
+        'copy/headlines.md: the candidates with their readings (needs 2 to 6) and a closing table; the choice is a person\'s',
+    ]
+    brief(project, 'Headline candidates', 'Write ten headline and subhead pairs for mizpah.ai that carry the most of what '
+          'matters in the fewest words, invent nothing, and report the readings so a person can choose.', needs, deliverables,
+          budget=200, notes='Coverage is counted by fact: a fact is carried when its content words appear (stemmed) in the '
+                            'candidate. Fewer words at equal coverage is better; say so in the report.',
+          non_goals=['No `choice` between candidates', 'No `claim` that is not in content/ (numbers only from evidence.json)'])
+    key_path(project).write_text(json.dumps(dict(fixture='headline', key=dict(by_need={1: 10, 3: 0, 5: True, 6: True, 7: True},
+                                                                             targets={2: '<=140', 4: '>=3'})), indent=1)+'\n')
+
+
+def pitch_copy(project: Path) -> None:
+    _seed_copy(project)
+    needs = [
+        'Know the word count of copy/home.md',                                                                                   # 1
+        'Know how many of the facts in content/facts.json copy/home.md carries',                                                 # 2
+        'Know the number of sentences in copy/home.md that trace to no line of content/product.md or content/name.md (an invention)',  # 3
+        'Know whether every number copy/home.md states appears as a value in content/evidence.json, each with its source named',  # 4
+        'Know the number of banned words or marks in copy/home.md',                                                              # 5
+        'Know the mean sentence length in words and the longest sentence',                                                       # 6
+        'Know whether copy/home.md has, in order, sections for what it is, how it works, the evidence, and how to start',         # 7
+        'Know whether the first sentence of copy/home.md names Mizpah and says what it is',                                      # 8
+        'Know whether copy/home.md documents its readings in copy/home-readings.md, every number a reading on the map',          # 9
+    ]
+    deliverables = [
+        'copy/home.md: the home page copy — under 350 words, four sections in order (what it is, how it works, the evidence, '
+        'how to start), every fact from content/facts.json carried, every number from content/evidence.json with its source, '
+        'no banned word, no sentence that is not traceable to content/',
+        'copy/home-readings.md: the readings (needs 1 to 8) as a table',
+    ]
+    brief(project, 'Home page copy', 'Write the mizpah.ai home page copy that carries every fact that matters in under 350 '
+          'words with nothing invented, and prove it by readings.', needs, deliverables, budget=250,
+          notes='Tracing: a sentence traces when at least half its content words (stemmed) appear in one line of product.md or '
+                'name.md; the readings name the line. Plain, specific, short (content/voice.md).',
+          non_goals=['No `claim` outside content/', 'No `adjective` in place of a number where evidence.json has one'])
+    key_path(project).write_text(json.dumps(dict(fixture='pitch_copy', key=dict(by_need={2: 9, 3: 0, 4: True, 5: 0, 7: True, 8: True, 9: True},
+                                                                               targets={1: '<=350', 6: '<=20'})), indent=1)+'\n')
+
+
+FIXTURES = dict(logo_mark=logo_mark, palette=palette, type_system=type_system, social_card=social_card, brand_kit=brand_kit,
+                headline=headline, pitch_copy=pitch_copy)
 
 
 def main() -> None:
