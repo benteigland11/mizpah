@@ -302,7 +302,12 @@ def fold_sse(lines: Iterable[str]) -> dict[str, Any]:
         if state.ended:
             break
     if state.response is not None:
-        result = responses_to_chat(state.response)
+        response = dict(state.response)
+        if not response.get("output") and state.items:
+            # Some backends (ChatGPT's Codex backend) end the stream with a response.completed whose output is
+            # empty; the items arrived in output_item.done and are the answer.
+            response["output"] = synthesize_response(state)["output"]
+        result = responses_to_chat(response)
         if state.error and "error" not in result:
             result["error"] = state.error
         return result

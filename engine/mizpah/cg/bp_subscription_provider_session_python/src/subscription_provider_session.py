@@ -472,6 +472,8 @@ class ProviderTransport:
                 body = chat_to_responses(body).body
             except ValueError as error:
                 return b"", f"CodecError: {error}"
+        for key in getattr(self.profile, "unsupported_fields", ()):
+            body.pop(key, None)   # the backend answers 400 to these; the profile says so
         return json.dumps(body, allow_nan=False).encode("utf-8"), None
 
     def _decode(self, response: HttpResponse, elapsed: float, payload: dict[str, Any]) -> WireResponse:

@@ -818,26 +818,38 @@ class SandboxedShell:
     def _mirror_workspace(self, workspace: bytes, *, only: str | None = None) -> None:
         """Give each running service the workspace as of now at its /work (wipe and re-extract: small, exact)."""
         limits = self.config.limits
+        members = [(info, data) for info, data in _members(workspace, limits.workspace_bytes, limits.max_files)
+                   if not (info.name.startswith('.svc/') or info.name.startswith('.tool-output/'))]
+        incoming = {info.name for info, _ in members}
         for name, entry in self._services.items():
             if entry.get('stopped_at') is not None or (only is not None and name != only):
                 continue
             target = self.services_root/name/'work'
-            for child in sorted(target.rglob('*'), key=lambda p: len(p.parts), reverse=True):
-                if child.is_symlink() or child.is_file():
-                    child.unlink()
-                elif child.is_dir():
-                    child.rmdir()
             target.mkdir(parents=True, exist_ok=True)
-            for info, data in _members(workspace, limits.workspace_bytes, limits.max_files):
-                if info.name.startswith('.svc/') or info.name.startswith('.tool-output/'):
-                    continue
+            # The service writes into its /work while it runs (a browser's profile, a build's cache); those
+            # files are its own and stay. The mirror removes only what it put there last time and is gone
+            # from the workspace now, then lays down the current workspace over the top.
+            for stale in sorted(entry.get('mirrored', set())-incoming, key=lambda n: -len(n)):
+                path = target/stale
+                try:
+                    if path.is_symlink() or path.is_file():
+                        path.unlink()
+                    elif path.is_dir():
+                        path.rmdir()
+                except OSError:
+                    continue   # the service is using it; it is the service's now
+            for info, data in members:
                 path = target/info.name
-                if info.isdir():
-                    path.mkdir(parents=True, exist_ok=True)
-                elif info.isfile():
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_bytes(data)
-                    path.chmod(info.mode & 0o777 | 0o600)
+                try:
+                    if info.isdir():
+                        path.mkdir(parents=True, exist_ok=True)
+                    elif info.isfile():
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_bytes(data)
+                        path.chmod(info.mode & 0o777 | 0o600)
+                except OSError:
+                    continue
+            entry['mirrored'] = incoming
 
     @staticmethod
     def _collect(process: subprocess.Popen[bytes], cap: int, timeout: float) -> tuple[bytes, bytes]:

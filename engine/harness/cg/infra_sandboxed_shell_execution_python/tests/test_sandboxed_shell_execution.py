@@ -541,3 +541,18 @@ def test_private_network_isolates_the_host_and_admits_only_the_allowlist(tmp_pat
     finally:
         shell.close()
     assert shell._netns is None
+
+
+def test_the_mirror_removes_only_its_own_stale_files_and_leaves_the_services_writes(tmp_path):
+    shell = SandboxedShell(ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits(),
+                                       share_network=True, services=services()))
+    shell._services['web'] = dict(unit='u', command='c', started_at=0)
+    ws = write_workspace_file(b'', 'a.txt', b'1', byte_limit=10**6, file_limit=100)
+    ws = write_workspace_file(ws, 'old.txt', b'2', byte_limit=10**6, file_limit=100)
+    shell._mirror_workspace(ws)
+    work = shell.services_root/'web'/'work'
+    (work/'.chrome').mkdir(); (work/'.chrome'/'Default').mkdir(); (work/'.chrome'/'Default'/'lock').write_text('live')
+    ws = write_workspace_file(b'', 'a.txt', b'1 changed', byte_limit=10**6, file_limit=100)   # old.txt gone
+    shell._mirror_workspace(ws)
+    assert (work/'a.txt').read_bytes() == b'1 changed' and not (work/'old.txt').exists()
+    assert (work/'.chrome'/'Default'/'lock').read_text() == 'live'   # the service's own files survive

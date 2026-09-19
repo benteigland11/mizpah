@@ -85,6 +85,9 @@ class ProviderProfile:
     context_window: int | None = None
     timeout_seconds: float = 600.0
     notes: str = ""
+    # Request fields this backend refuses (ChatGPT's Codex backend answers 400 to max_output_tokens);
+    # dropped before the request is sent.
+    unsupported_fields: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.wire not in WIRE_DIALECTS:
@@ -154,7 +157,7 @@ def profile_from_dict(data: Mapping[str, Any]) -> ProviderProfile:
     if "auth" not in kwargs:
         raise ValueError("profile needs an auth block")
     kwargs["auth"] = auth_from_dict(kwargs["auth"])
-    for key in ("models", "reasoning_efforts"):
+    for key in ("models", "reasoning_efforts", "unsupported_fields"):
         if key in kwargs:
             kwargs[key] = tuple(kwargs[key])
     return ProviderProfile(**kwargs)
