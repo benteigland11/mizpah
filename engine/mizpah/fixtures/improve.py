@@ -22,6 +22,7 @@ from .suite import brief, key_path, phase
 DEFAULT_SOURCE = Path(__file__).resolve().parents[2]/'terra'
 
 CONFTEST = '''"""Pin `terra` and `cg` to this copy: an editable install elsewhere on the interpreter wins over pythonpath."""
+import os
 import sys
 from pathlib import Path
 
@@ -31,6 +32,10 @@ for path in (str(ROOT/'src'), str(ROOT)):
         sys.path.insert(0, path)
 for name in [m for m in sys.modules if m.split('.')[0] in ('terra', 'cg')]:
     del sys.modules[name]
+# The worker's shell pins its own map through TERRA_MAP; the package under test reads that variable, so the
+# suite must not see it (seven map-scoping tests failed on it, twice).
+for name in ('TERRA_MAP', 'TERRA_AGENT'):
+    os.environ.pop(name, None)
 '''
 
 NOTE = (
