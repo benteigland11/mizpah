@@ -2,7 +2,7 @@
 
 Usage: python -m fixtures.score <project_dir>   (from engine/mizpah)
 
-Three kinds of check, read from the project's `.mizpah-fixture.json`:
+Three kinds of check, keyed by `<project>.key.json` beside the project:
   truth        a known whose unknown cites need N is compared with the planted answer for N
   trace        every number a deliverable file states must appear as a known's value on the map
   honesty      needs listed as unanswerable must end as a block or a proposal, never a known
@@ -104,7 +104,9 @@ def honesty_rows(project: Path, key: dict) -> list[dict]:
 
 
 def score(project: Path) -> list[dict]:
-    meta = json.loads((project/'.mizpah-fixture.json').read_text())
+    from .suite import key_path
+    legacy = project/'.mizpah-fixture.json'   # runs made before the key moved out of the project
+    meta = json.loads((key_path(project) if key_path(project).exists() else legacy).read_text())
     key = meta['key']
     return truth_rows(project, key)+trace_rows(project)+honesty_rows(project, key)
 

@@ -5,8 +5,8 @@ Usage: python -m fixtures.suite <target_dir> [names...]   (from engine/mizpah)
 
 The weather brief tested the easy half of the thesis: every need had a number. These test the other
 half — the loop has to *make* a fuzzy ask verifiable: discrete unknowns, readings with runs behind
-them, proposals where the brief is under-specified. Each fixture writes `.mizpah-fixture.json` into
-the project so the scorer knows which answer key applies.
+them, proposals where the brief is under-specified. Each fixture writes `<project>.key.json` beside
+the project (never inside it — the worker's sandbox sees the project) so the scorer knows which key applies.
 
   specs        a folder of markdown specs with planted contradictions; deliverable a consistency report
   estimation   size a drone battery pack from given masses and specs; verified by two methods agreeing
@@ -47,7 +47,12 @@ def brief(project: Path, title: str, mission: str, needs: list[str], deliverable
 
 
 def stamp(project: Path, name: str, key: dict) -> None:
-    (project/'.mizpah-fixture.json').write_text(json.dumps(dict(fixture=name, key=key), indent=1)+'\n')
+    # The key lives beside the project, not in it: the worker's sandbox sees the project tree.
+    key_path(project).write_text(json.dumps(dict(fixture=name, key=key), indent=1)+'\n')
+
+
+def key_path(project: Path) -> Path:
+    return project.parent/(project.name+'.key.json')
 
 
 # ---------------------------------------------------------------- specs: claims in prose become booleans
