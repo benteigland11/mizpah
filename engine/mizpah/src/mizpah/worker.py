@@ -197,10 +197,18 @@ def probe_inputs(project: Path, task: dict[str, Any]) -> dict[str, list[str]]:
 
 
 def known_ids_named(project: Path, unknown: dict[str, Any]) -> list[str]:
-    """Known ids that appear as words in the unknown's claim, evidence or notes, in order of first mention."""
+    """Known ids the unknown names: by id, or by the id's words ("the minimum passing parallel count" names
+    min_parallel_count). The loose match over-declares now and then; an extra input in ctx costs nothing, while a
+    reading that re-derives what the map holds cost the drone brief its whole second phase (p=4 hardcoded)."""
     text = ' '.join(str(unknown.get(k) or '') for k in ('claim', 'evidence_needed', 'notes'))
-    return [word for word in dict.fromkeys(re.findall(r'[a-z][a-z0-9_]*', text))
-            if '_' in word and read_known(project, word) is not None]
+    exact = [word for word in dict.fromkeys(re.findall(r'[a-z][a-z0-9_]*', text))
+             if '_' in word and read_known(project, word) is not None]
+    words = set(re.findall(r'[a-z][a-z0-9_]*', text.lower()))
+    own = set(known_words(str(unknown.get('id') or '')))
+    loose = [path.stem for path in sorted((project/'.terra'/'map'/'knowns').glob('*.json'))
+             if path.stem not in exact and path.stem != unknown.get('id') and names_known(words, path.stem)
+             and not set(known_words(path.stem)) <= own]
+    return exact+loose
 
 
 def render_assignment(task: dict[str, Any], unknowns: list[dict[str, Any]], map_id: str,
@@ -773,24 +781,38 @@ def run_meta(project: Path, run_id: str) -> dict[str, Any]:
     return {}
 
 
-def unread_input_problems(project: Path, unknown_ids: list[str]) -> list[str]:
-    """A reading "of that function" must read which function from the map, not decide it again.
+UNIT_WORDS = {'kg', 'g', 'w', 'wh', 'v', 'a', 'ah', 'min', 'mins', 's', 'ms', 'px', 'kb', 'mb', 'pct', 'ratio', 'count', 'id',
+              'name', 'label', 'value', 'total', 'number', 'n'}
 
-    An unknown whose claim names a label known (which function, which file, which store) is a reading
-    conditioned on that choice. Terra records what a run consumed (declared inputs, instrumented `known get`);
-    when the label appears in none of the unknown's runs, the probe re-derived the choice — luna's survey
-    took the branch count of the last function it walked while the map said `collect_map_status` (119
-    branches, recorded as 2). Red, with the fix spelled out."""
+
+def known_words(known_id: str) -> list[str]:
+    return [w for w in known_id.split('_') if len(w) > 2 and w not in UNIT_WORDS and not w[0].isdigit()]
+
+
+def names_known(text_words: set[str], known_id: str) -> bool:
+    """`min_parallel_count` is named by "the minimum passing parallel count": every content word of the id
+    appears in the text, by prefix either way (min/minimum), so a probe cannot hardcode what the map holds."""
+    parts = known_words(known_id)
+    return bool(parts) and all(any(t.startswith(p) or p.startswith(t) for t in text_words if len(t) > 2) for p in parts)
+
+
+def unread_input_problems(project: Path, unknown_ids: list[str]) -> list[str]:
+    """A reading "at that parallel count" must read the count from the map, not decide it again.
+
+    An unknown whose claim names another known — by id, or by the id's words ("the selected motor",
+    "the minimum passing parallel count") — is a reading conditioned on it. Terra records what a run consumed
+    (declared inputs, instrumented `known get`); when the known appears in none of the unknown's runs, the probe
+    re-derived or hardcoded it: luna's survey took the branch count of the last function it walked while the map
+    said `collect_map_status` (119 branches, recorded as 2); the drone's pack mass used `p=4` while the map's
+    min_parallel_count was 2, and every phase-2 number followed. Red, with the fix spelled out."""
     problems: list[str] = []
-    labels = {}
+    knowns: dict[str, dict[str, Any]] = {}
     for path in (project/'.terra'/'map'/'knowns').glob('*.json'):
         try:
-            known = json.loads(path.read_text())
+            knowns[path.stem] = json.loads(path.read_text())
         except ValueError:
             continue
-        if known.get('type') == 'label' or (known.get('stats') or {}).get('kind') == 'label':
-            labels[path.stem] = known
-    if not labels:
+    if not knowns:
         return problems
     for uid in unknown_ids:
         try:
@@ -799,17 +821,30 @@ def unread_input_problems(project: Path, unknown_ids: list[str]) -> list[str]:
             continue
         text = str(unknown.get('claim') or '')+' '+str(unknown.get('evidence_needed') or '')
         words = set(re.findall(r'[a-z][a-z0-9_]*', text.lower()))
-        named = [w for w in dict.fromkeys(re.findall(r'[a-z][a-z0-9_]*', text)) if w in labels and w != uid]
-        # "the selected motor" names selected_motor_id as surely as the id does: a label known whose id's words
-        # (less a trailing `id`) all appear in the text is named (selection_cost hardcoded the wrong parts' prices).
-        for label_id in labels:
-            parts = [p for p in label_id.split('_') if p not in ('id', 'name', 'label')]
-            if label_id != uid and label_id not in named and parts and all(p in words for p in parts):
-                named.append(label_id)
-        if not named:
-            continue
+        own = set(known_words(uid))
+        is_label = lambda k: knowns[k].get('type') == 'label' or (knowns[k].get('stats') or {}).get('kind') == 'label'  # noqa: E731
+        # Exact ids always; labels also by their words (distinctive); numbers by words are only declared as inputs
+        # at scaffold time (over-declaring is harmless there, refusing on a loose match is not).
+        named = [k for k in knowns if k != uid and k not in unknown_ids
+                 and (k in words or (is_label(k) and names_known(words, k) and not set(known_words(k)) <= own))]
         known = read_known(project, uid)
         if not known:
+            continue
+        meta_path = project/'.terra'/'map'/'probes'/(uid+'_probe')/'probe.json'
+        measure_path = project/'.terra'/'map'/'probes'/(uid+'_probe')/'measure.py'
+        if meta_path.exists() and measure_path.exists():
+            try:
+                declared = json.loads(meta_path.read_text()).get('inputs') or {}
+            except ValueError:
+                declared = {}
+            source = measure_path.read_text(errors='replace')
+            used = re.sub(r'_\s*=\s*ctx(\.get\(\s*)?\[?"inputs"\]?\)?', '', source)   # `_ = ctx["inputs"]` is not a read
+            if declared and not re.search(r'inputs', used):
+                problems.append(uid+'_probe declares '+', '.join(sorted(declared))+' as inputs but measure.py never reads '
+                                'ctx["inputs"]: the reading was computed without the map values it depends on. Use them '
+                                '(ctx["inputs"]["'+sorted(declared)[0]+'"]), re-run and re-graduate')
+                continue
+        if not named:
             continue
         consumed: set[str] = set()
         for run_id in known.get('run_ids') or []:
@@ -819,8 +854,8 @@ def unread_input_problems(project: Path, unknown_ids: list[str]) -> list[str]:
             consumed |= {str(r.get('known_id') or r.get('id') or '') for r in meta.get('known_reads') or [] if isinstance(r, dict)}
         missing = [n for n in named if n not in consumed]
         if missing:
-            problems.append(uid+' names '+', '.join(missing)+' (= '+', '.join(repr(extract_known_value(labels[m])) for m in missing)
-                            +') but none of its runs read it: the probe decided the choice again instead of taking it from '
+            problems.append(uid+' names '+', '.join(missing)+' (= '+', '.join(repr(extract_known_value(knowns[m])) for m in missing)
+                            +') but none of its runs read it: the probe decided that value again instead of taking it from '
                             'the map. Declare it as an input of the probe (probe.json "inputs": {"'+missing[0]+'": "known:'+missing[0]
                             +'"}) and use ctx["inputs"]["'+missing[0]+'"] in measure(); then re-run and re-graduate')
     return problems
