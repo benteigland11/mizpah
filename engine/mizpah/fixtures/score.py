@@ -45,9 +45,12 @@ def agree(found, expected, key: dict) -> bool:
     if found is None:
         return False
     if isinstance(expected, bool):
-        return bool(found) == expected
+        # A number known citing a boolean need is a type mismatch, not an agreement.
+        return isinstance(found, bool) and found == expected
     if isinstance(expected, str):
         return str(found) == expected
+    if isinstance(found, (str, bool)):
+        return False
     tol = key.get('tolerance', 0.05)
     if key.get('relative'):
         return abs(float(found)-expected) <= tol*max(1e-9, abs(expected))
