@@ -1436,3 +1436,20 @@ def test_a_continuation_survives_the_next_handoff(tmp_path):
     standing = next(m for m in fresh if m.get('role') == 'user' and 'current instruction' in m['content'])
     assert 'Gate green: record the method' in standing['content']
     assert fresh.index(standing) < max(i for i, m in enumerate(fresh) if m.get('role') == 'user')  # before the resume memory
+
+
+def test_a_generation_block_is_lifted_on_reopen_with_a_fresh_window(tmp_path):
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, total=3, enabled=False, rollover=False)
+    item = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, controller=controller)
+    item.run(maximum_worker_turns=1)
+    with item._locked():
+        item.state.update(blocked_kind='generation_retries', blocked_reason='worker exhausted its generation recovery budget after repetition responses',
+                          generation_rejections={'worker': 3})
+        item._save()
+    reopened = FocusedSession.open(tmp_path/'session', worker=worker, shell=shell, controller=controller)
+    assert reopened.reset_generation_block() == dict(reason='worker exhausted its generation recovery budget after repetition responses', rejections={'worker': 3})
+    assert reopened.reset_generation_block() is None
+    assert reopened.status()['blocked_reason'] is None and reopened.state['rollover_requested']['reason'] == 'generation_block_reset'
+    assert reopened.run()['status'] == 'complete'
+    events = [json.loads(line) for line in (tmp_path/'session'/'events'/'session.jsonl').read_text().splitlines()]
+    assert any(e['event_type'] == 'generation_block_reset' for e in events) and any(e['event_type'] == 'rollover_forced' for e in events)

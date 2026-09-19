@@ -869,6 +869,7 @@ class FocusedSession:
         transition = self.session.rollover(turn.message['content'], source_archive=source_archive)
         self._event('worker_handoff', transition)
         self.state.update(phase='worker', pending_io=None, input_cursor=0, handoffs=self.state['handoffs']+1)
+        self.state.get('generation_rejections', {}).pop('worker', None)   # a fresh window gets a fresh retry budget
         self._save()
 
     def _focus_files(self) -> dict[str, str]:
@@ -1196,6 +1197,22 @@ class FocusedSession:
                         self._finish_turn()
             self._save()
             return pending
+
+    def reset_generation_block(self) -> dict[str, Any] | None:
+        """Lift a generation-retries block on reopen: the block is a verdict on one window's context, not on
+        the task. The retry budget resets and a handoff is requested so the retry runs in a fresh window."""
+        with self._locked():
+            if self.store.read()['revision'] != self.revision:
+                raise RuntimeError('Session changed; reopen before resetting')
+            if self.state.get('blocked_kind') != 'generation_retries':
+                return None
+            record = dict(reason=self.state.get('blocked_reason'), rejections=dict(self.state.get('generation_rejections') or {}))
+            self.state.update(blocked_kind=None, blocked_reason=None, generation_rejections={})
+            if len(self.session.messages) > len(self.session.base_messages)+1 and not self.state.get('rollover_requested'):
+                self.state['rollover_requested'] = dict(reason='generation_block_reset', name='worker', count=0)
+            self._event('generation_block_reset', record)
+            self._save()
+            return record
 
     def prune_workspaces(self) -> int:
         """Delete snapshot stores the saved state no longer references; returns how many.

@@ -964,6 +964,9 @@ def run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | N
             checkin = client_for(config['controller'], observe_model(root))
             session = FocusedSession.open(root, worker=worker_client, shell=shell, controller=checkin)
         discarded = session.discard_pending()  # a killed run leaves an uncommitted call; nothing is replayed
+        lifted = session.reset_generation_block()   # a degenerate window is retried in a fresh one, not re-raised
+        if lifted:
+            (root/'discarded.jsonl').open('a').write(json.dumps(dict(generation_block=lifted))+'\n')
         # The config is the operator's current judgment; a resumed session renders its next request under it.
         wanted = {k: config['session_policy'][k] for k in FocusedSession.RETUNABLE if k in config['session_policy']}
         current = {k: getattr(session.settings.session_policy, k) for k in wanted}
