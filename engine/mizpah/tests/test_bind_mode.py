@@ -59,3 +59,13 @@ def test_bind_mode_binds_the_project_keeps_caches_and_writes_state_back(tmp_path
         assert 'big.bin' in r.stdout and not (project/'src'/'c.py').exists() and not (project/'build'/'x').exists()
     finally:
         shell.close()
+
+
+def test_open_walks_names_the_next_unticked_step() -> None:
+    import io, tarfile
+    text = '# build-page — for: the landing page\n- [x] Read\n- [ ] Gutters: check the gutters.\n- [ ] Report\n'
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode='w:') as tar:
+        info = tarfile.TarInfo(worker.PLAYBOOK_PREFIX+'/open/build-page--x.md'); data = text.encode(); info.size = len(data)
+        tar.addfile(info, io.BytesIO(data))
+    assert worker.open_walks(buf.getvalue()) == [worker.PLAYBOOK_PREFIX+'/open/build-page--x.md: 1/3 ticked; next: Gutters: check the gutters.']

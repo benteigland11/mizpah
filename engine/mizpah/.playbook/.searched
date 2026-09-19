@@ -532,3 +532,6 @@ candidate candidates content distinct drawn grounded hand idea name
 candidate 1 is a hand drawn idea grounded in content name md and distinct from candidates 2 and 3 
 candidate 2 is a hand drawn idea grounded in content name md and distinct from candidates 1 and 3 
 candidate 3 is a hand drawn idea grounded in content name md and distinct from candidates 1 and 2 
+Install and validate catalog lookup instrument
+catalog data exists instrument lookup project python validates
+the catalog lookup instrument exists at cg data catalog lookup cli python and validates for this project 

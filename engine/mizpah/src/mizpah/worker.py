@@ -590,6 +590,20 @@ def widget_problems(config: dict[str, Any], project: Path, root: Path) -> list[s
     return problems
 
 
+def open_walks(snapshot: bytes) -> list[str]:
+    """Each opened checklist with unticked steps, as `<file>: <ticked>/<total> ticked; next: <step>`."""
+    walks: list[str] = []
+    for name, data in sorted(_members(snapshot).items()):
+        if not name.startswith(PLAYBOOK_PREFIX+'/open/') or not name.endswith('.md'):
+            continue
+        lines = [ln.strip() for ln in data.decode('utf-8', errors='replace').splitlines()]
+        steps = [ln for ln in lines if ln.startswith('- [')]
+        pending = [ln[6:].strip('* ') for ln in steps if ln.startswith('- [ ]')]
+        if pending:
+            walks.append(name+': '+str(len(steps)-len(pending))+'/'+str(len(steps))+' ticked; next: '+pending[0][:100])
+    return walks
+
+
 def open_checklists(snapshot: bytes) -> list[str]:
     """Every procedure the worker opened is a commitment: each step ticked `[x]` (done) or `[-]` (not needed)
     before the gate can be green. Checklists live under .playbook/open/ in the workspace, one per walk."""
@@ -1468,6 +1482,14 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             session.retune(**{k: v for k, v in wanted.items() if current[k] != v})
         if discarded:
             (root/'discarded.jsonl').open('a').write(json.dumps(discarded)+'\n')
+        # A resumed worker is told where it stood, not left to its compacted memory of it: every procedure it
+        # opened and did not finish, with the next unticked step, so it picks the walk up rather than starting
+        # another one (or forgetting the first — the gate would hold the task on it either way).
+        left_open = open_walks(evidence(session))
+        if left_open:
+            session.continue_with('Resuming this task after a pause. You left these procedure walks open; continue each '
+                                  'from its next step (tick `[x]` done or `[-]` not needed as you go) before anything else:\n'
+                                  +'\n'.join('  - '+w for w in left_open)+'\n')
     else:
         task = pick_task(config, project, task_id)
         map_id = open_task_map(config, project, task)
