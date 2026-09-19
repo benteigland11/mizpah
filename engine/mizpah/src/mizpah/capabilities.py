@@ -42,7 +42,7 @@ def slug(enabler_id: str) -> str:
 
 def manifest(project: Path, enabler: dict[str, Any], *, widget: str | None = None) -> dict[str, Any]:
     """enabler.json: what the pack is and how to talk to it (the README head is the interface)."""
-    root = project/str(enabler.get('path') or '')
+    root = resolve_path(project, str(enabler.get('path') or '')) or project/str(enabler.get('path') or '')
     readme = next((p for p in (root/'README.md', root/'README.txt', root/'readme.md') if p.exists()), None)
     interface = readme.read_text(errors='replace').strip().splitlines()[:40] if readme else []
     files = sorted(str(p.relative_to(root)) for p in root.rglob('*') if p.is_file()
@@ -78,6 +78,16 @@ def install_procedures(config: dict[str, Any], pack: Path) -> list[str]:
     return installed
 
 
+def resolve_path(project: Path, path: str) -> Path | None:
+    """The enabler's directory, whichever spelling it landed in: Cartograph installs `a-b-c` at `cg/a_b_c`."""
+    if not path:
+        return None
+    candidates = [project/path, project/path.replace('-', '_'), project/path.replace('_', '-')]
+    parent, name = Path(path).parent, Path(path).name
+    candidates += [project/parent/name.replace('-', '_'), project/parent/name.replace('_', '-')]
+    return next((c for c in candidates if c.is_dir()), None)
+
+
 def record(config: dict[str, Any], project: Path, enabler: dict[str, Any], *, widget: str | None = None,
            procedures: list[str] = ()) -> Path:
     """Register a graduated (or ready) enabler and pack its directory; the record is what a future brief is shown."""
@@ -88,9 +98,9 @@ def record(config: dict[str, Any], project: Path, enabler: dict[str, Any], *, wi
     history = list(previous.get('history') or [])
     if previous:
         history.append({k: previous.get(k) for k in ('project', 'recorded_at', 'status', 'path', 'graduates_to')})
-    source = project/str(enabler.get('path') or '')
+    source = resolve_path(project, str(enabler.get('path') or ''))
     packed = False
-    if enabler.get('path') and source.is_dir():
+    if enabler.get('path') and source is not None and source.is_dir():
         pack = home/'pack'
         if pack.exists():
             shutil.rmtree(pack)

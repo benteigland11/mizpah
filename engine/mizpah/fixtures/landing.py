@@ -156,7 +156,7 @@ def landing(project: Path, *, enablers: bool = False) -> None:
           non_goals=['No `framework`, `bundler` or `build step`: the page is HTML and CSS written by hand',
                      'No `external request`: no fonts, scripts or images from outside site/',
                      'No `javascript` for layout or content: the page reads the same with scripts off'],
-          enablers=[('page_readings', 'Headless page readings', 'cg/frontend-headless-page-cli-python',
+          enablers=[('page_readings', 'Headless page readings', 'cg/frontend_headless_page_cli_python',
                      'A command-line instrument over headless chromium: serve or open a page, read its text, element boxes, '
                      'computed styles and requests, take a screenshot at a viewport width. The readings that name it are '
                      'taken through it.')] if enablers else ())

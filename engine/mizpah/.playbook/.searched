@@ -362,3 +362,11 @@ the number of requests the rendered page makes to urls outside site  is unknown
 Install and validate the page_readings instrument
 exists instrument page path readings specified validates
 the page readings instrument exists at its specified path and validates 
+Write site/index.html and site/style.css by hand
+site distinct html index page section declares elements style appears colors content
+the number of  section  elements in site index html is not known 
+it is not known whether the hero section opens with an h1 and every other section opens with an h2 in site index html 
+the page weight in kilobytes   site index html plus every file it references   is not known 
+the number of distinct font families the rendered page uses is not known 
+the number of distinct margin and padding values site style css declares is not known 
+the number of  img  elements without alt text is not known 
