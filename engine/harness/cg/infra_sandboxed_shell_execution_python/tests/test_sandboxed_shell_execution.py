@@ -353,3 +353,15 @@ def test_edit_forgives_the_anchor_encoding_but_not_its_content():
     assert error.value.code == 'text_not_found'
     exact, report = edit_workspace_file(snapshot, 'm.py', '    return x\n', '    return 0\n', byte_limit=4096, file_limit=10)
     assert report['matched'] == 'exact'
+
+
+def test_workspace_paths_accept_the_mount_and_refuse_the_dot_work_lookalike():
+    from src.sandboxed_shell_execution import _name
+    import pytest
+    assert _name('/work/.terra/map/probes/p/measure.py', user=True) == '.terra/map/probes/p/measure.py'
+    assert _name('weather/cli.py', user=True) == 'weather/cli.py'
+    with pytest.raises(ValueError, match='outside it'):
+        _name('/etc/passwd', user=True)
+    with pytest.raises(ValueError, match='not the workspace'):
+        _name('.work/.terra/map/probes/p/measure.py', user=True)
+    assert _name('.work/old.txt') == '.work/old.txt'   # an existing snapshot member still reads back

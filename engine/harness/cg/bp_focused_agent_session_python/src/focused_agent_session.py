@@ -542,6 +542,11 @@ class FocusedSession:
         self._event('generation_rejected', dict(purpose=purpose, cause=cause, attempt=counts[purpose],
             maximum_retries=self.settings.maximum_generation_retries, tools_executed=False, **record))
         exhausted = counts[purpose] > self.settings.maximum_generation_retries
+        if purpose == 'worker' and not exhausted and counts[purpose] >= 2 and not self.state.get('rollover_requested') \
+                and len(self.session.messages) > len(self.session.base_messages)+1:
+            # Retrying the same context reproduces the same degenerate generation; the last retry runs
+            # in a fresh window instead.
+            self.state['rollover_requested'] = dict(reason='generation_'+cause, name=purpose, count=counts[purpose])
         if exhausted:
             self.state.update(blocked_kind='generation_retries',
                 blocked_reason=purpose+' exhausted its generation recovery budget after '+cause+' responses')

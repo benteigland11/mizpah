@@ -100,10 +100,25 @@ class ShellResult:
     detail: str = ''
 
 
-def _name(value: str) -> str:
+WORKSPACE_MOUNT = '/work'
+
+
+def _name(value: str, *, user: bool = False) -> str:
+    """Canonical member name; `user` marks a path the model supplied, which gets the stray-tree refusal."""
     path = PurePosixPath(value)
-    if path.is_absolute() or '..' in path.parts or not path.parts:
+    if path.is_absolute():
+        # The workspace is mounted at /work in the sandbox; a path spelled from there is the same file.
+        if path == PurePosixPath(WORKSPACE_MOUNT) or PurePosixPath(WORKSPACE_MOUNT) in path.parents:
+            path = path.relative_to(WORKSPACE_MOUNT)
+        else:
+            raise ValueError('Workspace paths are relative to the workspace (or start with '+WORKSPACE_MOUNT+'/); '
+                             +str(value)+' is outside it')
+    if '..' in path.parts or not path.parts:
         raise ValueError('Workspace paths must be relative without parent traversal')
+    if user and path.parts[0] == '.work':
+        # A model that was refused `/work/x` next tries `.work/x`; accepting it creates a stray copy of the tree.
+        raise ValueError('`.work/` is not the workspace: write `'+str(PurePosixPath(*path.parts[1:]))+'` (relative) or `'
+                         +WORKSPACE_MOUNT+'/'+str(PurePosixPath(*path.parts[1:]))+'`')
     return str(path)
 
 
@@ -152,7 +167,7 @@ def workspace_files(snapshot: bytes, *, byte_limit: int, file_limit: int) -> tup
 
 def read_workspace_file(snapshot: bytes, name: str, *, byte_limit: int, file_limit: int) -> bytes:
     """Read a regular member; never follow a workspace symlink on the host."""
-    canonical = _name(name)
+    canonical = _name(name, user=True)
     for member, data in _members(snapshot, byte_limit, file_limit):
         if member.name == canonical and member.isfile():
             return data
@@ -161,7 +176,7 @@ def read_workspace_file(snapshot: bytes, name: str, *, byte_limit: int, file_lim
 
 def write_workspace_file(snapshot: bytes, name: str, data: bytes, *, byte_limit: int, file_limit: int) -> bytes:
     """Replace a regular member, preserving all other safe workspace members."""
-    canonical = _name(name)
+    canonical = _name(name, user=True)
     records = _members(snapshot, byte_limit, file_limit)
     parents = {str(path) for path in PurePosixPath(canonical).parents if str(path) != '.'}
     for member, _ in records:

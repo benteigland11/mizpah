@@ -82,3 +82,7 @@ diverged:
   window ahead of the resume memory; bp-focused-agent-session marks continue_with text as standing. A fresh
   window whose assignment still said "take the readings" re-verified them for ten turns after "gate green:
   record the method" was lost at the handoff; 0.22.0 → 0.23.0, model-session 1.7.0 → 1.8.0
+- harness: sandbox workspace paths accept `/work/...` (the mount) and refuse `.work/...` with the fix named — a
+  worker refused `/work/x` next wrote `.work/x`, creating a stray copy of the tree it then spent seven turns
+  untangling; bp-focused-agent-session requests a rollover on the second degenerate generation so the last
+  retry runs in a fresh window instead of reproducing the loop; sandbox 1.6.0 → 1.7.0, session 0.23.0 → 0.24.0
