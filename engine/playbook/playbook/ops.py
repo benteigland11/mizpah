@@ -226,9 +226,18 @@ def _append_steps(
             raise ValueError(f"steps[{position}].title must be a non-empty string")
         if not isinstance(do, str) or not do.strip():
             raise ValueError(f"steps[{position}].do must be a non-empty string")
-        updated = widget.add_step(updated, title, do, after=cursor)
+        linked = entry.get("procedure")
+        if linked is not None:
+            _require_procedure(str(linked))
+        updated = widget.add_step(updated, title, do, after=cursor, procedure=str(linked) if linked else None)
         cursor = title.strip()
     return updated
+
+
+def _require_procedure(procedure_id: str) -> None:
+    """A linked step must point at a procedure that exists: a dangling link is a step nobody can walk."""
+    if not store.procedure_path(procedure_id).is_file():
+        raise ValueError(f"linked procedure {procedure_id!r} does not exist; search for its id or create it first")
 
 
 def load_procedure(procedure_id: str, full: bool = True) -> dict[str, Any]:
@@ -312,13 +321,18 @@ def validate_procedure(procedure_id: str) -> dict[str, Any]:
     result = widget.validate_procedure(document)
     steps = document.get("steps")
     step_summaries = []
+    dangling = []
     if isinstance(steps, list):
         for step in steps:
             if isinstance(step, dict):
-                step_summaries.append({"id": step.get("id"), "title": step.get("title")})
+                step_summaries.append({"id": step.get("id"), "title": step.get("title"),
+                                       **({"procedure": step["procedure"]} if step.get("procedure") else {})})
+                if step.get("procedure") and not store.procedure_path(str(step["procedure"])).is_file():
+                    dangling.append(str(step["procedure"]))
     return {
-        "valid": result.valid,
-        "errors": [{"path": err.path, "message": err.message} for err in result.errors],
+        "valid": result.valid and not dangling,
+        "errors": [{"path": err.path, "message": err.message} for err in result.errors]
+        + [{"path": "$.steps", "message": f"linked procedure {d!r} does not exist"} for d in dangling],
         "id": document.get("id"),
         "description": document.get("description"),
         "tags": document.get("tags", []),
@@ -345,8 +359,12 @@ def edit_meta(
     }
 
 
-def add_step(procedure_id: str, title: str, do: str, after: str | None = None) -> dict[str, Any]:
-    return add_steps(procedure_id, [{"title": title, "do": do}], after=after)
+def add_step(procedure_id: str, title: str, do: str, after: str | None = None,
+             procedure: str | None = None) -> dict[str, Any]:
+    entry: dict[str, Any] = {"title": title, "do": do}
+    if procedure:
+        entry["procedure"] = procedure
+    return add_steps(procedure_id, [entry], after=after)
 
 
 def add_steps(
@@ -369,10 +387,13 @@ def edit_step(
     title: str,
     new_title: str | None = None,
     do: str | None = None,
+    procedure: str | None = None,
 ) -> dict[str, Any]:
     target = store.procedure_path(procedure_id)
     document = read_document(target)
-    updated = widget.edit_step(document, title, new_title=new_title, do=do)
+    if procedure:
+        _require_procedure(procedure)
+    updated = widget.edit_step(document, title, new_title=new_title, do=do, procedure=procedure)
     write_document(target, updated)
     marker = (new_title or title).strip()
     step = next(item for item in updated["steps"] if item.get("title") == marker)
@@ -428,6 +449,10 @@ def open_procedure(procedure_id: str, purpose: str, target_dir: str | Path = "."
               "Improve the procedure afterwards with `playbook edit-step` / `add-step` where a step fell short.", ""]
     for i, step in enumerate(steps, 1):
         lines += [f"- [ ] **{i}. {step.get('title', '')}**", "", f"  {str(step.get('do', '')).strip()}", ""]
+        if step.get("procedure"):
+            linked = str(step["procedure"])
+            lines += [f"  → this step is another procedure: `playbook open {linked} --for \"{purpose}: {step.get('title', '')}\"` "
+                      f"— walk that checklist, then tick this box.", ""]
     out_dir = Path(target_dir) / OPEN_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     slug = re.sub(r"[^a-z0-9]+", "-", purpose.lower()).strip("-")[:48] or "walk"

@@ -209,7 +209,7 @@ def test_edit_step_rejects_duplicate_rename() -> None:
 
 def test_edit_step_requires_a_change() -> None:
     document = add_step(new_procedure("item", TITLE, DESC, TAGS), "Ask", "Do it.")
-    with pytest.raises(ValueError, match="new_title and/or do"):
+    with pytest.raises(ValueError, match="new_title, do and/or procedure"):
         edit_step(document, "Ask")
 
 

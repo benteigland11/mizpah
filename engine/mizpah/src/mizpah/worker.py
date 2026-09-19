@@ -766,16 +766,23 @@ def green_message(gate: dict[str, Any], unknown_id: str | list[str], used: list[
                 for step, counts in cost.items()]
         paid = (' Calls that were refused or failed, by the step you were on:\n'+'\n'.join(rows)+
                 '\n Where a step led you into those, the step is what needs rewriting.')
+    linking = ('Procedures compose by linking, and a link is the first-class way to reuse one: a step that says "now walk '
+               'procedure X" is written `playbook add-step <id> --title ... --do "<why here>" --procedure <X>`, and open '
+               'renders it as the command to open X. Never copy another procedure\'s steps into yours — link the step to '
+               'it. Search before you write (`playbook search`, a create is refused without one): where a procedure '
+               'already covers part of what you did, your procedure links it for that part and adds only what was new.')
     if used:
         library = ('You followed '+', '.join('`'+u+'`' for u in used)+'. Improve that procedure with `playbook edit-step` '
-                   'or `playbook add-step` where its steps fell short of what you actually had to do; create a new '
-                   'procedure only if your method was genuinely different, not a rewording.')
+                   'or `playbook add-step` where its steps fell short of what you actually had to do; where a part of it '
+                   'is really another procedure (one that exists, or one you now create for that part), make that step a '
+                   'link with `--procedure`. Create a new procedure only if your method was genuinely different, not a '
+                   'rewording. '+linking)
     else:
         library = ('You followed only the loop\'s own bootstrap (`mizpah-resolve-unknown`), which is not yours to copy or '
                    'rewrite. If your method was specific to this kind of source or artifact (what you read, which widget, '
                    'how the reading was taken), `playbook create <id> --title ... --description ... --tags ...` a '
                    'procedure for that and `playbook add-step` one step at a time, each step one action with the exact '
-                   'commands; if it was nothing but the bootstrap, create nothing and reply "none".')
+                   'commands; if it was nothing but the bootstrap, create nothing and reply "none". '+linking)
     return ('Gate green: known '+unknown_id+' '+('are' if ',' in unknown_id else 'is')+' on the project map. The widgets '
             'your probes call under cg/ are checked in for you once `cartograph validate` passes; do not build or '
             'extract anything now — the reading is taken and the parts it needed already exist. One thing to record, so '
@@ -946,16 +953,21 @@ COMMAND_TOOLS: tuple[dict[str, Any], ...] = (
                                                         tags=string('comma-separated tags, 3-5', flag='--tags')),
                          required=['id', 'title', 'description'])),
     dict(name='playbook_add_step', description='Append one step to a procedure you created or followed: a short title '
-         'and one imperative `do` with the exact commands.',
-         command='playbook add-step {id} --title {title} --do {do}',
+         'and one imperative `do` with the exact commands. When the step is really another procedure, pass its id as '
+         '`procedure`: the step links it (open renders the command to walk it) instead of copying its steps.',
+         command='playbook add-step {id} --title {title} --do {do} {procedure}',
          parameters=dict(type='object', properties=dict(id=string('procedure id'), title=string('short step title'),
-                                                        do=string('one action, with the exact commands')),
+                                                        do=string('one action, with the exact commands'),
+                                                        procedure=dict(type='string', flag='--procedure',
+                                                                       description='id of the procedure this step walks (optional)')),
                          required=['id', 'title', 'do'])),
     dict(name='playbook_edit_step', description='Rewrite one step of a procedure where it fell short of what you '
-         'actually had to do; target it by its current title.',
-         command='playbook edit-step {id} --title {title} --do {do}',
+         'actually had to do; target it by its current title. `procedure` links another procedure to the step.',
+         command='playbook edit-step {id} --title {title} --do {do} {procedure}',
          parameters=dict(type='object', properties=dict(id=string('procedure id'), title=string('current step title'),
-                                                        do=string('the new imperative, with the exact commands')),
+                                                        do=string('the new imperative, with the exact commands'),
+                                                        procedure=dict(type='string', flag='--procedure',
+                                                                       description='id of the procedure this step walks (optional)')),
                          required=['id', 'title', 'do'])),
 )
 

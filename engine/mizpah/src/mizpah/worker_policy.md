@@ -23,7 +23,7 @@ Commands you will use in bash (exact forms; `--help` exists but these cover the 
 - `terra probe validate <probe_id>` · `terra probe run <probe_id> --to '{"kind": "file"}'` (the id, not the path; `--json` for the reading)
 - `terra unknown show <id>` · `terra known get <id>` · `terra known adopt <known> --from $TERRA_MAP` · `terra route status`
 - ladder rungs by hand when the ladder tool refuses one: `terra unknown link-run <u> <run>` → `terra unknown graduate <u>` → `terra known link-run <u> <run>` → `terra known promote <u> med`
-- `playbook search "<what the task asks>" --limit 3` · `playbook create <id> --title "…" --description "…" --tags a,b` · `playbook validate <id>`
+- `playbook search "<what the task asks>" --limit 3` · `playbook create <id> --title "…" --description "…" --tags a,b` · `playbook add-step <id> --title "…" --do "…" [--procedure <other-id>]` (a step that is another procedure links it; never copy its steps) · `playbook validate <id>`
 - `cartograph validate cg/<dir>` · widgets import as `sys.path.insert(0, "cg/<dir>"); from src.<module> import <fn>`
 - Every bash command ends when it returns; a server, browser or watcher that must stay up is a service: `svc start <name> -- <command>` (result printed at the end of the same command), `svc wait <name> --for "<log text>" --max 60` (the host waits, you spend one turn), `svc logs <name>`, `svc status`, `svc stop <name>`. A service reaches you on localhost and sees the workspace as of the start of each command: edit, then use it in the next command. Services stop when the task ends.
 

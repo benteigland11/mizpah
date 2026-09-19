@@ -103,11 +103,12 @@ def _build_parser() -> argparse.ArgumentParser:
     validate.add_argument("id")
     validate.set_defaults(handler=_cmd_validate)
 
-    add_step = sub.add_parser("add-step", help="append a serial step (title + do)")
+    add_step = sub.add_parser("add-step", help="append a serial step (title + do; --procedure links another procedure as the step)")
     add_step.add_argument("id")
     add_step.add_argument("--title", required=True, help="short trail label")
     add_step.add_argument("--do", dest="do_text", required=True, help="imperative: do this")
     add_step.add_argument("--after", default="", help="insert after this unique title (default: append)")
+    add_step.add_argument("--procedure", default="", help="link: walking this step means opening this other procedure")
     add_step.set_defaults(handler=_cmd_add_step)
 
     add_steps = sub.add_parser("add-steps", help="append several steps at once from a JSON array")
@@ -125,6 +126,7 @@ def _build_parser() -> argparse.ArgumentParser:
     edit_step.add_argument("--title", required=True, help="current unique title to target")
     edit_step.add_argument("--rename", default="", help="new title (id stays the same)")
     edit_step.add_argument("--do", dest="do_text", default="", help="new imperative")
+    edit_step.add_argument("--procedure", default=None, help="link another procedure to this step ('' to unlink)")
     edit_step.set_defaults(handler=_cmd_edit_step)
 
     remove_step = sub.add_parser("remove-step", help="remove a step by its unique title; remaining steps stay in order")
@@ -183,7 +185,7 @@ def _cmd_validate(args: argparse.Namespace) -> dict[str, Any]:
 
 def _cmd_add_step(args: argparse.Namespace) -> dict[str, Any]:
     after = args.after.strip() or None
-    return ops.add_step(args.id, args.title, args.do_text, after=after)
+    return ops.add_step(args.id, args.title, args.do_text, after=after, procedure=args.procedure.strip() or None)
 
 
 def _cmd_add_steps(args: argparse.Namespace) -> dict[str, Any]:
@@ -196,9 +198,9 @@ def _cmd_add_steps(args: argparse.Namespace) -> dict[str, Any]:
 def _cmd_edit_step(args: argparse.Namespace) -> dict[str, Any]:
     new_title = args.rename.strip() or None
     do_text = args.do_text.strip() or None
-    if new_title is None and do_text is None:
-        raise ValueError("edit-step requires --rename and/or --do")
-    return ops.edit_step(args.id, args.title, new_title=new_title, do=do_text)
+    if new_title is None and do_text is None and args.procedure is None:
+        raise ValueError("edit-step requires --rename, --do and/or --procedure")
+    return ops.edit_step(args.id, args.title, new_title=new_title, do=do_text, procedure=args.procedure)
 
 
 def _cmd_remove_step(args: argparse.Namespace) -> dict[str, Any]:

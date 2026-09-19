@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 from dataclasses import dataclass
 from json import JSONDecodeError, dumps, loads
 from typing import Any, Mapping
 from uuid import uuid4
 
 DOCUMENT_KEYS = frozenset({"id", "title", "description", "tags", "steps"})
-STEP_KEYS = frozenset({"id", "title", "do"})
+STEP_KEYS = frozenset({"id", "title", "do", "procedure"})
 
 
 @dataclass(frozen=True)
@@ -150,8 +151,11 @@ def add_step(
     do: str,
     step_id: str | None = None,
     after: str | None = None,
+    procedure: str | None = None,
 ) -> dict[str, Any]:
-    """Return a copy with one step inserted after `after`, or appended if `after` is omitted."""
+    """Return a copy with one step inserted after `after`, or appended if `after` is omitted.
+
+    `procedure` links another procedure: the step is walked by opening that one."""
     if not isinstance(title, str) or not title.strip():
         raise ValueError("title must be a non-empty string")
     if not isinstance(do, str) or not do.strip():
@@ -169,6 +173,8 @@ def add_step(
     }
     assigned = _assign_step_id(step_id, taken)
     new_step = {"id": assigned, "title": title.strip(), "do": do.strip()}
+    if procedure is not None:
+        new_step["procedure"] = procedure.strip()
     if after is None:
         steps.append(new_step)
     else:
@@ -184,12 +190,13 @@ def edit_step(
     title: str,
     new_title: str | None = None,
     do: str | None = None,
+    procedure: str | None = None,
 ) -> dict[str, Any]:
-    """Return a copy with one step's title and/or do changed. Id is unchanged."""
+    """Return a copy with one step's title, do and/or linked procedure changed ('' unlinks). Id is unchanged."""
     if not isinstance(title, str) or not title.strip():
         raise ValueError("title must be a non-empty string")
-    if new_title is None and do is None:
-        raise ValueError("edit requires new_title and/or do")
+    if new_title is None and do is None and procedure is None:
+        raise ValueError("edit requires new_title, do and/or procedure")
     if new_title is not None and (not isinstance(new_title, str) or not new_title.strip()):
         raise ValueError("new_title must be a non-empty string")
     if do is not None and (not isinstance(do, str) or not do.strip()):
@@ -205,6 +212,11 @@ def edit_step(
         step["title"] = new_title.strip()
     if do is not None:
         step["do"] = do.strip()
+    if procedure is not None:
+        if procedure.strip():
+            step["procedure"] = procedure.strip()
+        else:
+            step.pop("procedure", None)
     steps[index] = step
     result = validate_procedure(updated)
     if not result.valid:
@@ -276,6 +288,10 @@ def _validate_step(step: Any, path: str, seen_titles: set[str], seen_ids: set[st
         errors.append(Issue(f"{path}.do", "missing required field"))
     elif not isinstance(body, str) or not body.strip():
         errors.append(Issue(f"{path}.do", "expected non-empty string"))
+    # A step may link another procedure: following this step means opening that one and walking it.
+    linked = step.get("procedure")
+    if "procedure" in step and (not isinstance(linked, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", linked)):
+        errors.append(Issue(f"{path}.procedure", "expected a procedure id"))
     return errors
 
 

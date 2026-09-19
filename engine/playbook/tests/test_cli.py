@@ -241,3 +241,27 @@ def test_validate_reports_every_schema_error(tmp_path: Path, monkeypatch) -> Non
         encoding="utf-8",
     )
     assert main(["validate", "bad"]) == 2
+
+
+def test_a_step_can_link_another_procedure_and_open_renders_the_walk(tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    assert main(["create", "measure-gutters", "--title", "Measure gutters", "--description", "d", "--tags", "layout"]) == 0
+    assert main(["add-step", "measure-gutters", "--title", "Read", "--do", "page readings at 375 and 1280."]) == 0
+    assert main(["create", "build-page", "--title", "Build a page", "--description", "d", "--tags", "layout"]) == 0
+    # A dangling link is refused; a real one is stored and validates.
+    assert main(["add-step", "build-page", "--title", "Gutters", "--do", "Check the gutters.", "--procedure", "no-such"]) == 1
+    assert "does not exist" in capsys.readouterr().out
+    assert main(["add-step", "build-page", "--title", "Gutters", "--do", "Check the gutters.", "--procedure", "measure-gutters"]) == 0
+    assert main(["validate", "build-page"]) == 0
+    document = json.loads(procedure_path("build-page").read_text(encoding="utf-8"))
+    assert document["steps"][0]["procedure"] == "measure-gutters"
+    capsys.readouterr()
+    assert main(["open", "build-page", "--for", "the landing page", "--dir", str(tmp_path)]) == 0
+    text = next((tmp_path/".playbook"/"open").glob("build-page--*.md")).read_text()
+    assert 'playbook open measure-gutters --for "the landing page: Gutters"' in text
+    # Unlink, and a link to a procedure deleted afterwards shows up in validate.
+    assert main(["edit-step", "build-page", "--title", "Gutters", "--procedure", ""]) == 0
+    assert "procedure" not in json.loads(procedure_path("build-page").read_text(encoding="utf-8"))["steps"][0]
+    assert main(["edit-step", "build-page", "--title", "Gutters", "--procedure", "measure-gutters"]) == 0
+    procedure_path("measure-gutters").unlink()
+    assert main(["validate", "build-page"]) == 2
