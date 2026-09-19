@@ -17,7 +17,8 @@ def test_shipped_profiles_load_and_xai_needs_a_client_id() -> None:
     assert chatgpt.headers_for('t', {'account_id': 'a'})['chatgpt-account-id'] == 'a'
     assert providers.missing_client_id(chatgpt) is None
     grok = reg.get('xai_grok')
-    assert grok.auth.kind == 'device_code' and 'GROK_OAUTH2_CLIENT_ID' in (providers.missing_client_id(grok) or '')
+    assert grok.auth.kind == 'device_code' and providers.missing_client_id(grok) is None
+    assert grok.api_base_url == 'https://cli-chat-proxy.grok.com/v1' and grok.auth.client_id
 
 
 def test_overrides_and_environment_fill_the_profile() -> None:
@@ -51,8 +52,6 @@ def test_cli_login_status_logout_for_api_key(tmp_path: Path, capsys: pytest.Capt
     assert out['signed_in'] and 'sk-test' not in json.dumps(out)
     assert provider_cli.main(['logout', 'xai_api']) == 0
     assert json.loads(capsys.readouterr().out)['removed'] is True
-    assert provider_cli.main(['login', 'xai_grok']) == 2
-    assert 'client id' in json.loads(capsys.readouterr().out)['error']
     assert provider_cli.main(['list']) == 0
     assert len(json.loads(capsys.readouterr().out)['providers']) >= 8
 
@@ -78,3 +77,29 @@ def test_client_for_subscription(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     response = client.complete({'messages': [{'role': 'user', 'content': 'hello'}]}, 'worker')
     assert response['choices'][0]['message']['content'] == 'hi'
     assert client.count({'messages': [{'role': 'user', 'content': 'hello'}]}, 'worker')['calibrated'] is True
+
+
+def test_cli_models_and_use(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    assert provider_cli.main(['models', 'xai_grok']) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out['default_model'] == 'grok-4.6' and 'grok-4.5' in out['models'] and out['wire'] == 'responses'
+
+    harness = tmp_path / 'harness.json'
+    harness.write_text(json.dumps({'worker': {'provider': 'llama_client', 'known_issues': {'repetition': {}},
+                                              'endpoint': {'base_url': 'http://127.0.0.1:1', 'maximum_response_bytes': 5},
+                                              'generation': {'model': '/x.gguf', 'top_k': 4, 'temperature': 0.5}},
+                                   'controller': {'generation': {'model': '/x.gguf'}}}))
+    engine = tmp_path / 'engine.json'
+    engine.write_text(json.dumps({'harness_config': 'harness.json'}))
+    assert provider_cli.main(['--config', str(engine), 'use', 'xai_grok', 'nope']) == 2
+    assert 'not one of' in json.loads(capsys.readouterr().out)['error']
+    assert provider_cli.main(['--config', str(engine), 'use', 'xai_grok', 'grok-4.5', '--role', 'worker']) == 0
+    assert json.loads(capsys.readouterr().out)['roles'] == ['worker']
+    written = json.loads(harness.read_text())
+    worker = written['worker']
+    assert worker['provider'] == 'subscription' and worker['subscription'] == 'xai_grok' and 'known_issues' not in worker
+    assert worker['endpoint']['base_url'] == 'https://cli-chat-proxy.grok.com/v1' and worker['endpoint']['maximum_response_bytes'] == 5
+    assert worker['generation'] == {'model': 'grok-4.5', 'temperature': 0.5}
+    assert written['controller'] == {'generation': {'model': '/x.gguf'}}
+    assert provider_cli.main(['use', 'openai_chatgpt', '--harness', str(harness)]) == 0
+    assert json.loads(harness.read_text())['controller']['generation']['model'] == 'gpt-5.5'
