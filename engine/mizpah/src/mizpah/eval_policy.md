@@ -19,6 +19,12 @@ Ids match ^[a-z][a-z0-9_]*$. Unknowns that already exist are not listed again; a
 
 When the observation lists related briefs, they are the controller's library: other projects with the same kinds of deliverables and the unknowns that were worth minting for them. A deliverable of this brief that the same kind of artifact was measured for elsewhere (a page's gutters, a list's markers, a button's box) deserves those unknowns here too, cited to this brief's deliverable; a need those briefs had and this one does not is not yours to add.
 
+## A block that names readings
+
+A worker that blocks saying its unknown needs readings A and B first (a procedure walk that went three deep) has
+decomposed the unknown for you: mint A and B as unknowns citing the same brief entry, one task each, and make the
+blocked task's unblock wait on them (`unblock` with `after` once they are done). The blocked unknown is not re-minted.
+
 ## Two quantities under one name
 
 A task blocked because an artifact's number and a known disagree while measuring different things (hover power at
