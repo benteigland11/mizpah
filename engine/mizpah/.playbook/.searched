@@ -685,3 +685,20 @@ Validate the type sample stylesheet links
 brand html sample type uses tokens
 brand type sample html uses brand type css 
 brand type sample html uses brand tokens css 
+Compute candidate fill contrast readings
+candidate contrast fill ratio mark black near white among lowest
+the contrast ratio of candidate 1 s mark fill against white is known 
+the contrast ratio of candidate 1 s mark fill against near black  111 is known 
+the contrast ratio of candidate 2 s mark fill against white is known 
+the contrast ratio of candidate 2 s mark fill against near black  111 is known 
+the contrast ratio of candidate 3 s mark fill against white is known 
+the contrast ratio of candidate 3 s mark fill against near black  111 is known 
+Write and check the palette documentation
+allowed background both brand documents pairs palette role scheme text token values
+it is not known whether brand palette md documents every token with its role  both scheme values  and the allowed text background pairs 
+Confirm the container class is applied and re-measure the before and after state
+bounded bounds character class container define false gutter guttered html index measure
+the current site style css and site index html do not yet define a shared container class that bounds every section s prose to a  70 character measure with a side gutter at every viewport width  css container bounded and guttered is still false 
+Build the Open Graph card HTML and CSS
+assets available brand card content description exists follows html name product social
+ brand social card html  exists and its content follows the name and product description in  content name md  and  content product md   using available brand assets and tokens 

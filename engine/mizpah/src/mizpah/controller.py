@@ -411,7 +411,8 @@ def stem(unknown_id: str) -> str:
     return RETRY_SUFFIX.sub('', unknown_id)
 
 
-def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path | None = None) -> tuple[dict[str, Any], list[str]]:
+def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path | None = None, *,
+          require_deliverables: bool = False) -> tuple[dict[str, Any], list[str]]:
     """Structural floor: every unknown cites a brief entry and names a source that exists; every task
     resolves an open unknown. The quantity is the unknown id — the controller does not pick a second name."""
     refusals: list[str] = []
@@ -734,6 +735,19 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         unblock.append(dict(task=tid, after=after))
     done = decision.get('done')
     done = bool(done) if isinstance(done, bool) else None
+    if require_deliverables:
+        # A route step that leaves a deliverable with no unknown has routed the readings and forgotten the thing
+        # they read: thirteen measurements of marks nobody was asked to draw (logo_mark4, 2026-09-19). The reply is
+        # sent back for the builder — boolean, `creates`, anchored on the source it is built from.
+        cited = {ref for u in observation['unknowns'] for ref in re.findall(r'(?:need|deliverable):\d+', str(u.get('notes') or ''))}
+        cited |= {u['cites'] for u in unknowns} | {a for u in unknowns for a in (u.get('also') or [])}
+        for index, text in enumerate(observation['brief'].get('deliverables') or [], start=1):
+            ref = 'deliverable:'+str(index)
+            if ref in cited or phases.refused_cites(observation['brief'], [ref]):
+                continue
+            refusals.append(ref+' has no unknown: the readings you routed are of what it names, and nothing builds it. Mint '
+                            'its artifact unknown first (boolean, `creates` the file, claim naming the source it is built '
+                            'from) with a task; the readings depend on that task')
     if done is True and (observation['brief'].get('proposals') or proposals):
         done = False
         refusals.append('done refused: a proposal is open — the brief is not met until a person decides it; '
@@ -901,7 +915,7 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
             refusals = refused
             continue
         attempt += 1
-        accepted, refusals = guard(decision, observation, project)
+        accepted, refusals = guard(decision, observation, project, require_deliverables=(mode == 'route'))
         record['attempts'].append(dict(raw=raw, accepted=accepted, refusals=refusals, observation_chars=len(user)))
         minted_nothing = not any(accepted[k] for k in ('unknowns', 'tasks', 'proposals', 'rebucket', 'unblock'))
         if minted_nothing and accepted.get('done') is not True and attempt == 1:

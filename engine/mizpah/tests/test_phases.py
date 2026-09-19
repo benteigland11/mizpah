@@ -451,3 +451,13 @@ def test_a_boolean_about_an_unbuilt_deliverable_file_builds_it(project: Path) ->
     built = next(u for u in accepted['unknowns'] if u['id'] == 'survey_built')
     assert built['creates'] == 'report/survey.md', (built, refusals)
     assert [t['id'] for t in accepted['tasks']] == ['count', 'build'], refusals
+
+
+def test_a_route_reply_without_the_deliverable_is_sent_back_for_the_builder(project: Path) -> None:
+    observation = controller.observe(CONFIG, project)
+    accepted, refusals = controller.guard(dict(unknowns=[
+        dict(id='line_count', cites='need:1', type='number', claim='lines', evidence_needed='wc')],
+        tasks=[dict(id='count', unknowns=['line_count'], bucket='low', title='count')]), observation, project, require_deliverables=True)
+    assert accepted['unknowns'] and any('deliverable:1 has no unknown' in r for r in refusals)
+    # A later-phase deliverable is not demanded yet.
+    assert not any('deliverable:2' in r for r in refusals)
