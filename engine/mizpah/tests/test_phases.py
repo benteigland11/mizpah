@@ -18,7 +18,8 @@ sys.path.insert(0, str(ROOT.parent.parent))   # cg namespace for the harness wid
 from mizpah import controller, phases  # noqa: E402
 
 TERRA = ROOT.parent.parent/'.venv'/'bin'/'terra'
-CONFIG = dict(mizpah=dict(terra=str(TERRA), brief_library=False))
+import tempfile
+CONFIG = dict(mizpah=dict(terra=str(TERRA), brief_library=False, capability_store=tempfile.mkdtemp(prefix='mizpah-caps-')))
 
 
 def terra(project: Path, *args: str) -> dict:
@@ -214,3 +215,24 @@ def test_a_built_page_is_anchored_on_its_source_and_its_readings_follow_it(tmp_p
     assert {u['id'] for u in accepted['unknowns']} == {'site_built', 'section_count'}, refusals
     by_id = {t['id']: t for t in accepted['tasks']}
     assert by_id['build']['deps'] == [] and by_id['count']['deps'] == ['build'], (accepted['tasks'], refusals)
+
+
+def test_registry_records_a_graduation_and_shows_it_to_the_next_brief(instrumented: Path, tmp_path: Path) -> None:
+    from mizpah import capabilities, loop
+    config = dict(CONFIG, mizpah=dict(CONFIG['mizpah'], capability_store=str(tmp_path/'registry')))
+    outcome = loop.advance_enabler(config, instrumented, dict(enabler_id='page_readings'),
+                                  dict(widgets=dict(checked_in=['frontend-headless-page-cli-python'])), tmp_path/'errors.jsonl')
+    assert outcome['status'] == 'graduated'
+    rows = capabilities.registered(config)
+    assert [(r['id'], r['kind'], r['graduates_to'], r['project'], r['uses']) for r in rows] == \
+        [('page_readings', 'tooling', 'frontend-headless-page-cli-python', 'instrumented', 1)]
+    # A new brief declaring the same enabler is shown the registry entry.
+    p = tmp_path/'next'
+    p.mkdir()
+    terra(p, 'init')
+    terra(p, 'brief', 'init', '--title', 'Next', '--mission', 'measure another page')
+    terra(p, 'brief', 'set', '--status', 'active', '--budget-points', '50', '--need', 'Know contrast (page_readings)',
+          '--enabler', 'page_readings:Headless page readings:cg/frontend-headless-page-cli-python')
+    terra(p, 'route', 'init')
+    text = controller.render_observation(controller.observe(config, p), 'route')
+    assert 'registry: page_readings (tooling) Headless page readings — widget frontend-headless-page-cli-python, graduated by instrumented, used 1×' in text

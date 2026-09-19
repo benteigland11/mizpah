@@ -17,7 +17,7 @@ from typing import Any
 from cg.bp_focused_agent_session_python.src import EndpointConfig, ModelClient, llama_model_client
 from cg.backend_persistent_model_session_python.src.persistent_model_session import parse_turn
 
-from . import briefs, enablers, phases
+from . import briefs, capabilities, enablers, phases
 from .worker import terra
 
 ID_PATTERN = re.compile(r'^[a-z][a-z0-9_]*$')
@@ -127,13 +127,14 @@ def observe(config: dict[str, Any], project: Path) -> dict[str, Any]:
     unknowns = [json.loads(path.read_text()) for path in sorted((project/'.terra'/'map'/'unknowns').glob('*.json'))]
     route = terra(config, project, 'route', 'status')
     related_briefs = briefs.related(config, brief) if config['mizpah'].get('brief_library', True) else []
+    registry = capabilities.render(config, brief)
     return dict(
         repo=repo_digest(project),
         brief={key: brief.get(key) for key in ('title', 'version', 'status', 'mission', 'needs', 'deliverables',
                                                 'non_goals', 'enablers', 'budget_points', 'phases', 'open_proposals')}
               | dict(proposals=[p for p in json.loads((project/'.terra'/'brief.json').read_text()).get('proposals') or []
                                 if p.get('status') in (None, 'open', 'pending')]),
-        gate=sitrep.get('gate'), related_briefs=related_briefs,
+        gate=sitrep.get('gate'), related_briefs=related_briefs, registry=registry,
         budget=(sitrep.get('route') or {}).get('budget'),
         knowns=[dict(id=k.get('id'), type=k.get('type'), status=k.get('status'), confidence=k.get('confidence'),
                      n=(k.get('stats') or {}).get('n'), mean=(k.get('stats') or {}).get('mean'),
@@ -155,6 +156,7 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
              'Mission: '+str(brief.get('mission'))]
     lines += phases.render(brief)
     lines += enablers.render(brief)
+    lines += observation.get('registry') or []
     cited: dict[str, list[str]] = {}
     for u in observation['unknowns']:
         notes = str(u.get('notes') or '')
