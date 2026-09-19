@@ -363,12 +363,37 @@ def writeback(snapshot: bytes, project: Path, task: dict[str, Any], map_id: str,
     return written
 
 
+class _store_lock:
+    """One harvest into a shared store at a time: two loops finishing tasks together must not race on the
+    same procedure or widget id (last writer wins silently otherwise). A flock on a file beside the store."""
+
+    def __init__(self, store: Path) -> None:
+        store.mkdir(parents=True, exist_ok=True)
+        self.path = store/'.harvest.lock'
+
+    def __enter__(self) -> None:
+        import fcntl
+        self.handle = self.path.open('a+')
+        fcntl.flock(self.handle, fcntl.LOCK_EX)
+
+    def __exit__(self, *_: Any) -> None:
+        import fcntl
+        fcntl.flock(self.handle, fcntl.LOCK_UN)
+        self.handle.close()
+
+
 def harvest_playbook(snapshot: bytes, store: Path, config: dict[str, Any],
                      allowed: tuple[str, ...] | None = None) -> dict[str, list[str]]:
     """Procedures new or changed in the workspace copy; installed only if they validate.
 
     With `allowed`, only those ids are considered: the procedures this session followed or created.
     Anything else the worker touched stays in its workspace."""
+    with _store_lock(store):
+        return _harvest_playbook(snapshot, store, config, allowed)
+
+
+def _harvest_playbook(snapshot: bytes, store: Path, config: dict[str, Any],
+                      allowed: tuple[str, ...] | None = None) -> dict[str, list[str]]:
     installed, rejected, ignored = [], [], []
     prefix = PLAYBOOK_PREFIX+'/playbook/procedures/'
     with tarfile.open(fileobj=io.BytesIO(snapshot), mode='r:') as archive:
@@ -437,6 +462,11 @@ def widgets_touched(root: Path) -> list[str]:
 
 
 def harvest_widgets(snapshot: bytes, root: Path, config: dict[str, Any]) -> dict[str, list[str]]:
+    with _store_lock(Path(config['mizpah']['widget_library'])):
+        return _harvest_widgets(snapshot, root, config)
+
+
+def _harvest_widgets(snapshot: bytes, root: Path, config: dict[str, Any]) -> dict[str, list[str]]:
     """Widgets the session created or changed: validated and checked into the local library after green.
 
     Never published. A widget the library already holds at identical source is left alone.
