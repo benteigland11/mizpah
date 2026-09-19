@@ -378,3 +378,6 @@ report design md has a row for need 3 stating its reading and whether it meets c
 report design md has a row for need 4 stating its reading and whether it meets content targets json 
 report design md has a row for need 5 stating its reading and whether it meets content targets json 
 report design md has a row for need 6 stating its reading and whether it meets content targets json 
+Verify the landing page has no external requests
+html index makes outside requests site style urls
+site index html with site style css makes no requests to urls outside site  

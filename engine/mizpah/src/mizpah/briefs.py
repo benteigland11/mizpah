@@ -60,7 +60,7 @@ def _stems(words: set[str]) -> set[str]:
     return {w[:5] for w in words}
 
 
-def related(config: dict[str, Any], brief: dict[str, Any], *, limit: int = 3) -> list[dict[str, Any]]:
+def related(config: dict[str, Any], brief: dict[str, Any], *, limit: int = 2) -> list[dict[str, Any]]:
     """The stored briefs nearest this one: ranked by shared stems across mission, needs and deliverables,
     excluding the same project; each with the unknowns it minted."""
     here = _stems(_words(' '.join([str(brief.get('mission') or '')]+list(brief.get('needs') or [])+list(brief.get('deliverables') or []))))
@@ -86,7 +86,7 @@ def related(config: dict[str, Any], brief: dict[str, Any], *, limit: int = 3) ->
     return [dict(doc, overlap=round(score, 2)) for score, doc in sorted(scored.values(), key=lambda sd: -sd[0])[:limit]]
 
 
-def render(briefs: list[dict[str, Any]], *, max_unknowns: int = 14) -> list[str]:
+def render(briefs: list[dict[str, Any]], *, max_unknowns: int = 8) -> list[str]:
     if not briefs:
         return []
     lines = ['# Related briefs (what other projects measured for the same kinds of deliverables; the controller\'s '
@@ -95,8 +95,10 @@ def render(briefs: list[dict[str, Any]], *, max_unknowns: int = 14) -> list[str]
         outcome = str(doc.get('stop') or '?')
         lines.append('  '+str(doc.get('title'))+' — '+outcome+', '+str(doc.get('tasks'))+' tasks; '
                      +str(len([u for u in doc.get('unknowns') or [] if u.get('resolved')]))+'/'+str(len(doc.get('unknowns') or []))+' unknowns resolved')
-        for u in (doc.get('unknowns') or [])[:max_unknowns]:
-            lines.append('    '+str(u['id'])+' ['+str(u.get('type'))+', '+str(u.get('cites') or '?')+'] '+str(u.get('claim'))[:110])
+        # Resolved unknowns first (what was actually measured), ids and cites only: the claim text is the
+        # controller's to write for its own brief, and the section was the largest thing it read.
+        unknowns = sorted(doc.get('unknowns') or [], key=lambda u: not u.get('resolved'))[:max_unknowns]
+        lines.append('    '+'; '.join(str(u['id'])+' ['+str(u.get('type'))[:3]+', '+str(u.get('cites') or '?')+']' for u in unknowns))
         if doc.get('proposals'):
             lines.append('    proposed: '+' | '.join(p[:80] for p in doc['proposals'][:2]))
     return lines

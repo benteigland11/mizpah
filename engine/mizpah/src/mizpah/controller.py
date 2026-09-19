@@ -226,7 +226,13 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
                      'or asked. Route it again only with a different question or type; otherwise propose the change '
                      'and leave it — the artifacts that depend on the map may still be built.')
     lines.append('Route tasks:'+('' if observation['tasks'] else ' (none)'))
+    finished = [t for t in observation['tasks'] if t['status'] in ('done', 'cancelled')]
+    if finished:
+        # Closed tasks are history the map already shows as knowns: ids only.
+        lines.append('  done: '+', '.join(t['id'] for t in finished))
     for t in observation['tasks']:
+        if t in finished:
+            continue
         lines.append('  '+t['id']+' ['+t['status']+', '+str(t['bucket'])+'] → '+', '.join(t.get('unknowns') or [str(t['unknown'])])+': '+t['title']+
                      (' (blocked: '+t['blocked_reason']+')' if t.get('blocked_reason') else ''))
     if any(str(t.get('blocked_reason') or '').startswith(BUDGET_BLOCK) for t in observation['tasks']):
