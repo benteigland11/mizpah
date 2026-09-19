@@ -762,7 +762,7 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
             continue
         attempt += 1
         accepted, refusals = guard(decision, observation, project)
-        record['attempts'].append(dict(raw=raw, accepted=accepted, refusals=refusals))
+        record['attempts'].append(dict(raw=raw, accepted=accepted, refusals=refusals, observation_chars=len(user)))
         minted_nothing = not any(accepted[k] for k in ('unknowns', 'tasks', 'proposals', 'rebucket', 'unblock'))
         if minted_nothing and accepted.get('done') is not True and attempt == 1:
             # It described what is owed but routed nothing: ask once for the unknowns or an explicit done.

@@ -231,6 +231,15 @@ def write_report(config: dict[str, Any], project: Path, root: Path, cycles: list
         refused = _count(e['host'] for e in egress if not e.get('allowed'))
         lines.append('- egress: '+str(sum(allowed.values()))+' allowed ('+', '.join(h+' ×'+str(n) for h, n in sorted(allowed.items(), key=lambda kv: -kv[1])[:6])
                      +'); '+str(sum(refused.values()))+' refused ('+', '.join(h+' ×'+str(n) for h, n in sorted(refused.items(), key=lambda kv: -kv[1])[:6])+')')
+    sizes = []
+    if (root/'controller.jsonl').exists():
+        for line in (root/'controller.jsonl').read_text().splitlines():
+            try:
+                sizes += [int(a.get('observation_chars') or 0) for a in json.loads(line).get('attempts') or [] if a.get('observation_chars')]
+            except ValueError:
+                continue
+    if sizes:
+        lines.append('- controller observation: '+str(sizes[-1]//4)+' tokens last, '+str(max(sizes)//4)+' max over '+str(len(sizes))+' steps')
     phase_rows = [ph for c in cycles for ph in (c.get('phases') or [])]
     if phase_rows:
         lines += ['', '## Phases']
