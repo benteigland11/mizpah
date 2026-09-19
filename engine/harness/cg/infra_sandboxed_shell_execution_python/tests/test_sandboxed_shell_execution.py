@@ -471,3 +471,15 @@ def test_a_command_matching_a_refused_pattern_is_rejected_with_its_reason(tmp_pa
     assert shell.run("echo '{}' > .terra/brief.json", b'').status == 'rejected'
     with pytest.raises(ValueError):
         ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits(), refused_patterns=(('(', 'bad'),))
+
+
+def test_a_service_log_past_its_cap_keeps_only_its_tail(tmp_path):
+    shell = SandboxedShell(ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits(),
+                                       share_network=True, services=ServiceLimits(512*1024**2, 64, 600, 2, 120, log_bytes=1000)))
+    home = shell.services_root/'web'
+    home.mkdir(parents=True)
+    (home/'log').write_bytes(b'x'*2000+b'END')
+    shell._services['web'] = dict(unit='u', command='c', started_at=0)
+    shell._cap_logs()
+    data = (home/'log').read_bytes()
+    assert data.startswith(b'[log head dropped') and data.endswith(b'END') and len(data) < 1100

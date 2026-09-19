@@ -52,6 +52,8 @@ class ServiceLimits:
     lifetime_seconds: float
     maximum_services: int = 4
     wait_seconds: float = 1800
+    # A service's log lives on host scratch; past this size its head is dropped (the tail is what anyone reads).
+    log_bytes: int = 8*1024*1024
 
     def __post_init__(self) -> None:
         if any(value <= 0 for value in self.__dict__.values()):
@@ -498,6 +500,7 @@ class SandboxedShell:
         unit = 'isolated-shell-'+uuid4().hex
         if self._services:
             self._mirror_workspace(workspace)
+            self._cap_logs()
         with tempfile.TemporaryDirectory(dir=config.scratch_root, prefix='shell-input-') as directory:
             input_dir = Path(directory)
             (input_dir/'workspace.tar').write_bytes(workspace)
@@ -661,6 +664,25 @@ class SandboxedShell:
         (self.services_root/name/'status.json').write_text(json.dumps(dict(
             name=name, command=entry['command'], unit=entry['unit'], started_at=entry['started_at'],
             stopped_at=entry.get('stopped_at'), state=self.service_state(name)), indent=1)+'\n')
+
+    def _cap_logs(self) -> None:
+        """Keep every running service's log under log_bytes by dropping its head (called before each command)."""
+        limit = self.config.services.log_bytes if self.config.services else None
+        if limit is None:
+            return
+        for name, entry in self._services.items():
+            if entry.get('stopped_at') is not None:
+                continue
+            log = self.services_root/name/'log'
+            try:
+                size = log.stat().st_size
+            except OSError:
+                continue
+            if size > limit:
+                with log.open('rb') as handle:
+                    handle.seek(size-limit//2)
+                    tail = handle.read()
+                log.write_bytes(b'[log head dropped: it passed '+str(limit).encode()+b' bytes]\n'+tail)
 
     def _mirror_workspace(self, workspace: bytes, *, only: str | None = None) -> None:
         """Give each running service the workspace as of now at its /work (wipe and re-extract: small, exact)."""

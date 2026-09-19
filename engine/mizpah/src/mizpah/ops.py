@@ -185,6 +185,13 @@ def write_report(config: dict[str, Any], project: Path, root: Path, cycles: list
             lines.append('  - '+str(step.get('mode'))+': applied '+summary+(', refused '+str(refused) if refused else '')
                          +(' — done' if step.get('done') is True else '')
                          +(' — error: '+str(step['error'])[:120] if step.get('error') else ''))
+    refusals = _refusals(root)
+    if refusals:
+        lines += ['', '## Refused by the guards (what the structure caught)']
+        for task_name, rows in refusals.items():
+            lines.append('- `'+task_name+'`: '+str(len(rows))+' refused')
+            for reason, count in sorted(_count(r['reason'] for r in rows).items(), key=lambda kv: -kv[1])[:5]:
+                lines.append('  - '+str(count)+'× '+reason[:140])
     outages = [r for t in (root/'tasks').glob('*') for r in _read_jsonl(t/'outages.jsonl')] if (root/'tasks').exists() else []
     health = _read_jsonl(root/'health.jsonl')
     notes = _read_jsonl(root/'errors.jsonl')
@@ -206,6 +213,39 @@ def write_report(config: dict[str, Any], project: Path, root: Path, cycles: list
     path = root/'report.md'
     path.write_text('\n'.join(lines)+'\n')
     return path
+
+
+def _count(items: Any) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for item in items:
+        out[item] = out.get(item, 0)+1
+    return out
+
+
+def _refusals(root: Path) -> dict[str, list[dict[str, Any]]]:
+    """Every tool call a guard refused, per task, from the session journals: rejected shell commands (paths,
+    patterns, oversized arguments) and refused writes to protected records."""
+    out: dict[str, list[dict[str, Any]]] = {}
+    for journal in sorted(root.glob('tasks/*/events/session.jsonl')):
+        rows = []
+        for line in journal.read_text().splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if event.get('event_type') != 'tool_outcome':
+                continue
+            payload = event.get('payload') or {}
+            status = payload.get('status')
+            detail = str(payload.get('detail') or payload.get('error') or '')
+            guard = status == 'rejected' or (status == 'error' and any(
+                mark in detail for mark in ('a tool owns', 'refused', 'too long for one call', 'only creates files')))
+            if guard:
+                reason = detail.split('.')[0].removeprefix('refused: ')[:160] or str(payload.get('code') or status)
+                rows.append(dict(reason=reason, at=event.get('created_at')))
+        if rows:
+            out[journal.parts[-3]] = rows
+    return out
 
 
 def _engine_version() -> str:
