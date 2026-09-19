@@ -22,6 +22,7 @@ import re
 import subprocess
 import sys
 import tarfile
+import time
 from typing import Any
 
 from cg.bp_focused_agent_session_python.src import (
@@ -600,6 +601,88 @@ def task_gate(config: dict[str, Any], project: Path, task: dict[str, Any], map_i
                                     if v.get('map_id') != map_id and v.get('id') not in own_ids])
 
 
+def remeasure(config: dict[str, Any], project: Path, root: Path, known_ids: list[str]) -> list[str]:
+    """The host takes each adopted reading again, in a sandbox the worker never touched, and compares.
+
+    Nothing that runs in the worker's sandbox can be trusted not to have been shaped by it; the only check
+    that costs the worker nothing to pass honestly and everything to pass dishonestly is an independent
+    re-measurement. A fresh shell (own network namespace, no services) runs `terra probe run` for the known's
+    probe on the project as written back; a reading that disagrees, or a probe that cannot run without the
+    worker's ambient state (a browser it left on a port), is a problem the gate reports. Only the value is
+    compared: numbers within tolerance, booleans and labels exactly.
+    """
+    problems: list[str] = []
+    sandbox = config['mizpah']['sandbox']
+    scratch = root/'remeasure'
+    scratch.mkdir(parents=True, exist_ok=True)
+    network = NetworkPolicy(**sandbox['network']) if sandbox.get('network') else None
+    shell = SandboxedShell(ShellConfig(**(config['shell'] | dict(
+        scratch_root=str(scratch), limits=ShellLimits(**config['shell']['limits']),
+        read_only_binds=tuple(sandbox['read_only_binds']), environment=dict(sandbox['environment']),
+        share_network=bool(sandbox.get('share_network', False)) and network is None, network=network,
+        refused_paths=tuple(sandbox.get('refused_paths') or ()), refused_patterns=REFUSED_PATTERNS))))
+    try:
+        workspace = pack_workspace(project)
+        for known_id in known_ids:
+            known = read_known(project, known_id)
+            if known is None:
+                continue
+            probe_id = (known.get('probe_ids') or [None])[0] or (known.get('primary_run_id') or '').split('_', 1)[-1].rsplit('_', 1)[0]
+            if not probe_id:
+                problems.append('re-measure: known '+known_id+' names no probe')
+                continue
+            expected = extract_known_value(known)
+            result = shell.run('terra probe run '+probe_id+' --to \'{"kind": "file"}\' --json 2>/dev/null; '
+                               'cat .terra/map/probes/'+probe_id+'/_last_reading.json 2>/dev/null', workspace,
+                               timeout_seconds=min(80, config['shell']['limits']['command_seconds']))
+            reading = None
+            text = result.stdout
+            start = text.rfind('{"to"') if '{"to"' in text else text.rfind('{\n  "to"')
+            try:
+                doc = json.loads(text[start:]) if start >= 0 else {}
+                reading = (doc.get('readings') or {}).get(known.get('quantity') or known_id)
+            except ValueError:
+                reading = None
+            if reading is None:
+                problems.append('re-measure: probe '+probe_id+' did not produce a reading for '+known_id+' when the host ran it '
+                                'alone (exit '+str(result.exit_code)+'): '+(result.stderr or result.stdout).strip()[-200:]
+                                +' — a reading must not depend on state only your session had (a service on a port, a file outside the project)')
+                continue
+            if not values_agree(known.get('type'), expected, reading):
+                problems.append('re-measure: known '+known_id+' = '+str(expected)+' on the map but the host\'s own run of '
+                                +probe_id+' read '+str(reading)+'; the reading is not reproducible')
+    finally:
+        shell.close()
+    (root/'remeasure.jsonl').open('a').write(json.dumps(dict(at=time.time(), knowns=known_ids, problems=problems))+'\n')
+    return problems
+
+
+def extract_known_value(known: dict[str, Any]) -> Any:
+    stats = known.get('stats') or {}
+    kind = stats.get('kind') or known.get('type')
+    if kind == 'number':
+        return stats.get('mean')
+    if kind == 'boolean':
+        return None if stats.get('rate') is None else stats['rate'] >= 0.5
+    if kind == 'label':
+        return stats.get('mode')
+    return stats.get('value')
+
+
+def values_agree(kind: str | None, expected: Any, reading: Any) -> bool:
+    if expected is None or reading is None:
+        return False
+    if kind == 'boolean':
+        return isinstance(reading, bool) and reading == expected
+    if kind == 'label':
+        return str(reading) == str(expected)
+    try:
+        a, b = float(expected), float(reading)
+    except (TypeError, ValueError):
+        return False
+    return abs(a-b) <= max(1e-6, 0.02*abs(a))   # 2%: a re-run of a reading, not a different reading
+
+
 def red_message(gate: dict[str, Any], project: Path, map_id: str, unknown_ids: list[str]) -> str:
     """The delta only: what is missing and what to keep (never a restatement of the task)."""
     keep = []
@@ -791,7 +874,10 @@ def green_message(gate: dict[str, Any], unknown_id: str | list[str], used: list[
             ' Then `playbook validate <id>` and reply with the procedure id and nothing else.\n')
 
 
-def client_for(spec: dict[str, Any], observer: Any) -> ModelClient:
+def client_for(spec: dict[str, Any], observer: Any, config: dict[str, Any] | None = None) -> ModelClient:
+    if spec.get('provider') == 'subscription':
+        from mizpah.providers import hosted_model_client
+        return hosted_model_client(spec, config or {}, observer)
     endpoint = EndpointConfig(**spec['endpoint'])
     if spec.get('provider', 'direct_json') == 'llama_client':
         return llama_model_client(endpoint, known_issues=spec.get('known_issues'),
@@ -809,10 +895,10 @@ def observe_model(root: Path):
 
 def bindings(config: dict[str, Any], root: Path, map_id: str, checkins: bool | None = None) -> tuple[ModelClient, ModelClient | None, SandboxedShell]:
     observe = observe_model(root)
-    worker = client_for(config['worker'], observe)
+    worker = client_for(config['worker'], observe, config)
     if checkins is None:
         checkins = config['mizpah']['scaffolding']['checkins']
-    checkin = client_for(config['controller'], observe) if checkins else None
+    checkin = client_for(config['controller'], observe, config) if checkins else None
     scratch = root/'scratch'
     scratch.mkdir(parents=True, exist_ok=True)
     sandbox = config['mizpah']['sandbox']
@@ -1013,12 +1099,8 @@ def build_settings(config: dict[str, Any], assignment: str, reference: str,
 
 
 def model_up(config: dict[str, Any]) -> bool:
-    import urllib.request
-    try:
-        with urllib.request.urlopen(config['worker']['endpoint']['base_url'].rstrip('/')+'/health', timeout=5) as r:
-            return r.status == 200
-    except OSError:
-        return False
+    from mizpah.ops import model_up as reachable
+    return reachable(config['worker']['endpoint']['base_url'])
 
 
 def run_through_outages(session: FocusedSession, config: dict[str, Any], root: Path, *, maximum_worker_turns: int,
@@ -1092,7 +1174,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             session = FocusedSession.open(root, worker=worker_client, shell=shell, controller=checkin)
         except ValueError:
             # A session created with check-ins keeps its reviewer binding even after the toggle went off.
-            checkin = client_for(config['controller'], observe_model(root))
+            checkin = client_for(config['controller'], observe_model(root), config)
             session = FocusedSession.open(root, worker=worker_client, shell=shell, controller=checkin)
         discarded = session.discard_pending()  # a killed run leaves an uncommitted call; nothing is replayed
         lifted = session.reset_generation_block()   # a degenerate window is retried in a fresh one, not re-raised
@@ -1170,6 +1252,11 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             session.interject(effort_message(task, estimate, status['completed_worker_turns'], overruns))
             continue
         gate = task_gate(config, project, task, map_id, root)
+        if gate['ok'] and config['mizpah'].get('remeasure', True):
+            # Green on the worker's evidence is not yet green: the host takes the readings itself.
+            checked = remeasure(config, project, root, [k for k in gate['knowns'] if k in task_unknown_ids(task)] or task_unknown_ids(task))
+            if checked:
+                gate = dict(gate, ok=False, problems=checked)
         unticked = open_checklists(session.workspace())
         if unticked:
             gate = dict(gate, ok=False, problems=gate['problems']+unticked)
