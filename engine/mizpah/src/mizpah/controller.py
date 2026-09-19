@@ -301,8 +301,12 @@ def uncovered_deliverable_terms(observation: dict[str, Any], extra_unknowns: lis
     unknowns = list(observation['unknowns'])+[dict(id=u['id'], claim=u['claim'], notes='cites '+u['cites']) for u in extra_unknowns]
     for index, text in enumerate(observation['brief'].get('deliverables') or [], start=1):
         ref = 'deliverable:'+str(index)
-        citing = ' '.join((u['id']+' '+str(u.get('claim') or '')).lower() for u in unknowns
-                          if ('cites '+ref) in str(u.get('notes') or ''))
+        citing_unknowns = [u for u in unknowns if ('cites '+ref) in str(u.get('notes') or '')]
+        if not citing_unknowns:
+            # No backticks does not mean nothing named: a deliverable no unknown cites is not covered at all.
+            problems.append(ref+' has no unknown citing it (the artifact it names has not been made or verified)')
+            continue
+        citing = ' '.join((u['id']+' '+str(u.get('claim') or '')).lower() for u in citing_unknowns)
         terms = [t for t in re.findall(r'`([^`]+)`', text) if t and len(t) <= 60]
         def covered(term: str) -> bool:
             low = term.lower()
