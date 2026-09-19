@@ -20,7 +20,7 @@ from cg.backend_persistent_model_session_python.src.persistent_model_session imp
 from .worker import terra
 
 ID_PATTERN = re.compile(r'^[a-z][a-z0-9_]*$')
-TYPES = ('number', 'boolean')
+TYPES = ('number', 'boolean', 'label')
 BUCKETS = ('low', 'medium', 'high')
 OPEN_UNKNOWN = ('open', 'probing', 'blocked')
 OPEN_TASK = ('ready', 'in_progress', 'blocked', 'pending')
@@ -135,7 +135,7 @@ def observe(config: dict[str, Any], project: Path) -> dict[str, Any]:
         budget=(sitrep.get('route') or {}).get('budget'),
         knowns=[dict(id=k.get('id'), type=k.get('type'), status=k.get('status'), confidence=k.get('confidence'),
                      n=(k.get('stats') or {}).get('n'), mean=(k.get('stats') or {}).get('mean'),
-                     rate=(k.get('stats') or {}).get('rate'), claim=k.get('claim'),
+                     rate=(k.get('stats') or {}).get('rate'), mode=(k.get('stats') or {}).get('mode'), claim=k.get('claim'),
                      stale=k.get('stale', False), stale_reasons=k.get('stale_reasons') or []) for k in knowns],
         unknowns=[dict(id=u['id'], status=u.get('status'), type=u.get('type'), quantity=u.get('quantity'),
                        claim=u.get('claim'), resolved_by=u.get('resolved_by'), notes=u.get('notes')) for u in unknowns],
@@ -188,7 +188,9 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
     lines.append('Knowns:'+('' if observation['knowns'] else ' (none)'))
     for k in observation['knowns']:
         value = k['mean'] if k['mean'] is not None else k['rate']
-        if k['type'] == 'boolean' and value is not None:
+        if k['type'] == 'label':
+            value = repr(k.get('mode')) if k.get('mode') is not None else None
+        elif k['type'] == 'boolean' and value is not None:
             value = 'true' if float(value) >= 0.5 else 'false'
         elif isinstance(value, float):
             value = round(value, 4)

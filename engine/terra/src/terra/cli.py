@@ -1607,7 +1607,7 @@ def cmd_unknown_show(args: argparse.Namespace) -> int:
     if rec.get("probe_id") and rec.get("probe_id") not in pids:
         pids = [rec["probe_id"], *pids]
     print(f"probes: {', '.join(pids) if pids else '(none)'}")
-    if rec.get("type") in ("number", "boolean", "formula"):
+    if rec.get("type") in ("number", "boolean", "label", "formula"):
         st = rec.get("stats") or {}
         if rec.get("type") == "formula":
             print(
@@ -1616,6 +1616,13 @@ def cmd_unknown_show(args: argparse.Namespace) -> int:
                 f"n={st.get('n')}  conf_derived={rec.get('confidence_derived')}"
             )
             print(f"vars: {rec.get('vars')}")
+        elif rec.get("type") == "label":
+            print(
+                f"type: label  quantity={rec.get('quantity')}  "
+                f"n={st.get('n')}  mode={st.get('mode')!r}  "
+                f"agreement={st.get('agreement')}  distinct={st.get('distinct')}  "
+                f"confidence_derived={rec.get('confidence_derived')}"
+            )
         elif rec.get("type") == "boolean":
             print(
                 f"type: boolean  quantity={rec.get('quantity')}  "
@@ -1699,6 +1706,8 @@ def _print_known_summary(prefix: str, rec: dict, path: Path | None = None) -> No
             f"  n={st.get('n')}  rate={st.get('rate')}  "
             f"k_true={st.get('k_true')}  k_false={st.get('k_false')}"
         )
+    elif rec.get("type") == "label":
+        print(f"  n={st.get('n')}  mode={st.get('mode')!r}  agreement={st.get('agreement')}")
     else:
         print(f"  n={st.get('n')}  mean={st.get('mean')}  std={st.get('std')}")
     if path is not None:
@@ -1708,7 +1717,7 @@ def _print_known_summary(prefix: str, rec: dict, path: Path | None = None) -> No
 _KNOWN_BIRTH_MSG = (
     "`terra known create` is retired — knowns are born by graduating an "
     "evidence-bearing unknown.\n"
-    "  terra unknown create <slug> --type number|boolean|formula "
+    "  terra unknown create <slug> --type number|boolean|label|formula "
     "--quantity <q> --claim \"…?\" --evidence \"…\"\n"
     "  terra unknown link-probe <slug> <probe_id>\n"
     "  terra probe run <probe_id> --to '…' --json\n"
@@ -1781,6 +1790,8 @@ def cmd_known_list(args: argparse.Namespace) -> int:
             stat_s = f"holds={st.get('holds')}  rate={st.get('holds_rate')}  n={st.get('n')}"
         elif rec.get("type") == "boolean":
             stat_s = f"n={st.get('n')}  rate={st.get('rate')}"
+        elif rec.get("type") == "label":
+            stat_s = f"n={st.get('n')}  mode={st.get('mode')!r}"
         else:
             stat_s = f"n={st.get('n')}  mean={st.get('mean')}"
         print(
@@ -1858,6 +1869,11 @@ def cmd_known_show(args: argparse.Namespace) -> int:
                 f"stats: n={st.get('n')}  rate={st.get('rate')}  "
                 f"k_true={st.get('k_true')}  k_false={st.get('k_false')}"
             )
+        elif rec.get("type") == "label":
+            print(
+                f"stats: n={st.get('n')}  mode={st.get('mode')!r}  "
+                f"agreement={st.get('agreement')}  distinct={st.get('distinct')}"
+            )
         else:
             print(
                 f"stats: n={st.get('n')}  mean={st.get('mean')}  std={st.get('std')}  "
@@ -1868,6 +1884,8 @@ def cmd_known_show(args: argparse.Namespace) -> int:
         for pid, g in sorted(by_probe.items()):
             if rec.get("type") == "boolean":
                 print(f"  method {pid}: n={g.get('n')} rate={g.get('rate')}")
+            elif rec.get("type") == "label":
+                print(f"  method {pid}: n={g.get('n')} mode={g.get('mode')!r}")
             else:
                 print(f"  method {pid}: n={g.get('n')} mean={g.get('mean')} std={g.get('std')}")
     corr = st.get("corroboration") or {}
@@ -2466,6 +2484,12 @@ def cmd_known_link_run(args: argparse.Namespace) -> int:
             f"k_true={st.get('k_true')}  conf={rec.get('confidence')}/"
             f"{rec.get('confidence_derived')}"
         )
+    elif rec.get("type") == "label":
+        print(
+            f"known {rec['id']}  n={st.get('n')}  mode={st.get('mode')!r}  "
+            f"agreement={st.get('agreement')}  conf={rec.get('confidence')}/"
+            f"{rec.get('confidence_derived')}"
+        )
     else:
         print(
             f"known {rec['id']}  n={st.get('n')}  mean={st.get('mean')}  "
@@ -2840,7 +2864,7 @@ def cmd_unknown_unlink_run(args: argparse.Namespace) -> int:
         f"unknown {rec['id']}  run_ids={rec.get('run_ids')}  "
         f"primary_run={rec.get('primary_run_id')}"
     )
-    if rec.get("type") in ("number", "boolean"):
+    if rec.get("type") in ("number", "boolean", "label"):
         print(
             f"  recomputed n={st.get('n')}  "
             f"derived={rec.get('confidence_derived')}"
@@ -2874,6 +2898,8 @@ def cmd_known_unlink_run(args: argparse.Namespace) -> int:
     )
     if rec.get("type") == "boolean":
         print(f"  n={st.get('n')}  rate={st.get('rate')}")
+    elif rec.get("type") == "label":
+        print(f"  n={st.get('n')}  mode={st.get('mode')!r}")
     else:
         print(f"  n={st.get('n')}  mean={st.get('mean')}  std={st.get('std')}")
     if not (st.get("n") or 0):
@@ -4012,9 +4038,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_uc.add_argument(
         "--type",
         default=None,
-        choices=["number", "boolean", "formula", "relation"],
+        choices=["number", "boolean", "label", "formula", "relation"],
         dest="type",
-        help="number | boolean | formula (expr+vars) | relation (F(x) curve)",
+        help="number | boolean | label (a name the data answers with) | formula (expr+vars) | relation (F(x) curve)",
     )
     p_uc.add_argument(
         "--x-quantity",
@@ -4028,7 +4054,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_uc.add_argument(
         "--quantity",
         default=None,
-        help="For number/boolean: stable measure name (e.g. hostile_count)",
+        help="For number/boolean/label: stable measure name (e.g. hostile_count)",
     )
     p_uc.add_argument(
         "--expression",

@@ -1,4 +1,4 @@
-"""Map types: number + boolean — samples in, substrate-computed stats out.
+"""Map types: number + boolean + label — samples in, substrate-computed stats out.
 
 Probes stay open. Typed knowns/unknowns filter the world.
 Agents do not author stats; Terra recomputes from runs.measures.
@@ -13,10 +13,12 @@ from typing import Any
 
 # Leaf filter types for knowns/unknowns and for plan *legs*.
 # Plans are a higher layer (see evidence_plan / plans), not a peer type.
-# number/boolean: estimates; formula: observation as checkable predicate + vars
-SCALAR_TYPES = frozenset({"number", "boolean"})
+# number/boolean: estimates; label: a name the world answers with (argmax, id,
+# filename) — categorical samples, the mode is the value; formula: observation
+# as checkable predicate + vars
+SCALAR_TYPES = frozenset({"number", "boolean", "label"})
 # relation: F(x) curves — samples are (x, y) pairs, ladder unit is sweeps
-MAP_TYPES = frozenset({"number", "boolean", "formula", "relation"})
+MAP_TYPES = frozenset({"number", "boolean", "label", "formula", "relation"})
 CONFIDENCE_LEVELS = ("low", "med", "high")
 CONFIDENCE_SET = frozenset(CONFIDENCE_LEVELS)
 
@@ -167,6 +169,67 @@ def derive_confidence_boolean(stats: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Label
+# ---------------------------------------------------------------------------
+
+
+def coerce_label(value: Any) -> str | None:
+    """A label sample is a non-empty string; numbers and booleans are not labels."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    return None
+
+
+def compute_label_stats(values: list[str]) -> dict[str, Any]:
+    """From sample vector → n, distinct, mode, agreement (share of samples equal to the mode)."""
+    clean = [v for v in values if isinstance(v, str) and v.strip()]
+    n = len(clean)
+    if n == 0:
+        return {
+            "kind": "label",
+            "n": 0,
+            "distinct": 0,
+            "mode": None,
+            "agreement": None,
+            "values": [],
+        }
+    counts: dict[str, int] = {}
+    for v in clean:
+        counts[v] = counts.get(v, 0) + 1
+    mode = max(counts, key=lambda k: (counts[k], -clean.index(k)))
+    return {
+        "kind": "label",
+        "n": n,
+        "distinct": len(counts),
+        "mode": mode,
+        "agreement": float(counts[mode]) / float(n),
+        "values": clean,
+    }
+
+
+def derive_confidence_label(stats: dict[str, Any]) -> str:
+    """low: n>=1; med: n>=3 unanimous; high: n>=5 unanimous AND >=2 methods agreeing.
+    Samples that disagree name no value, so they stay low."""
+    from .corroboration import corroboration_gate_high, methods_disagree
+
+    if methods_disagree(stats):
+        return "low"
+    n = int(stats.get("n") or 0)
+    if n < 1:
+        return "low"
+    if stats.get("agreement") != 1.0:
+        return "low"
+    if n >= 5 and corroboration_gate_high(stats)[0]:
+        return "high"
+    if n >= 3:
+        return "med"
+    return "low"
+
+
+# ---------------------------------------------------------------------------
 # Shared confidence API
 # ---------------------------------------------------------------------------
 
@@ -175,6 +238,8 @@ def derive_confidence(stats: dict[str, Any], map_type: str | None = None) -> str
     kind = map_type or stats.get("kind") or "number"
     if kind == "boolean":
         return derive_confidence_boolean(stats)
+    if kind == "label":
+        return derive_confidence_label(stats)
     if kind == "formula":
         from .formula_type import derive_confidence_formula
 
@@ -228,6 +293,13 @@ def can_claim_confidence(
             False,
             f"cannot claim confidence={want!r} with n={stats.get('n')}, "
             f"rate={stats.get('rate')} (derived max is {derived!r}; need more trials)",
+        )
+    if kind == "label":
+        return (
+            False,
+            f"cannot claim confidence={want!r} with n={stats.get('n')}, "
+            f"agreement={stats.get('agreement')} (derived max is {derived!r}; "
+            f"med needs >=3 samples that all name the same value)",
         )
     if kind == "relation":
         return (
@@ -301,6 +373,30 @@ def extract_boolean_measures_from_run_meta(
     return values
 
 
+def extract_label_measures_from_run_meta(
+    run_meta: dict[str, Any],
+    *,
+    quantity: str | None = None,
+) -> list[str]:
+    values: list[str] = []
+    raw = run_meta.get("measures")
+    if not isinstance(raw, list):
+        return values
+    for item in raw:
+        if isinstance(item, dict):
+            q = item.get("quantity")
+            if quantity is not None and q is not None and q != quantity:
+                continue
+            label = coerce_label(item.get("value"))
+            if label is not None:
+                values.append(label)
+        elif quantity is None:
+            label = coerce_label(item)
+            if label is not None:
+                values.append(label)
+    return values
+
+
 def _load_measures_json(fpath: Path) -> Any:
     try:
         return json.loads(fpath.read_text(encoding="utf-8"))
@@ -359,6 +455,14 @@ def extract_measures_from_run_dir(
             )
         return values
 
+    if map_type == "label":
+        values = extract_label_measures_from_run_meta(run_meta, quantity=quantity)
+        for blob in _artifact_measure_blobs(run_dir, run_meta):
+            values.extend(
+                extract_label_measures_from_run_meta(blob, quantity=quantity)
+            )
+        return values
+
     values = extract_number_measures_from_run_meta(run_meta, quantity=quantity)
     for blob in _artifact_measure_blobs(run_dir, run_meta):
         values.extend(
@@ -379,6 +483,8 @@ def extract_measures_from_run_meta(
 def empty_stats(map_type: str = "number") -> dict[str, Any]:
     if map_type == "boolean":
         return compute_boolean_stats([])
+    if map_type == "label":
+        return compute_label_stats([])
     if map_type == "formula":
         from .formula_type import empty_formula_stats
 
@@ -501,6 +607,12 @@ def recompute_typed_node(
         stats = compute_boolean_stats([v for v in all_values if isinstance(v, bool)])
         by_probe = {
             pid: compute_boolean_stats([v for v in vals if isinstance(v, bool)])
+            for pid, vals in values_by_probe.items()
+        }
+    elif map_type == "label":
+        stats = compute_label_stats([v for v in all_values if isinstance(v, str)])
+        by_probe = {
+            pid: compute_label_stats([v for v in vals if isinstance(v, str)])
             for pid, vals in values_by_probe.items()
         }
     else:

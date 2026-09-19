@@ -80,6 +80,12 @@ def compute_corroboration(
         out["agree"] = len(set(verdicts.values())) == 1
         return out
 
+    if map_type == "label":
+        verdicts = {pid: g.get("mode") for pid, g in groups.items()}
+        out["verdicts"] = verdicts
+        out["agree"] = len(set(verdicts.values())) == 1
+        return out
+
     means = {pid: g.get("mean") for pid, g in groups.items()}
     vals = [m for m in means.values() if m is not None]
     if len(vals) < 2:

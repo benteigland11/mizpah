@@ -93,3 +93,8 @@ diverged:
   knowns/*.json spent ~20 turns reconstructing values from stats
 - terra: `known list --json` rows carry `stale` / `stale_reasons` (compute_staleness over the map) so a controller
   reading the list sees a known whose file dependencies changed
+- terra: third scalar type `label` (number|boolean|label): a categorical sample (a string — the best store's id,
+  the file with the largest total, which service is down); stats {n, distinct, mode, agreement}; confidence med at
+  n>=3 unanimous, high at n>=5 unanimous + two methods agreeing; corroboration compares per-method modes;
+  `extract_value` → mode. Reason: three briefs on 2026-09-19 needed a name-valued reading and the controller could
+  only mint it as a number, which the ladder rightly refused (the worker blocked instead of encoding it).

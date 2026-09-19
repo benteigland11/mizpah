@@ -25,6 +25,8 @@ def knowns(project: Path) -> dict[str, dict]:
             value = stats.get('mean')
         elif stats.get('kind') == 'boolean':
             value = None if stats.get('rate') is None else stats['rate'] >= 0.5
+        elif stats.get('kind') == 'label':
+            value = stats.get('mode')
         else:
             value = stats.get('value') or stats.get('mean')
         out[rec['id']] = dict(value=value, confidence=rec.get('confidence'), n=stats.get('n'))

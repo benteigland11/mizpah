@@ -214,13 +214,15 @@ def list_consumers(project_root: Path, known_id: str) -> list[dict[str, Any]]:
 
 
 def extract_value(rec: dict[str, Any]) -> Any:
-    """Canonical scalar for a known: number→mean, boolean→rate, formula→holds."""
+    """Canonical scalar for a known: number→mean, boolean→rate, label→mode, formula→holds."""
     stats = rec.get("stats") or {}
     mtype = rec.get("type")
     if mtype == "number":
         return stats.get("mean")
     if mtype == "boolean":
         return stats.get("rate")
+    if mtype == "label":
+        return stats.get("mode")
     if mtype == "formula":
         return stats.get("holds")
     if mtype == "relation":
