@@ -178,7 +178,7 @@ def write_report(config: dict[str, Any], project: Path, root: Path, cycles: list
                  stop: str | None, started: float) -> Path:
     """root/report.md: the run as a person would want to read it, rebuilt after every task and eval."""
     lines = ['# '+project.name+' — '+('running' if stop is None else 'stopped: '+stop),
-             '', 'engine '+_engine_version()+' · model '+str(config['worker']['endpoint']['base_url'])
+             '', 'engine '+_engine_version()+' · model '+model_label(config['worker'])
              +' · '+str(round((time.time()-started)/3600, 2))+' h · '
              +str(sum(len(c.get('tasks') or []) for c in cycles))+' tasks', '']
     lines.append('## Tasks')
