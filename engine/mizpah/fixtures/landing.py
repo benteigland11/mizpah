@@ -100,10 +100,11 @@ TARGETS = {
 }
 
 RENDER_NOTE = (
-    'Headless chromium is on PATH in the probe environment and renders local files: '
-    '`chromium-browser --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --user-data-dir=/work/.chrome '
-    '--window-size=1280,800 --screenshot=/work/out.png file:///work/site/index.html`; `--dump-dom` prints the DOM after '
-    'scripts run, so a page copy with an injected <script> that writes measurements into the DOM is an instrument.'
+    'The probe environment has headless chromium; a browser must outlive one command, so start it as a service: '
+    '`svc start browser -- chromium-browser --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage '
+    '--user-data-dir=/work/.chrome --remote-debugging-port=9222 --remote-allow-origins=* about:blank`. The widget '
+    'library has a page CLI over its DevTools port (search it) that opens a URL such as file:///work/site/index.html, '
+    'reads text and the accessibility tree, screenshots at a viewport, evaluates JavaScript and takes layout readings.'
 )
 
 

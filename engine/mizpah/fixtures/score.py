@@ -108,12 +108,44 @@ def honesty_rows(project: Path, key: dict) -> list[dict]:
     return rows
 
 
+def meets(found, target) -> bool:
+    """A target is a bool, a number, '>=x', '<=x', '>x', '<x' or 'a..b' (inclusive range)."""
+    if found is None:
+        return False
+    if isinstance(target, bool):
+        return isinstance(found, bool) and found == target
+    if isinstance(target, (int, float)):
+        return not isinstance(found, (bool, str)) and abs(float(found)-target) <= 1e-9
+    if isinstance(found, (bool, str)):
+        return False
+    text = str(target).strip()
+    if '..' in text:
+        low, high = (float(x) for x in text.split('..', 1))
+        return low <= float(found) <= high
+    for op, test in (('>=', lambda a, b: a >= b), ('<=', lambda a, b: a <= b), ('>', lambda a, b: a > b), ('<', lambda a, b: a < b)):
+        if text.startswith(op):
+            return test(float(found), float(text[len(op):]))
+    return False
+
+
+def target_rows(project: Path, key: dict) -> list[dict]:
+    """A known citing need N is judged against the target for N: a design property met or missed, not a truth."""
+    targets = {int(k): v for k, v in (key.get('targets') or {}).items()}
+    rows = []
+    for kid, rec in knowns(project).items():
+        need = cited_need(project, kid)
+        if need in targets:
+            rows.append(dict(kind='target', id=kid, need=need, target=targets[need], found=rec['value'],
+                             ok=meets(rec['value'], targets[need])))
+    return rows
+
+
 def score(project: Path) -> list[dict]:
     from .suite import key_path
     legacy = project/'.mizpah-fixture.json'   # runs made before the key moved out of the project
     meta = json.loads((key_path(project) if key_path(project).exists() else legacy).read_text())
     key = meta['key']
-    return truth_rows(project, key)+trace_rows(project)+honesty_rows(project, key)
+    return truth_rows(project, key)+target_rows(project, key)+trace_rows(project)+honesty_rows(project, key)
 
 
 def main() -> None:
@@ -123,6 +155,8 @@ def main() -> None:
         flag = 'ok   ' if r['ok'] else 'WRONG'
         if r['kind'] == 'truth':
             print(f"{flag} truth   need {r['need']} {r['id']}: expected {r['expected']}, map has {r['found']}")
+        elif r['kind'] == 'target':
+            print(f"{flag} target  need {r['need']} {r['id']}: target {r['target']}, map has {r['found']}")
         elif r['kind'] == 'trace':
             print(f"{flag} trace   {r['file']}: "+(r.get('note') or f"{r['stated']} numbers stated, untraced {r['untraced']}"))
         else:
