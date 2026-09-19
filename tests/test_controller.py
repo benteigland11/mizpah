@@ -157,7 +157,7 @@ def test_observation_reads_known_values_from_the_nested_record(config: dict, pro
     terra(project, 'unknown', 'graduate', 'sample_mean')
     known = observe(config, project)['knowns']
     assert known == [dict(id='sample_mean', type='number', status='provisional', confidence='low', n=1, mean=5.0,
-                          rate=None, claim='The mean is unknown')]
+                          rate=None, claim='The mean is unknown', stale=False, stale_reasons=[])]
     assert 'sample_mean = 5.0 (low, n=1)' in render_observation(observe(config, project), 'eval')
 
 

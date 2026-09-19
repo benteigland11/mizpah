@@ -1261,6 +1261,9 @@ def list_knowns(project_root: Path) -> list[dict[str, Any]]:
     root = knowns_root(project_root)
     if not root.is_dir():
         return []
+    from .staleness import compute_staleness
+
+    staleness = compute_staleness(project_root)
     out = []
     for path in sorted(root.glob("*.json")):
         try:
@@ -1273,11 +1276,14 @@ def list_knowns(project_root: Path) -> list[dict[str, Any]]:
             out.append({"id": path.stem, "ok": False, "blocks": [str(e)], "record": None})
             continue
         blocks = validate_known_record(data, expected_id=path.stem)
+        stale = staleness.get(path.stem) or {}
         out.append(
             {
                 "id": path.stem,
                 "ok": len(blocks) == 0,
                 "blocks": blocks,
+                "stale": bool(stale.get("stale")),
+                "stale_reasons": list(stale.get("reasons") or []),
                 "record": data,
             }
         )

@@ -487,3 +487,31 @@ def test_green_message_hands_back_the_steps_a_walk_skipped(tmp_path: Path):
     text = green_message(dict(ok=True, problems=[], knowns=['a'], runs=['r']), ['a'], ['csv-counting'], None, skips)
     assert 'marked `[-]` not needed' in text and 'csv-counting: 2. Extract a widget; 6. Cross-check' in text
     assert 'not needed on this walk' in text and 'not needed in general' in text
+
+
+def test_artifact_knowns_depend_on_the_files_that_make_them(config: dict, project: Path):
+    """A later task that rewrites a sibling module makes the artifact known stale, so the eval re-takes the reading."""
+    from mizpah.worker import declare_artifact_deps
+    (project/'tool').mkdir()
+    (project/'tool'/'cli.py').write_text('print(1)\n')
+    (project/'tool'/'__main__.py').write_text('import tool.cli\n')
+    terra(project, 'unknown', 'create', 'cli_ok', '--claim', 'tool prints 1', '--evidence', 'run it', '--type', 'boolean',
+          '--quantity', 'cli_ok', '--notes', 'cites deliverable:1; creates tool/cli.py')
+    terra(project, 'probe', 'create', 'cli_ok_probe', '--purpose', 'run', '--kind', 'run', '--measure', 'cli_ok')
+    (project/'.terra'/'map'/'probes'/'cli_ok_probe'/'measure.py').write_text(
+        'import subprocess, sys\ndef measure(ctx):\n    return {"cli_ok": subprocess.run([sys.executable, "tool/cli.py"], capture_output=True, text=True).stdout.strip() == "1"}\n')
+    terra(project, 'probe', 'validate', 'cli_ok_probe')
+    for _ in range(3):
+        out = terra(project, 'probe', 'run', 'cli_ok_probe')
+        run_id = next(line.split()[1] for line in out.splitlines() if line.startswith('run '))
+        node = 'known' if (project/'.terra'/'map'/'knowns'/'cli_ok.json').exists() else 'unknown'
+        terra(project, node, 'link-run', 'cli_ok', run_id)
+        if node == 'unknown':
+            terra(project, 'unknown', 'graduate', 'cli_ok')
+    unknown = read_unknown(project, 'cli_ok')
+    assert declare_artifact_deps(config, project, [unknown]) == {'cli_ok': ['file:tool/__main__.py', 'file:tool/cli.py']}
+    rows = json.loads(terra(project, 'known', 'list', '--json'))
+    assert [r['stale'] for r in rows] == [False]
+    (project/'tool'/'__main__.py').write_text('import tool.cli  # rewritten by a later task\n')
+    rows = json.loads(terra(project, 'known', 'list', '--json'))
+    assert rows[0]['stale'] is True and any('__main__.py' in r for r in rows[0]['stale_reasons'])

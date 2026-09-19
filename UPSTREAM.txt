@@ -91,3 +91,5 @@ diverged:
   calls it on resume; 0.24.0 → 0.25.0
 - terra: known records carry a top-level `value` (the canonical scalar `known get` reports) — a worker grepping
   knowns/*.json spent ~20 turns reconstructing values from stats
+- terra: `known list --json` rows carry `stale` / `stale_reasons` (compute_staleness over the map) so a controller
+  reading the list sees a known whose file dependencies changed

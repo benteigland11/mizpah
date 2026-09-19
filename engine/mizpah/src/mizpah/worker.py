@@ -779,6 +779,34 @@ def checkin_settings(config: dict[str, Any]) -> ControllerSettings:
         plain_review=True, plain_recent_exchanges=config['mizpah'].get('checkin_recent_exchanges', 6))
 
 
+def declare_artifact_deps(config: dict[str, Any], project: Path, unknowns: list[dict[str, Any]]) -> dict[str, list[str]]:
+    """An adopted artifact known depends on the files that make the artifact: the file the task built and its
+    sibling modules (a CLI's entry point lives next to the command). Terra stamps their hashes; a later task
+    that changes one of them makes the known stale, and the eval sees it. Without this, `build_cli` rewrote
+    the dispatch and `quality_ok` stayed green on the map while `python3 -m weather quality` was broken."""
+    declared: dict[str, list[str]] = {}
+    for unknown in unknowns:
+        creates = unknown_notes(unknown).get('creates')
+        if not creates or read_known(project, unknown['id']) is None:
+            continue
+        target = project/creates
+        paths: list[Path] = []
+        if target.is_file():
+            paths.append(target)
+            if target.suffix == '.py':
+                paths += [p for p in target.parent.glob('*.py') if p != target]
+        elif target.is_dir():
+            paths += [p for p in target.rglob('*') if p.is_file()]
+        specs = ['file:'+p.relative_to(project).as_posix() for p in sorted(paths)]
+        if specs:
+            try:
+                terra(config, project, 'known', 'depend', unknown['id'], *[a for spec in specs for a in ('--on', spec)])
+                declared[unknown['id']] = specs
+            except RuntimeError:
+                continue
+    return declared
+
+
 def focus_globs(unknowns: list[dict[str, Any]]) -> tuple[str, ...]:
     """Probes, widget sources, and every artifact this task's unknowns say it creates."""
     globs = ['.terra/map/probes/*/probe.py', '.terra/map/probes/*/measure.py', 'cg/*/src/*.py']
@@ -1050,8 +1078,9 @@ def run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | N
         widgets = harvest_widgets(session.workspace(), root, config)
         playbook = harvest_playbook(session.workspace(), store, config,
                                     allowed=tuple(procedures_used(root)+procedures_created(root)))
+        deps = declare_artifact_deps(config, project, unknowns)
         rounds.append(dict(turns=status['completed_worker_turns'], session=status['status'], gate='playbook',
-                           final_text=status['final_text'], playbook=playbook, widgets=widgets))
+                           final_text=status['final_text'], playbook=playbook, widgets=widgets, artifact_deps=deps))
     verdict = 'complete' if gate['ok'] else ('blocked_by_worker' if blocked_reason is not None else 'incomplete')
     result = dict(task=task['id'], unknown=task['map_id'], unknowns=task_unknown_ids(task), map=map_id, resumed=resuming,
                   verdict=verdict,

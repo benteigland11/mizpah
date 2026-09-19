@@ -117,8 +117,12 @@ def observe(config: dict[str, Any], project: Path) -> dict[str, Any]:
     brief = terra(config, project, 'brief', 'show')
     sitrep = terra(config, project, 'sitrep')
     # `known list --json` nests each known's fields under `record`.
-    knowns = [row.get('record') or row for row in json.loads(subprocess.run(
-        [config['mizpah']['terra'], 'known', 'list', '--json'], cwd=project, capture_output=True, text=True).stdout or '[]')]
+    knowns = []
+    for row in json.loads(subprocess.run([config['mizpah']['terra'], 'known', 'list', '--json'], cwd=project,
+                                         capture_output=True, text=True).stdout or '[]'):
+        record = dict(row.get('record') or row)
+        record['stale'], record['stale_reasons'] = bool(row.get('stale')), list(row.get('stale_reasons') or [])
+        knowns.append(record)
     unknowns = [json.loads(path.read_text()) for path in sorted((project/'.terra'/'map'/'unknowns').glob('*.json'))]
     route = terra(config, project, 'route', 'status')
     return dict(
@@ -131,7 +135,8 @@ def observe(config: dict[str, Any], project: Path) -> dict[str, Any]:
         budget=(sitrep.get('route') or {}).get('budget'),
         knowns=[dict(id=k.get('id'), type=k.get('type'), status=k.get('status'), confidence=k.get('confidence'),
                      n=(k.get('stats') or {}).get('n'), mean=(k.get('stats') or {}).get('mean'),
-                     rate=(k.get('stats') or {}).get('rate'), claim=k.get('claim')) for k in knowns],
+                     rate=(k.get('stats') or {}).get('rate'), claim=k.get('claim'),
+                     stale=k.get('stale', False), stale_reasons=k.get('stale_reasons') or []) for k in knowns],
         unknowns=[dict(id=u['id'], status=u.get('status'), type=u.get('type'), quantity=u.get('quantity'),
                        claim=u.get('claim'), resolved_by=u.get('resolved_by'), notes=u.get('notes')) for u in unknowns],
         tasks=[dict(id=t['id'], status=t['status'], unknown=t.get('map_id'),
@@ -187,7 +192,11 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
             value = 'true' if float(value) >= 0.5 else 'false'
         elif isinstance(value, float):
             value = round(value, 4)
-        lines.append('  '+str(k['id'])+' = '+str(value)+' ('+str(k['confidence'])+', n='+str(k['n'])+')')
+        stale = ' STALE: '+'; '.join(str(r)[:80] for r in k['stale_reasons'][:2]) if k.get('stale') else ''
+        lines.append('  '+str(k['id'])+' = '+str(value)+' ('+str(k['confidence'])+', n='+str(k['n'])+')'+stale)
+    if any(k.get('stale') for k in observation['knowns']):
+        lines.append('A STALE known is no longer believed: a file it depends on changed after its readings. It is owed '
+                     'again — mint an unknown that re-takes the reading (its artifact may have regressed) and a task for it.')
     open_unknowns = [u for u in observation['unknowns'] if u['status'] in OPEN_UNKNOWN]
     resolved = len(observation['unknowns'])-len(open_unknowns)
     lines.append('Open unknowns:'+('' if open_unknowns else ' (none)')+(' — '+str(resolved)+' resolved' if resolved else ''))
