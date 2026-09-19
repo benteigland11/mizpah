@@ -271,3 +271,27 @@ def test_a_graduated_enabler_is_packed_and_installed_into_the_next_project(instr
     # And the need that names it is mintable straight away.
     observation = controller.observe(config, p)
     assert '(waits for enabler' not in controller.render_observation(observation, 'route')
+
+
+def test_a_pack_ships_its_procedures_and_installs_them(instrumented: Path, tmp_path: Path) -> None:
+    from mizpah import capabilities
+    store = tmp_path/'playbook'
+    store.mkdir()
+    (store/'render-page-layout-readings.json').write_text(json.dumps(dict(id='render-page-layout-readings', steps=[])))
+    config = dict(CONFIG, mizpah=dict(CONFIG['mizpah'], capability_store=str(tmp_path/'registry3'), playbook_store=str(store)))
+    tool = instrumented/'cg'/'frontend-headless-page-cli-python'
+    tool.mkdir(parents=True)
+    (tool/'README.md').write_text('# reader\n')
+    enabler = dict(id='page_readings', title='Headless page readings', path='cg/frontend-headless-page-cli-python')
+    capabilities.record(config, instrumented, enabler, widget='w', procedures=['render-page-layout-readings', 'not-in-store'])
+    pack = tmp_path/'registry3'/'page_readings'/'pack'
+    assert (pack/'procedures'/'render-page-layout-readings.json').exists()
+    assert json.loads((pack/'enabler.json').read_text())['procedures'] == ['render-page-layout-readings']
+    # A fresh store on the next machine: installing the pack installs the procedure.
+    other = tmp_path/'playbook2'
+    other.mkdir()
+    config2 = dict(config, mizpah=dict(config['mizpah'], playbook_store=str(other)))
+    p = tmp_path/'next3'
+    (p/'x').mkdir(parents=True)
+    doc = capabilities.install(config2, p, enabler)
+    assert doc['procedures_installed'] == ['render-page-layout-readings'] and (other/'render-page-layout-readings.json').exists()

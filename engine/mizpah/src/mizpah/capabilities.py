@@ -52,7 +52,34 @@ def manifest(project: Path, enabler: dict[str, Any], *, widget: str | None = Non
                 interface=interface, files=files, packed_from=project.name, packed_at=time.time())
 
 
-def record(config: dict[str, Any], project: Path, enabler: dict[str, Any], *, widget: str | None = None) -> Path:
+def pack_procedures(config: dict[str, Any], pack: Path, procedure_ids: list[str]) -> list[str]:
+    """Copy the procedures an enabler came with into pack/procedures/: the method ships with the tool."""
+    store = Path(config['mizpah'].get('playbook_store') or '')
+    packed = []
+    for pid in dict.fromkeys(procedure_ids):
+        source = store/(pid+'.json')
+        if store and source.exists():
+            (pack/'procedures').mkdir(exist_ok=True)
+            shutil.copy2(source, pack/'procedures'/(pid+'.json'))
+            packed.append(pid)
+    return packed
+
+
+def install_procedures(config: dict[str, Any], pack: Path) -> list[str]:
+    """Procedures in the pack enter the Playbook store when the store has no procedure of that id."""
+    store = Path(config['mizpah'].get('playbook_store') or '')
+    installed = []
+    for source in sorted((pack/'procedures').glob('*.json')) if (pack/'procedures').is_dir() and store else []:
+        target = store/source.name
+        if not target.exists():
+            store.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+            installed.append(source.stem)
+    return installed
+
+
+def record(config: dict[str, Any], project: Path, enabler: dict[str, Any], *, widget: str | None = None,
+           procedures: list[str] = ()) -> Path:
     """Register a graduated (or ready) enabler and pack its directory; the record is what a future brief is shown."""
     home = store_dir(config)/slug(enabler['id'])
     home.mkdir(parents=True, exist_ok=True)
@@ -68,7 +95,8 @@ def record(config: dict[str, Any], project: Path, enabler: dict[str, Any], *, wi
         if pack.exists():
             shutil.rmtree(pack)
         shutil.copytree(source, pack, ignore=IGNORE)
-        (pack/'enabler.json').write_text(json.dumps(manifest(project, enabler, widget=widget), indent=1)+'\n')
+        shipped = pack_procedures(config, pack, list(procedures))
+        (pack/'enabler.json').write_text(json.dumps(manifest(project, enabler, widget=widget) | dict(procedures=shipped), indent=1)+'\n')
         packed = True
     doc = dict(id=enabler['id'], title=enabler.get('title') or '',
                notes=enabler.get('notes') or '', status=enabler.get('status') or 'ready', path=enabler.get('path') or '',
@@ -88,7 +116,9 @@ def install(config: dict[str, Any], project: Path, enabler: dict[str, Any]) -> d
     if not target.exists():
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(pack, target, ignore=IGNORE)
+    procedures = install_procedures(config, pack)
     doc = json.loads(record_path.read_text())
+    doc['procedures_installed'] = procedures
     doc['uses'] = int(doc.get('uses') or 0)+1
     doc.setdefault('installed_by', []).append(dict(project=project.name, at=time.time()))
     record_path.write_text(json.dumps(doc, indent=1)+'\n')

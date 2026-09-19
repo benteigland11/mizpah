@@ -143,8 +143,11 @@ def advance_enabler(config: dict[str, Any], project: Path, task: dict[str, Any],
         # The registry: what this project can now do, for the next brief that declares the same instrument.
         enabler = next((e for e in terra(config, project, 'brief', 'show').get('enablers') or [] if e.get('id') == eid), None)
         if enabler:
+            # The procedures the enabler task installed or created ship in the pack: the method with the tool.
+            procedures = [pid for r in (result.get('rounds') or []) for pid in ((r.get('playbook') or {}).get('installed') or [])]
+            procedures += ((result.get('playbook') or {}).get('installed') or [])
             try:
-                capabilities.record(config, project, enabler, widget=widgets[0] if widgets else None)
+                capabilities.record(config, project, enabler, widget=widgets[0] if widgets else None, procedures=procedures)
             except (OSError, KeyError) as error:   # no store configured: the brief still holds the graduation
                 outcome['registry_error'] = str(error)[:200]
     except RuntimeError as error:
