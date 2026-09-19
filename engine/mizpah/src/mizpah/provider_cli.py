@@ -40,6 +40,7 @@ def cmd_list(args: argparse.Namespace) -> int:
         session = session_for(name, config)
         status = session.status()
         status['blocked'] = missing_client_id(session.profile)
+        status['api_base_url'] = session.profile.api_base_url
         rows.append(status)
     _emit(dict(credentials_file=str(store_path), providers=rows))
     return 0
@@ -49,6 +50,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     session = session_for(args.provider, _config(args.config))
     status = session.status()
     status['blocked'] = missing_client_id(session.profile)
+    status['api_base_url'] = session.profile.api_base_url
     _emit(status)
     return 0
 
@@ -85,29 +87,49 @@ def cmd_models(args: argparse.Namespace) -> int:
     """Models a profile offers, with what the engine knows about each."""
     session = session_for(args.provider, _config(args.config))
     profile = session.profile
-    models, source = available_models(session)
+    rows, source = available_models(session)
     _emit(dict(provider=profile.name, default_model=profile.default_model, context_window=profile.context_window,
-               wire=profile.wire, models=models, live=source == 'live', source=source))
+               wire=profile.wire, models=[r['id'] for r in rows], details=rows, live=source == 'live', source=source))
     return 0
 
 
 def cmd_use(args: argparse.Namespace) -> int:
-    """Point a harness config's worker and/or controller at a provider and model.
+    """Point a harness config's worker and/or controller at a provider, model and effort.
 
-    Rewrites the harness config the engine config names (or --harness directly): the endpoint spec
-    becomes provider "subscription", the model is set, and llama-only sampling keys are dropped.
+    Rewrites the harness config the engine config names (or --harness directly). A hosted profile
+    becomes provider "subscription"; a local llama.cpp profile (no auth, tokenize counting) becomes
+    provider "llama_client" so the native guarded client keeps its exact counting. The model is set,
+    reasoning_effort is set or removed, and llama-only sampling keys are dropped for hosted providers.
     """
     config = _config(args.config)
     session = session_for(args.provider, config)
     profile = session.profile
     model = args.model or profile.default_model
-    models, source = available_models(session)
+    rows, source = available_models(session)
     if source == 'signed_out':
         _emit(dict(event='error', provider=args.provider, error=f'sign in to {profile.display_name} first; its models are listed from the account'))
         return 2
-    if models and model not in models:
-        _emit(dict(event='error', provider=args.provider, error=f'{model!r} is not one of {models}'))
+    if source == 'unreachable':
+        _emit(dict(event='error', provider=args.provider, error=f'{profile.display_name} is not answering at {profile.api_base_url}'))
         return 2
+    known = {r['id']: r for r in rows}
+    if known and model not in known:
+        _emit(dict(event='error', provider=args.provider, error=f'{model!r} is not one of {sorted(known)}'))
+        return 2
+    if model is None:
+        _emit(dict(event='error', provider=args.provider, error='no model named and the profile has no default'))
+        return 2
+    efforts = known[model]['efforts'] if model in known else list(profile.reasoning_efforts)
+    effort = args.effort
+    if effort in (None, '') and model in known:
+        effort = known[model]['default_effort']
+    if effort == 'none':
+        effort = None
+    if effort is not None and efforts and effort not in efforts:
+        _emit(dict(event='error', provider=args.provider, error=f'effort {effort!r} is not one of {efforts} for {model}'))
+        return 2
+    if effort is not None and not efforts:
+        effort = None  # the model does not take an effort; do not send one
     harness_path = args.harness
     if harness_path is None:
         if args.config is None:
@@ -116,11 +138,9 @@ def cmd_use(args: argparse.Namespace) -> int:
         harness_path = (args.config.parent/json.loads(args.config.read_text())['harness_config']).resolve()
     harness = json.loads(harness_path.read_text())
     roles = ('worker', 'controller') if args.role == 'both' else (args.role,)
+    native = profile.auth.kind == 'none' and profile.token_count == 'tokenize_endpoint'
     for role in roles:
         spec = harness.setdefault(role, {})
-        spec['provider'] = 'subscription'
-        spec['subscription'] = profile.name
-        spec.pop('known_issues', None)
         endpoint = spec.setdefault('endpoint', {})
         endpoint.update(base_url=profile.api_base_url, completion_path=profile.completion_path,
                         timeout_seconds=profile.timeout_seconds)
@@ -129,11 +149,48 @@ def cmd_use(args: argparse.Namespace) -> int:
                                tokenizer_add_special=True, tokenizer_parse_special=True).items():
             endpoint.setdefault(key, value)
         generation = spec.setdefault('generation', {})
-        for key in LLAMA_ONLY_GENERATION_KEYS:
-            generation.pop(key, None)
+        if native:
+            spec['provider'] = 'llama_client'
+            spec.pop('subscription', None)
+            spec.setdefault('known_issues', {'repetition': {'identical_tool_calls': 8}})
+        else:
+            spec['provider'] = 'subscription'
+            spec['subscription'] = profile.name
+            spec.pop('known_issues', None)
+            for key in LLAMA_ONLY_GENERATION_KEYS:
+                generation.pop(key, None)
         generation['model'] = model
+        if effort is None:
+            generation.pop('reasoning_effort', None)
+        else:
+            generation['reasoning_effort'] = effort
     harness_path.write_text(json.dumps(harness, indent=2)+'\n')
-    _emit(dict(event='using', provider=profile.name, model=model, roles=list(roles), harness_config=str(harness_path)))
+    _emit(dict(event='using', provider=profile.name, model=model, effort=effort, roles=list(roles),
+               transport='llama_client' if native else 'subscription', harness_config=str(harness_path)))
+    return 0
+
+
+def cmd_configure(args: argparse.Namespace) -> int:
+    """Override a profile field in the engine config (mizpah.providers.<name>), e.g. a local server's address."""
+    if args.config is None:
+        _emit(dict(event='error', error='configure needs --config (the engine config to write the override into)'))
+        return 2
+    raw = json.loads(args.config.read_text())
+    target = raw['mizpah'] if 'mizpah' in raw else raw
+    override = target.setdefault('providers', {}).setdefault(args.provider, {})
+    if args.base_url:
+        if not args.base_url.startswith(('http://', 'https://')):
+            _emit(dict(event='error', provider=args.provider, error='base url must start with http:// or https://'))
+            return 2
+        override['api_base_url'] = args.base_url.rstrip('/')
+    if args.default_model:
+        override['default_model'] = args.default_model
+    if args.client_id:
+        override.setdefault('auth', {})['client_id'] = args.client_id
+    args.config.write_text(json.dumps(raw, indent=2)+'\n')
+    session = session_for(args.provider, _config(args.config))
+    _emit(dict(event='configured', provider=args.provider, override=override, **{k: v for k, v in session.status().items()
+                                                                                  if k in ('signed_in', 'reachable', 'reason')}))
     return 0
 
 
@@ -158,8 +215,14 @@ def main(argv: list[str] | None = None) -> int:
     use = commands.add_parser('use', help='point the harness config at a provider and model')
     use.add_argument('provider'); use.add_argument('model', nargs='?', default=None)
     use.add_argument('--role', choices=('worker', 'controller', 'both'), default='both')
+    use.add_argument('--effort', default=None, help="reasoning effort when the model takes one; 'none' removes it")
     use.add_argument('--harness', type=Path, default=None, help='harness config to rewrite (default: the one --config names)')
     use.set_defaults(run=cmd_use)
+    configure = commands.add_parser('configure', help='override a profile field in the engine config')
+    configure.add_argument('provider')
+    configure.add_argument('--base-url', default=None); configure.add_argument('--default-model', default=None)
+    configure.add_argument('--client-id', default=None)
+    configure.set_defaults(run=cmd_configure)
     args = parser.parse_args(argv)
     return args.run(args)
 

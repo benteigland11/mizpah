@@ -69,27 +69,43 @@ def session_for(name: str, config: dict[str, Any] | None = None, *, open_browser
     return ProviderSession(profile, CredentialStore(credential_path(config)), open_browser=open_browser)
 
 
-def available_models(session: ProviderSession) -> tuple[list[str], str]:
-    """Models the person may pick, and where they came from.
+def available_models(session: ProviderSession) -> tuple[list[dict[str, Any]], str]:
+    """Models the person may pick — ``{id, efforts, default_effort, context_window}`` each — and where
+    they came from.
 
     ``live``: the provider listed them for this credential (authoritative; profile default first).
     ``signed_out``: the provider has a list endpoint but no credential yet — nothing is shown, since
-    a static list cannot be verified. ``no_list_endpoint``: the profile's static catalogue.
+    a static list cannot be verified. ``unreachable``: a no-auth endpoint that is not answering. ``no_list_endpoint``: the profile's static catalogue.
     ``list_failed:<why>``: signed in but the list call failed; the static catalogue as an unverified hint.
+    A model the provider listed without an effort ladder inherits the profile's.
     """
-    static = list(session.profile.models)
-    if session.profile.models_url is None:
+    profile = session.profile
+
+    def hint(identifier: str) -> dict[str, Any]:
+        return {'id': identifier, 'efforts': list(profile.reasoning_efforts),
+                'default_effort': profile.default_reasoning_effort, 'context_window': profile.context_window}
+
+    static = [hint(m) for m in profile.models]
+    if profile.models_url is None:
         return static, 'no_list_endpoint'
-    if not session.status()['signed_in']:
-        return [], 'signed_out'
+    status = session.status()
+    if not status['signed_in']:
+        return [], 'unreachable' if status['auth_kind'] == 'none' else 'signed_out'
     try:
-        live = session.list_models()
+        live = session.list_model_info()
     except Exception as error:  # noqa: BLE001 - any failure here means "hint only"
         return static, f'list_failed: {type(error).__name__}: {error}'
     if not live:
         return static, 'list_failed: empty list'
-    default = session.profile.default_model
-    return ([default] if default in live else []) + [m for m in live if m != default], 'live'
+    rows = []
+    for info in live:
+        row = info.as_dict()
+        if not row['efforts']:
+            row['efforts'], row['default_effort'] = list(profile.reasoning_efforts), profile.default_reasoning_effort
+        row['context_window'] = row['context_window'] or profile.context_window
+        rows.append(row)
+    default = profile.default_model
+    return sorted(rows, key=lambda r: r['id'] != default), 'live'
 
 
 def missing_client_id(profile: ProviderProfile) -> str | None:
@@ -131,6 +147,9 @@ def hosted_model_client(spec: dict[str, Any], config: dict[str, Any], observer: 
     if not name:
         raise ValueError("endpoint spec with provider 'subscription' needs a 'subscription' profile name")
     session = session_for(name, config, open_browser=False)
-    if not session.status()['signed_in']:
+    status = session.status()
+    if not status['signed_in']:
+        if status['auth_kind'] == 'none':
+            raise RuntimeError(f"{name} is not answering at {session.profile.api_base_url}: {status.get('reason')}")
         raise RuntimeError(f'not signed in to {name}; run: mizpah-provider login {name}')
     return HostedModelClient(session, spec, observer)

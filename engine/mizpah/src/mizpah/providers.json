@@ -2,6 +2,40 @@
   "_comment": "Provider profiles the engine ships. Every value here is public client configuration; credentials never live in this file. openai_chatgpt constants come from the Apache-2.0 openai/codex source (codex-rs/login). xai_grok endpoints come from the Apache-2.0 xai-org/grok-build source (crates/codegen/xai-grok-login); its public OIDC client id and subscription base URL were read from an installed Grok Build; GROK_OAUTH2_CLIENT_ID still overrides. Static model lists are hints dated 2026-09-19; wherever a profile has models_path the live list replaces them once signed in.",
   "profiles": [
     {
+      "name": "local_llama",
+      "display_name": "Local llama.cpp server",
+      "auth": {
+        "kind": "none"
+      },
+      "api_base_url": "http://127.0.0.1:58081",
+      "completion_path": "/v1/chat/completions",
+      "wire": "chat_completions",
+      "models_path": "/v1/models",
+      "models": [],
+      "token_count": "tokenize_endpoint",
+      "context_window": null,
+      "timeout_seconds": 900,
+      "reasoning_efforts": [],
+      "notes": "llama-server's OpenAI-compatible API with exact /tokenize counting and the native guarded client (repetition guard). Change the address with `mizpah-provider configure local_llama --base-url http://host:port`."
+    },
+    {
+      "name": "local_openai",
+      "display_name": "Local OpenAI-compatible server (Ollama, LM Studio, vLLM)",
+      "auth": {
+        "kind": "none"
+      },
+      "api_base_url": "http://127.0.0.1:11434/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "models_path": "/models",
+      "models": [],
+      "token_count": "usage_calibrated",
+      "context_window": null,
+      "timeout_seconds": 900,
+      "reasoning_efforts": [],
+      "notes": "Any server that speaks /v1/chat/completions without a key: Ollama (:11434/v1), LM Studio (:1234/v1), vLLM (:8000/v1). Counting is usage-calibrated since these expose no tokenizer. Change the address with `mizpah-provider configure local_openai --base-url ...`."
+    },
+    {
       "name": "openai_chatgpt",
       "display_name": "ChatGPT (Plus/Pro/Team subscription)",
       "auth": {
@@ -49,7 +83,14 @@
       "context_window": 272000,
       "timeout_seconds": 900,
       "notes": "OpenAI lets ChatGPT plans back third-party OSS harnesses (Codex for Open Source). Static list is the Codex CLI's bundled catalogue (visible entries, Sept 2026); the live list is authoritative once signed in. Reasoning effort low..ultra per model.",
-      "models_path": "/models?client_version=1.0.0"
+      "models_path": "/models?client_version=1.0.0",
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "default_reasoning_effort": "medium"
     },
     {
       "name": "xai_grok",
@@ -83,7 +124,14 @@
       "context_window": 500000,
       "timeout_seconds": 900,
       "notes": "Device-code flow against auth.x.ai as Grok Build does; the public OIDC client id and the cli-chat-proxy.grok.com base URL are what an installed Grok Build (~/.grok/auth.json, models_cache.json) uses with a subscription session; api.x.ai/v1 is the API-key host. Both models take reasoning effort xhigh/high/medium/low. xAI may 403 some tiers.",
-      "models_path": "/models"
+      "models_path": "/models",
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "default_reasoning_effort": "high"
     },
     {
       "name": "github_copilot",
@@ -121,7 +169,12 @@
       "token_count": "usage_calibrated",
       "context_window": 128000,
       "timeout_seconds": 900,
-      "notes": "GitHub's Copilot SDK route for third parties: register your own GitHub OAuth App (Settings > Developer settings > OAuth Apps, enable Device Flow) and set MIZPAH_GITHUB_CLIENT_ID. The device-flow token is sent as the bearer with X-GitHub-Api-Version, as OpenCode does. GitHub tokens do not expire; a 401 means sign in again. The static model list is a hint; the live /models list is used once signed in."
+      "notes": "GitHub's Copilot SDK route for third parties: register your own GitHub OAuth App (Settings > Developer settings > OAuth Apps, enable Device Flow) and set MIZPAH_GITHUB_CLIENT_ID. The device-flow token is sent as the bearer with X-GitHub-Api-Version, as OpenCode does. GitHub tokens do not expire; a 401 means sign in again. The static model list is a hint; the live /models list is used once signed in.",
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high"
+      ]
     },
     {
       "name": "openai_api",
@@ -145,7 +198,14 @@
       "token_count": "usage_calibrated",
       "context_window": 272000,
       "timeout_seconds": 900,
-      "models_path": "/models"
+      "models_path": "/models",
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "default_reasoning_effort": "medium"
     },
     {
       "name": "xai_api",
@@ -290,7 +350,12 @@
       "token_count": "usage_calibrated",
       "context_window": 1000000,
       "timeout_seconds": 900,
-      "notes": "Gemini's OpenAI-compatible endpoint (chat completions, tools, streaming). API only: Google does not allow Gemini plan OAuth in third-party clients."
+      "notes": "Gemini's OpenAI-compatible endpoint (chat completions, tools, streaming). API only: Google does not allow Gemini plan OAuth in third-party clients.",
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high"
+      ]
     },
     {
       "name": "anthropic_api",
@@ -320,7 +385,12 @@
       "token_count": "usage_calibrated",
       "context_window": 200000,
       "timeout_seconds": 900,
-      "notes": "Anthropic's OpenAI SDK compatibility layer (/v1/chat/completions); extended thinking and some features are Messages-API only. API only: Claude plan OAuth is prohibited in third-party tools since 2026-02-20. The registry's backend-anthropic-messages-codec widget is the upgrade path to the native API."
+      "notes": "Anthropic's OpenAI SDK compatibility layer (/v1/chat/completions); extended thinking and some features are Messages-API only. API only: Claude plan OAuth is prohibited in third-party tools since 2026-02-20. The registry's backend-anthropic-messages-codec widget is the upgrade path to the native API. reasoning_effort maps to an extended-thinking budget on the compatibility layer; unset means no thinking.",
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high"
+      ]
     },
     {
       "name": "mistral_api",
@@ -376,7 +446,12 @@
       "token_count": "usage_calibrated",
       "context_window": 200000,
       "timeout_seconds": 900,
-      "notes": "One key, many vendors; model ids are vendor/model."
+      "notes": "One key, many vendors; model ids are vendor/model.",
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high"
+      ]
     },
     {
       "name": "groq_api",

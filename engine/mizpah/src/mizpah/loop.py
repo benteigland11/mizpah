@@ -9,13 +9,14 @@ transcript.
 from __future__ import annotations
 
 import argparse
+import os
 import json
 from pathlib import Path
 import time
 import traceback
 from typing import Any
 
-from . import controller, ops, worker
+from . import briefs, controller, ops, worker
 from .worker import terra
 
 
@@ -71,6 +72,21 @@ def terra_list(config: dict[str, Any], project: Path, *args: str) -> list[dict[s
     return json.loads(text[start:]) if start >= 0 else []
 
 
+def registry_path() -> Path:
+    """Every run this machine starts, one line each, wherever its root lives: how a front end finds them."""
+    base = Path(os.environ.get('XDG_STATE_HOME') or Path.home()/'.local'/'state')
+    return base/'mizpah'/'runs.jsonl'
+
+
+def _register(record: dict[str, Any]) -> None:
+    try:
+        path = registry_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.open('a').write(json.dumps(dict(root=record['root'], project=record['project'], started_at=record['started_at']))+'\n')
+    except OSError:
+        pass  # a registry that cannot be written never stops a run
+
+
 def _loop_alive(root: Path) -> bool:
     """Another run root on this machine whose loop process is still running (its services are not orphans)."""
     import subprocess
@@ -105,6 +121,12 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
     stalled_evals = 0
     health = ops.Health(config, root)
     config['mizpah']['run_root'] = str(root)   # the controller's outage wait records health here too
+    # The pointer from a session root back to its project, and whether the loop is alive: what a
+    # front end needs to find runs on disk without guessing from directory names.
+    run_record = dict(project=str(project), root=str(root), pid=os.getpid(), started_at=started,
+                      config=str(config.get('harness_config_path', '')), ended_at=None, stop=None)
+    (root/'run.json').write_text(json.dumps(run_record, indent=1))
+    _register(run_record)
     # A previous run of this root killed without its finally leaves services running; they are its, so reap them.
     orphans = ops.sweep_services(live_roots=[r for r in Path(root).parent.glob('*') if r.is_dir() and r != root
                                              and (r/'loop.json').exists() and _loop_alive(r)])
@@ -237,6 +259,11 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
         # run_task's finally; the report says so.
         stop = 'interrupted'
     report(stop)
+    try:
+        briefs.record(config, project, stop, cycles)   # the controller's library grows by one finished run
+    except Exception as error:  # noqa: BLE001
+        with log.open('a') as handle:
+            handle.write(json.dumps(dict(at=time.time(), where='briefs.record', error=str(error)[:300]))+'\n')
     if stop not in ('nothing_owed', 'max_cycles', 'max_tasks'):
         ops.notify(config, root, project.name+' stopped: '+stop,
                    str(tasks_run)+' tasks in '+str(round((time.time()-started)/3600, 2))+' h; report at '+str(root/'report.md'))
@@ -244,6 +271,8 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                   blocked=[dict(id=t['id'], reason=t.get('blocked_reason')) for t in blocked(config, project)],
                   open_proposals=terra(config, project, 'brief', 'show').get('open_proposals'))
     (root/'loop.json').write_text(json.dumps(result, indent=1))
+    run_record.update(ended_at=time.time(), stop=stop)
+    (root/'run.json').write_text(json.dumps(run_record, indent=1))
     return result
 
 

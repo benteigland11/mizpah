@@ -15,3 +15,5 @@ If the project-files section is not enough to route or bucket well, look first: 
  "rebucket": [{"task": "<id>", "bucket": "medium|high", "why": "..."}],
  "done": false, "why": "one sentence"}
 Ids match ^[a-z][a-z0-9_]*$. Unknowns that already exist are not listed again; a task lists only the unknowns it resolves.
+
+When the observation lists related briefs, they are the controller's library: other projects with the same kinds of deliverables and the unknowns that were worth minting for them. A deliverable of this brief that the same kind of artifact was measured for elsewhere (a page's gutters, a list's markers, a button's box) deserves those unknowns here too, cited to this brief's deliverable; a need those briefs had and this one does not is not yours to add.

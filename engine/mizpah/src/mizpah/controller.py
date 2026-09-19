@@ -17,6 +17,7 @@ from typing import Any
 from cg.bp_focused_agent_session_python.src import EndpointConfig, ModelClient, llama_model_client
 from cg.backend_persistent_model_session_python.src.persistent_model_session import parse_turn
 
+from . import briefs
 from .worker import terra
 
 ID_PATTERN = re.compile(r'^[a-z][a-z0-9_]*$')
@@ -125,13 +126,14 @@ def observe(config: dict[str, Any], project: Path) -> dict[str, Any]:
         knowns.append(record)
     unknowns = [json.loads(path.read_text()) for path in sorted((project/'.terra'/'map'/'unknowns').glob('*.json'))]
     route = terra(config, project, 'route', 'status')
+    related_briefs = briefs.related(config, brief) if config['mizpah'].get('brief_library', True) else []
     return dict(
         repo=repo_digest(project),
         brief={key: brief.get(key) for key in ('title', 'version', 'status', 'mission', 'needs', 'deliverables',
                                                 'non_goals', 'enablers', 'budget_points', 'phases', 'open_proposals')}
               | dict(proposals=[p for p in json.loads((project/'.terra'/'brief.json').read_text()).get('proposals') or []
                                 if p.get('status') in (None, 'open', 'pending')]),
-        gate=sitrep.get('gate'),
+        gate=sitrep.get('gate'), related_briefs=related_briefs,
         budget=(sitrep.get('route') or {}).get('budget'),
         knowns=[dict(id=k.get('id'), type=k.get('type'), status=k.get('status'), confidence=k.get('confidence'),
                      n=(k.get('stats') or {}).get('n'), mean=(k.get('stats') or {}).get('mean'),
@@ -176,6 +178,7 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
         for p in proposals:
             lines.append('  '+str(p.get('id'))+' '+str(p.get('summary') or '').split(' \u2014 evidence:')[0][:200])
     lines.append('')
+    lines += briefs.render(observation.get('related_briefs') or [])
     lines.append('# Map (state)')
     lines.append('Gate: '+('green' if (observation.get('gate') or {}).get('ok') else 'red')+
                  ''.join('\n  - '+str(v.get('why') or v.get('kind')) for v in (observation.get('gate') or {}).get('violations') or []))
