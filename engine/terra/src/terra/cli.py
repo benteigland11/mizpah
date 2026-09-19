@@ -2591,7 +2591,7 @@ def cmd_known_adopt(args: argparse.Namespace) -> int:
 
     try:
         root = require_project_root()
-        rec = adopt_known(root, args.id, from_map=args.from_map)
+        rec = adopt_known(root, args.id, from_map=args.from_map, update=bool(getattr(args, "update", False)))
         to_map = map_parent(root, args.from_map)
     except (ValueError, FileExistsError, FileNotFoundError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
@@ -4762,6 +4762,9 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Source map (destination is its parent)",
     )
+    p_kad.add_argument("--update", action="store_true",
+                       help="The parent already holds this known from an earlier adoption and the child "
+                            "re-took the reading: replace the parent's evidence with the child's")
     p_kad.set_defaults(func=cmd_known_adopt)
 
     p_kld = kn_sub.add_parser(

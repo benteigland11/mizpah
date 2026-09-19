@@ -698,6 +698,9 @@ def task_gate(config: dict[str, Any], project: Path, task: dict[str, Any], map_i
         project_unknown = read_unknown(project, unknown_id)
         if project_unknown.get('status') != 'resolved':
             problems.append('project unknown '+unknown_id+' is '+str(project_unknown.get('status')))
+    resynced = readopt_retaken(config, project, map_id, unknown_ids)
+    if resynced:
+        (root/'resynced.jsonl').open('a').write(json.dumps(dict(at=time.time(), readopted=resynced))+'\n') if root else None
     problems += artifact_agreement_problems(project, unknown_ids)
     problems += unread_input_problems(project, unknown_ids)
     gate = terra(config, project, 'gate')
@@ -833,6 +836,28 @@ def artifact_agreement_problems(project: Path, unknown_ids: list[str]) -> list[s
                             'another point, another unit), do not bend it to the map: block the task naming both '
                             'quantities, so the brief can be made to name them apart')
     return problems
+
+
+def readopt_retaken(config: dict[str, Any], project: Path, map_id: str, unknown_ids: list[str]) -> list[str]:
+    """A known the task re-took on its map (voided runs, new runs) is adopted again with --update, so the
+    parent's copy carries the reading the worker now stands behind.
+
+    The worker fixed its instrument, voided three false runs and linked five true ones on its task map; the
+    gate kept comparing the host's fresh reading with global's stale copy and refused the task five times
+    (catalog_pick1, 2026-09-19). The worker is entitled to its own knowns; the plumbing is the host's."""
+    resynced: list[str] = []
+    for uid in unknown_ids:
+        own, parent = read_known(project, uid, map_id), read_known(project, uid)
+        if not own or not parent or not own.get('adopted_to'):
+            continue
+        if list(own.get('run_ids') or []) == list(parent.get('run_ids') or []):
+            continue
+        try:
+            terra(config, project, 'known', 'adopt', uid, '--from', map_id, '--update')
+            resynced.append(uid)
+        except RuntimeError:
+            continue
+    return resynced
 
 
 def run_meta(project: Path, run_id: str) -> dict[str, Any]:

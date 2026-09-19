@@ -535,3 +535,12 @@ candidate 3 is a hand drawn idea grounded in content name md and distinct from c
 Install and validate catalog lookup instrument
 catalog data exists instrument lookup project python validates
 the catalog lookup instrument exists at cg data catalog lookup cli python and validates for this project 
+Use catalog_lookup to identify and record the cheapest matching part and its fields
+part cost matching selected 22uf catalog grams json lowest mass parts spec
+the number of parts in catalog json matching spec json is 2 
+the lowest cost matching part id is cap 22uf 35v 
+the selected part s cost is 0 31 
+the selected part s mass is 0 9 grams 
+Install and validate the WCAG contrast-ratio instrument
+contrast exist frontend instrument python ratio validate wcag
+the wcag contrast ratio instrument  contrast ratio  is not known to exist and validate at  cg frontend wcag contrast ratio python  

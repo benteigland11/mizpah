@@ -783,6 +783,7 @@ def adopt_known(
     known_id: str,
     *,
     from_map: str,
+    update: bool = False,
     _cohort_ok: bool = False,
 ) -> dict[str, Any]:
     """Promote a known one hop up the map tree (child → its parent map).
@@ -790,6 +791,13 @@ def adopt_known(
     Copies the record plus its live run directories; stamps provenance
     (``adopted_from`` / ``adopted_to``). Admission bar re-checked at the
     border; deps must already resolve from the destination map.
+
+    ``update``: the parent already holds this known from an earlier adoption
+    and the child re-took the reading (voided runs, new runs): the parent's
+    copy is replaced by the child's evidence — its run directories copied,
+    the parent's runs that the child voided voided there too — and the
+    provenance stamped again. Without ``update`` a second adoption is
+    refused, so a re-taken reading could never reach the parent.
     """
     import shutil
 
@@ -835,12 +843,22 @@ def adopt_known(
         )
 
     with scoped_map(to_map):
-        if known_path(project_root, known_id).is_file():
+        if known_path(project_root, known_id).is_file() and not update:
             raise FileExistsError(
-                f"known {known_id} already exists on {to_map!r} — merge new "
-                f"evidence there instead (terra unknown graduate --into "
-                f"{known_id}), or rename before adopting"
+                f"known {known_id} already exists on {to_map!r} — a re-taken "
+                f"reading is adopted again with --update (the parent's copy takes "
+                f"the child's evidence); otherwise rename before adopting"
             )
+        if known_path(project_root, known_id).is_file() and update:
+            # The runs the child voided are voided on the parent too: same reading, same verdict.
+            from .probe_run import void_run
+            previous = load_known(project_root, known_id)
+            for rid in list(previous.get("run_ids") or []):
+                if rid not in src_runs and rid not in live:
+                    try:
+                        void_run(project_root, rid, reason=f"re-taken on {from_map}: adopted again with --update")
+                    except (FileNotFoundError, ValueError):
+                        pass
         for rid, src in src_runs.items():
             dst = run_dir(project_root, rid)
             if not dst.exists():
