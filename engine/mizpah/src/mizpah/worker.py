@@ -715,6 +715,42 @@ def library_parts(config: dict[str, Any], project: Path, unknowns: list[dict[str
     return ['`'+k+'` — '+v for k, v in seen.items()]
 
 
+def procedure_parts(config: dict[str, Any], task: dict[str, Any], unknowns: list[dict[str, Any]]) -> list[str]:
+    """Procedures already in the playbook near this task, found by the host so the worker opens one instead of
+    working the method out: the sales2 run never searched once and minted a twin per task."""
+    import subprocess as sp
+    queries = [str(task.get('title') or '')]
+    queries += [re.sub(r'[^a-z0-9 ]', ' ', (u.get('claim') or '').lower()) for u in unknowns[:6]]
+    seen: dict[str, tuple[float, str]] = {}
+    for query in queries:
+        if not query.strip():
+            continue
+        try:
+            out = sp.run([config['mizpah']['playbook'], 'search', query, '--limit', '3'], capture_output=True, text=True,
+                         timeout=60).stdout
+            words = {w for w in re.findall(r'[a-z0-9]{4,}', query.lower()) if w not in STOP}
+            for hit in json.loads(out[out.find('{'):]).get('hits') or []:
+                if hit['id'] in BOOTSTRAP_PROCEDURES:
+                    continue
+                # Scores are not comparable across queries; a hit counts when it shares two real words with
+                # the query ("character" alone matched a rigged-game procedure for a 70-character measure).
+                text = ' '.join(str(hit.get(k) or '') for k in ('id', 'title', 'description', 'snippet')).lower().replace('-', ' ')
+                shared = {w for w in words if w in text}
+                if len(shared) < 2:
+                    continue
+                score = float(hit.get('score') or 0)
+                if score > seen.get(hit['id'], (0, ''))[0]:
+                    seen[hit['id']] = (score, str(hit.get('title') or '')[:80])
+        except (ValueError, OSError, sp.SubprocessError, KeyError):
+            continue
+    best = sorted(seen.items(), key=lambda kv: -kv[1][0])[:4]
+    return ['`'+k+'` — '+v[1] for k, v in best]
+
+
+STOP = {'with', 'from', 'that', 'this', 'into', 'every', 'each', 'must', 'their', 'when', 'than', 'then', 'against',
+        'rendered', 'known', 'unknown', 'reading', 'value', 'number', 'whether', 'count', 'site', 'index', 'html'}
+
+
 def green_message(gate: dict[str, Any], unknown_id: str | list[str], used: list[str] = (), cost: dict[str, Any] | None = None,
                   skips: dict[str, list[str]] | None = None) -> str:
     if isinstance(unknown_id, list):
@@ -1041,6 +1077,11 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         if parts:
             assignment += ('The library already has parts near this work; install and extend one where it nearly fits '
                            'rather than creating a near-duplicate:\n'+'\n'.join('  - '+p for p in parts)+'\n')
+        methods = procedure_parts(config, task, unknowns)
+        if methods:
+            assignment += ('The playbook already has methods near this work; search for them, open the best with '
+                           '`playbook open <id> --for ...` and follow it before working the method out yourself:\n'
+                           +'\n'.join('  - '+m for m in methods)+'\n')
         worker_client, checkin, shell = bindings(config, root, map_id)
         holder['shell'] = shell
         reference = render_reference(project, task, unknowns)

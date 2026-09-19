@@ -9,6 +9,25 @@ from playbook.cli import main
 from playbook.store import procedure_path
 
 
+@pytest.fixture(autouse=True)
+def searched_tree(tmp_path: Path, monkeypatch) -> None:
+    """create is gated behind a search from the working tree; these tests are about the rest."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path/".playbook").mkdir(exist_ok=True)
+    (tmp_path/".playbook"/".searched").write_text("fixture\n")
+
+
+def test_create_is_refused_until_the_tree_has_searched(tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    (tmp_path/".playbook"/".searched").unlink()
+    assert main(["create", "gated", "--title", "G", "--description", "d", "--tags", "a"]) == 1
+    assert "Search first" in capsys.readouterr().out
+    assert main(["search", "gated", "--limit", "2"]) == 0
+    assert (tmp_path/".playbook"/".searched").read_text().strip() == "gated"
+    assert main(["create", "gated", "--title", "G", "--description", "d", "--tags", "a"]) == 0
+    assert main(["create", "gated2", "--title", "G", "--description", "d", "--tags", "a", "--unsearched"]) == 0
+
+
 def test_cli_create_add_validate(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
     assert main(["create", "item", "--title", "Item", "--description", "choose a mode", "--tags", "alpha"]) == 0

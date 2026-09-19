@@ -4,10 +4,28 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from typing import Any, Sequence
 
 from playbook import ops
+
+# The working tree remembers that the playbook was searched from here (create checks for it), the way
+# Cartograph's cg/.searched does: a method is looked for before it is written.
+SEARCH_MARK = os.path.join(".playbook", ".searched")
+
+
+def _note_search(query: str) -> None:
+    try:
+        os.makedirs(".playbook", exist_ok=True)
+        with open(SEARCH_MARK, "a") as handle:
+            handle.write(query.replace("\n", " ")+"\n")
+    except OSError:
+        pass
+
+
+def _searched_here() -> bool:
+    return os.path.exists(SEARCH_MARK)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -43,6 +61,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default="",
         help='JSON array of {"title","do"} objects, or - to read it from stdin; writes the whole procedure at once',
     )
+    create.add_argument("--unsearched", action="store_true", help="create without a prior `playbook search` from this tree")
     create.set_defaults(handler=_cmd_create)
 
     edit = sub.add_parser("edit", help="edit procedure title, description, and/or tags")
@@ -120,6 +139,11 @@ def _cmd_create(args: argparse.Namespace) -> dict[str, Any]:
     tags = _csv(args.tags)
     if not tags:
         raise ValueError("--tags must include at least one tag")
+    if not args.unsearched and not _searched_here():
+        raise ValueError("No playbook search has been run from this tree. Search first — "
+                         "`playbook search \"<what the method does>\" --limit 3` — and improve the closest procedure "
+                         "(add-step / edit-step) when one nearly fits; create only if nothing does "
+                         "(or pass --unsearched to skip this check).")
     steps = _steps_json(args.steps)
     path = ops.create_procedure(args.id, args.title, args.description, tags, steps=steps)
     return {"ok": True, "id": args.id, "path": str(path), "steps": len(steps or [])}
@@ -135,6 +159,7 @@ def _cmd_edit(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _cmd_search(args: argparse.Namespace) -> dict[str, Any]:
+    _note_search(" ".join(args.query))
     return ops.search_procedures(" ".join(args.query), limit=args.limit)
 
 

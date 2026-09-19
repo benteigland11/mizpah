@@ -114,3 +114,6 @@ diverged:
 - harness: infra-sandboxed-shell-execution 1.8.0 → 1.8.1 gains ShellConfig.refused_paths: a command naming one is
   refused unexecuted (the bind stays so the tools run). Mizpah refuses engine/ and .venv/lib: the worker read terra
   internals for 200 turns on a verification task instead of blocking with "input known X is wrong".
+- playbook: `create` refused until `playbook search` has run from the working tree (`.playbook/.searched`, the
+  mirror of Cartograph's cg/.searched); `--unsearched` skips. Reason: on 2026-09-19 a worker minted a twin
+  procedure per task and never searched once.
