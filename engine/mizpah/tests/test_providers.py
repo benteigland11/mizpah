@@ -11,7 +11,13 @@ from mizpah.worker import client_for
 
 def test_shipped_profiles_load_and_xai_needs_a_client_id() -> None:
     reg = providers.registry({}, environ={})
-    assert {'openai_api', 'openai_chatgpt', 'xai_api', 'xai_grok', 'zai_coding', 'kimi_coding', 'minimax_coding', 'deepseek_api'} <= set(reg.names())
+    assert {'openai_api', 'openai_chatgpt', 'xai_api', 'xai_grok', 'zai_coding', 'kimi_coding', 'minimax_coding', 'deepseek_api',
+            'github_copilot', 'google_gemini', 'anthropic_api', 'mistral_api', 'openrouter_api', 'groq_api'} <= set(reg.names())
+    copilot = reg.get('github_copilot')
+    assert copilot.auth.kind == 'device_code' and 'MIZPAH_GITHUB_CLIENT_ID' in (providers.missing_client_id(copilot) or '')
+    assert copilot.models_url == 'https://api.githubcopilot.com/models'
+    anthropic = reg.get('anthropic_api')
+    assert anthropic.headers_for('k') == {'anthropic-version': '2023-06-01', 'Authorization': 'Bearer k', 'x-api-key': 'k'}
     chatgpt = reg.get('openai_chatgpt')
     assert chatgpt.auth.kind == 'oauth_pkce' and chatgpt.auth.redirect_uri == 'http://localhost:1455/auth/callback'
     assert chatgpt.headers_for('t', {'account_id': 'a'})['chatgpt-account-id'] == 'a'
@@ -103,3 +109,25 @@ def test_cli_models_and_use(tmp_path: Path, capsys: pytest.CaptureFixture) -> No
     assert written['controller'] == {'generation': {'model': '/x.gguf'}}
     assert provider_cli.main(['use', 'openai_chatgpt', '--harness', str(harness)]) == 0
     assert json.loads(harness.read_text())['controller']['generation']['model'] == 'gpt-5.5'
+
+
+def test_models_merge_live_list_when_signed_in(tmp_path: Path, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path))
+    session = providers.session_for('mistral_api', {})
+    static, live = providers.available_models(session)
+    assert live is False and static[0] == 'mistral-large-latest'
+    session.login(api_key='sk-1')
+
+    def fake_http(method, url, headers, body, timeout) -> HttpResponse:
+        assert method == 'GET' and url == 'https://api.mistral.ai/v1/models'
+        return HttpResponse(200, {}, json.dumps({'data': [{'id': 'mistral-large-latest'}, {'id': 'brand-new'}]}).encode())
+
+    session.http = fake_http
+    merged, live = providers.available_models(session)
+    assert live and merged == ['mistral-large-latest', 'devstral-latest', 'codestral-latest', 'brand-new']
+
+    def broken(*args) -> HttpResponse:
+        raise OSError('down')
+
+    session.http = broken
+    assert providers.available_models(session) == (static, False)

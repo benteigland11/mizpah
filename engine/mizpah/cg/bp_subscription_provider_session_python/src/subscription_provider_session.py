@@ -217,6 +217,31 @@ class ProviderSession:
         """Prompt-token estimate in the shape a model client's ``count`` returns."""
         return self.estimator.estimate(payload).as_dict()
 
+    def list_models(self) -> list[str]:
+        """Model ids the provider reports for this credential, in the OpenAI ``/models`` shape.
+
+        Empty when the profile has no list endpoint; raises ``NotSignedIn`` / ``QuarantinedCredential``
+        when there is no usable credential, and ``LookupError`` when the endpoint answers badly.
+        """
+        url = self.profile.models_url
+        if url is None:
+            return []
+        record = self._bearer().ensure_fresh()
+        headers = {"Accept": "application/json"}
+        headers.update(self.profile.headers_for(record.secret["access_token"], record.metadata))
+        response = self.http("GET", url, headers, None, self.profile.timeout_seconds)
+        if not 200 <= response.status < 300:
+            raise LookupError(f"model list http {response.status}: {response.body[:200].decode('utf-8', 'replace')}")
+        try:
+            payload = json.loads(response.body.decode("utf-8"))
+        except ValueError as error:
+            raise LookupError("model list is not JSON") from error
+        rows = payload.get("data") if isinstance(payload, dict) else payload
+        if not isinstance(rows, list):
+            raise LookupError("model list has no data array")
+        ids = [str(row.get("id")) for row in rows if isinstance(row, dict) and row.get("id")]
+        return [identifier.split("/", 1)[1] if identifier.startswith("models/") else identifier for identifier in ids]
+
     def endpoint(self) -> dict[str, Any]:
         """Fields for an ``EndpointConfig``: where the transport already sends things."""
         return {"base_url": self.profile.api_base_url, "completion_path": self.profile.completion_path,

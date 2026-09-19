@@ -25,7 +25,8 @@ from cg.backend_llm_provider_profiles_python.src.llm_provider_profiles import (
 )
 
 SHIPPED_PROFILES = Path(__file__).with_name('providers.json')
-CLIENT_ID_ENVIRONMENT = {'xai_grok': 'GROK_OAUTH2_CLIENT_ID', 'openai_chatgpt': 'MIZPAH_OPENAI_CLIENT_ID'}
+CLIENT_ID_ENVIRONMENT = {'xai_grok': 'GROK_OAUTH2_CLIENT_ID', 'openai_chatgpt': 'MIZPAH_OPENAI_CLIENT_ID',
+                         'github_copilot': 'MIZPAH_GITHUB_CLIENT_ID'}
 
 
 def credential_path(config: dict[str, Any] | None = None) -> Path:
@@ -66,6 +67,18 @@ def registry(config: dict[str, Any] | None = None, environ: dict[str, str] | Non
 def session_for(name: str, config: dict[str, Any] | None = None, *, open_browser: bool = True) -> ProviderSession:
     profile = registry(config).get(name)
     return ProviderSession(profile, CredentialStore(credential_path(config)), open_browser=open_browser)
+
+
+def available_models(session: ProviderSession) -> tuple[list[str], bool]:
+    """The profile's catalogue, extended by the live list when signed in; the flag says whether it was."""
+    static = list(session.profile.models)
+    if not session.status()['signed_in'] or session.profile.models_url is None:
+        return static, False
+    try:
+        live = session.list_models()
+    except Exception:
+        return static, False
+    return static + [m for m in live if m not in static], True
 
 
 def missing_client_id(profile: ProviderProfile) -> str | None:

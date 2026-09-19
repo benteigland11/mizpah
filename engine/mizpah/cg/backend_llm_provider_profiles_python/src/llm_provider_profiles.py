@@ -71,6 +71,7 @@ class ProviderProfile:
     credential_headers: dict[str, str] = field(default_factory=dict)
     models: tuple[str, ...] = ()
     default_model: str | None = None
+    models_path: str | None = None
     token_count: str = "usage_calibrated"
     context_window: int | None = None
     timeout_seconds: float = 600.0
@@ -85,8 +86,15 @@ class ProviderProfile:
             raise ValueError("api_base_url must be absolute")
         if not self.completion_path.startswith("/"):
             raise ValueError("completion_path must begin with a slash")
+        if self.models_path is not None and not self.models_path.startswith("/"):
+            raise ValueError("models_path must begin with a slash")
         if self.default_model is not None and self.models and self.default_model not in self.models:
             raise ValueError("default_model must be one of models")
+
+    @property
+    def models_url(self) -> str | None:
+        """Where a live model list can be fetched with the credential headers, if the provider has one."""
+        return None if self.models_path is None else self.api_base_url.rstrip("/") + self.models_path
 
     def headers_for(self, access_token: str, metadata: Mapping[str, Any] | None = None) -> dict[str, str]:
         """Static headers plus credential headers rendered from the token and its metadata.

@@ -51,6 +51,14 @@ def test_roundtrip_through_dict() -> None:
     assert isinstance(key, ApiKeyAuth) and key.environment_variable == "EXAMPLE_KEY"
 
 
+def test_models_url() -> None:
+    assert PROFILE.models_url is None
+    listed = ProviderProfile("n", "N", ApiKeyAuth(), "https://api.example.org/v1/", "/chat/completions", models_path="/models")
+    assert listed.models_url == "https://api.example.org/v1/models"
+    with pytest.raises(ValueError):
+        ProviderProfile("n", "N", ApiKeyAuth(), "https://api.example.org", "/x", models_path="models")
+
+
 def test_validation() -> None:
     with pytest.raises(ValueError):
         ProviderProfile("n", "N", ApiKeyAuth(), "api.example.org", "/x")

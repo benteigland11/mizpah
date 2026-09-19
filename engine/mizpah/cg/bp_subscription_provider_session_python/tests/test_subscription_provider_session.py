@@ -280,6 +280,27 @@ def test_transport_surfaces_provider_errors(store: CredentialStore) -> None:
     assert response.status is None and "connection reset" in response.error
 
 
+def test_list_models(store: CredentialStore) -> None:
+    listed = ProviderProfile("keyed", "Keyed", ApiKeyAuth(environment_variable="K"), "https://api.example.org/v1", "/chat/completions",
+                             credential_headers={"Authorization": "Bearer {token}"}, models_path="/models")
+    http = FakeHttp()
+    session = _session(listed, store, http)
+    with pytest.raises(NotSignedIn):
+        session.list_models()
+    session.login(api_key="sk-1")
+    http.model_answers.append(HttpResponse(200, {}, json.dumps({"data": [{"id": "models/m-1"}, {"id": "m-2"}, {"object": "x"}]}).encode()))
+    assert session.list_models() == ["m-1", "m-2"]
+    call = http.calls[-1]
+    assert call["method"] == "GET" and call["url"] == "https://api.example.org/v1/models" and call["headers"]["Authorization"] == "Bearer sk-1"
+    http.model_answers.append(HttpResponse(403, {}, b"no"))
+    with pytest.raises(LookupError, match="403"):
+        session.list_models()
+    http.model_answers.append(HttpResponse(200, {}, b"[]garbage"))
+    with pytest.raises(LookupError):
+        session.list_models()
+    assert _session(pkce_profile(), store, http).list_models() == []
+
+
 def test_endpoint_and_count(store: CredentialStore) -> None:
     session = _session(pkce_profile(), store, FakeHttp())
     assert session.endpoint() == {"base_url": "https://api.example.org/backend", "completion_path": "/responses",

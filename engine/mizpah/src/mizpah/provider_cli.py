@@ -15,7 +15,7 @@ from typing import Any
 
 from cg.bp_subscription_provider_session_python.src.subscription_provider_session import LoginError, LoginPrompt
 
-from mizpah.providers import credential_path, missing_client_id, registry, session_for
+from mizpah.providers import available_models, credential_path, missing_client_id, registry, session_for
 
 
 LLAMA_ONLY_GENERATION_KEYS = ('reasoning_format', 'reasoning_budget_tokens', 'chat_template_kwargs', 'top_k', 'min_p', 'seed')
@@ -83,9 +83,11 @@ def cmd_login(args: argparse.Namespace) -> int:
 
 def cmd_models(args: argparse.Namespace) -> int:
     """Models a profile offers, with what the engine knows about each."""
-    profile = registry(_config(args.config)).get(args.provider)
+    session = session_for(args.provider, _config(args.config))
+    profile = session.profile
+    models, live = available_models(session)
     _emit(dict(provider=profile.name, default_model=profile.default_model, context_window=profile.context_window,
-               wire=profile.wire, models=list(profile.models)))
+               wire=profile.wire, models=models, live=live))
     return 0
 
 
@@ -96,10 +98,12 @@ def cmd_use(args: argparse.Namespace) -> int:
     becomes provider "subscription", the model is set, and llama-only sampling keys are dropped.
     """
     config = _config(args.config)
-    profile = registry(config).get(args.provider)
+    session = session_for(args.provider, config)
+    profile = session.profile
     model = args.model or profile.default_model
-    if profile.models and model not in profile.models:
-        _emit(dict(event='error', provider=args.provider, error=f'{model!r} is not one of {list(profile.models)}'))
+    models, _ = available_models(session)
+    if models and model not in models:
+        _emit(dict(event='error', provider=args.provider, error=f'{model!r} is not one of {models}'))
         return 2
     harness_path = args.harness
     if harness_path is None:
