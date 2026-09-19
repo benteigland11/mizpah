@@ -170,6 +170,11 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
                     lines.append('      ↳ (no unknown cites this deliverable)')
     if brief.get('budget_points') is not None:
         lines.append('Budget points: '+str(brief['budget_points']))
+    proposals = brief.get('proposals') or []
+    if proposals:
+        lines.append('Open proposals (queued for the person; the map\'s record that a need cannot be met as written):')
+        for p in proposals:
+            lines.append('  '+str(p.get('id'))+' '+str(p.get('summary') or '').split(' \u2014 evidence:')[0][:200])
     lines.append('')
     lines.append('# Map (state)')
     lines.append('Gate: '+('green' if (observation.get('gate') or {}).get('ok') else 'red')+
@@ -394,12 +399,18 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
                             '(the output equals the known it names) or number (the value it prints); a label is for a '
                             'reading of the data (which store, which file)')
             unknowns.remove(item); continue
-        if artifact and not [w for w in re.findall(r'[a-z][a-z0-9_]*', item['claim']+' '+item['evidence_needed'])
-                             if w in anchors and w != item['id']]:
+        # A statement about what the map does NOT hold ("the report lists the questions the data could not
+        # answer") is anchored on the proposals that record it (CR-001), not on a known.
+        proposal_ids = {str(p.get('id')) for p in observation['brief'].get('proposals') or []}
+        names_proposal = any(m in proposal_ids for m in re.findall(r'CR-\d+', item['claim']+' '+item['evidence_needed']))
+        if artifact and not names_proposal and not [w for w in re.findall(r'[a-z][a-z0-9_]*', item['claim']+' '+item['evidence_needed'])
+                                                    if w in anchors and w != item['id']]:
             refusals.append('unknown '+item['id']+': it is about '+(item['creates'] or item['cites'])+' but names no known '
                             'or unknown its content must agree with; an artifact is verified against the map — name '
                             'them in the evidence ("the STN01 row matches stn01_mean_temp_c", "the tests assert '
-                            'station_count and mean_temp_c"), minting number unknowns first when the map lacks them')
+                            'station_count and mean_temp_c"), minting number unknowns first when the map lacks them; '
+                            'a statement that a need cannot be answered is anchored on the open proposal that records '
+                            'it (name its id, e.g. CR-001)')
             unknowns.remove(item)
     minted = {u['id'] for u in unknowns}
     for item in decision.get('tasks') or []:

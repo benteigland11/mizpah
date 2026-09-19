@@ -95,6 +95,7 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
     cycles: list[dict[str, Any]] = []
     tasks_run = 0
     errors = 0
+    stalled_evals = 0
     stop = 'max_cycles'
 
     def out_of_time() -> bool:
@@ -182,10 +183,16 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                 stop = 'proposals_pending'
             elif record['eval'].get('done') is True:
                 stop = 'nothing_owed'
+            elif stalled_evals < 1:
+                # One empty eval is one bad draw (each step is a fresh window): a second cycle gets a route
+                # step and another eval before a person is asked to decide.
+                stalled_evals += 1
+                continue
             else:
-                # The controller routed nothing but would not say the brief is met: a person decides.
+                # The controller routed nothing twice and would not say the brief is met: a person decides.
                 stop = 'controller_stalled'
             break
+        stalled_evals = 0
         if tasks_run >= max_tasks:
             stop = 'max_tasks'
             break
