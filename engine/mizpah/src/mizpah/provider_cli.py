@@ -85,9 +85,9 @@ def cmd_models(args: argparse.Namespace) -> int:
     """Models a profile offers, with what the engine knows about each."""
     session = session_for(args.provider, _config(args.config))
     profile = session.profile
-    models, live = available_models(session)
+    models, source = available_models(session)
     _emit(dict(provider=profile.name, default_model=profile.default_model, context_window=profile.context_window,
-               wire=profile.wire, models=models, live=live))
+               wire=profile.wire, models=models, live=source == 'live', source=source))
     return 0
 
 
@@ -101,7 +101,10 @@ def cmd_use(args: argparse.Namespace) -> int:
     session = session_for(args.provider, config)
     profile = session.profile
     model = args.model or profile.default_model
-    models, _ = available_models(session)
+    models, source = available_models(session)
+    if source == 'signed_out':
+        _emit(dict(event='error', provider=args.provider, error=f'sign in to {profile.display_name} first; its models are listed from the account'))
+        return 2
     if models and model not in models:
         _emit(dict(event='error', provider=args.provider, error=f'{model!r} is not one of {models}'))
         return 2

@@ -69,21 +69,27 @@ def session_for(name: str, config: dict[str, Any] | None = None, *, open_browser
     return ProviderSession(profile, CredentialStore(credential_path(config)), open_browser=open_browser)
 
 
-def available_models(session: ProviderSession) -> tuple[list[str], bool]:
-    """The live list when signed in and the provider has one (authoritative; the profile's default
-    first if it is there), else the profile's static catalogue. The flag says which."""
+def available_models(session: ProviderSession) -> tuple[list[str], str]:
+    """Models the person may pick, and where they came from.
+
+    ``live``: the provider listed them for this credential (authoritative; profile default first).
+    ``signed_out``: the provider has a list endpoint but no credential yet — nothing is shown, since
+    a static list cannot be verified. ``no_list_endpoint``: the profile's static catalogue.
+    ``list_failed:<why>``: signed in but the list call failed; the static catalogue as an unverified hint.
+    """
     static = list(session.profile.models)
-    if not session.status()['signed_in'] or session.profile.models_url is None:
-        return static, False
+    if session.profile.models_url is None:
+        return static, 'no_list_endpoint'
+    if not session.status()['signed_in']:
+        return [], 'signed_out'
     try:
         live = session.list_models()
-    except Exception:
-        return static, False
+    except Exception as error:  # noqa: BLE001 - any failure here means "hint only"
+        return static, f'list_failed: {type(error).__name__}: {error}'
     if not live:
-        return static, False
+        return static, 'list_failed: empty list'
     default = session.profile.default_model
-    ordered = ([default] if default in live else []) + [m for m in live if m != default]
-    return ordered, True
+    return ([default] if default in live else []) + [m for m in live if m != default], 'live'
 
 
 def missing_client_id(profile: ProviderProfile) -> str | None:
