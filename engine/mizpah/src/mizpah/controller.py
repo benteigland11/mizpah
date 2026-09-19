@@ -329,15 +329,22 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         if not isinstance(item, dict):
             refusals.append('unknown entry is not an object'); continue
         uid = str(item.get('id') or '')
-        cites = str(item.get('cites') or '')
+        # One unknown may serve several brief entries ("the report states the questions the data could not
+        # answer" cites the deliverable and the needs it names); the first reference is the primary cite.
+        refs = [r.strip() for r in re.split(r'[|,;]| and ', str(item.get('cites') or '')) if r.strip()]
+        cites = refs[0] if refs else ''
         kind, _, index = cites.partition(':')
         if not ID_PATTERN.match(uid):
             refusals.append('unknown '+repr(uid)+': id must match ^[a-z][a-z0-9_]*$'); continue
         if uid in existing_unknowns:
             refusals.append('unknown '+uid+': already exists ('+str(existing_unknowns[uid]['status'])+')'); continue
-        if kind not in counts or not index.isdigit() or not 1 <= int(index) <= counts[kind]:
-            refusals.append('unknown '+uid+': cites '+repr(cites)+' but the brief has '+str(counts['need'])+
-                            ' needs and '+str(counts['deliverable'])+' deliverables; cite need:N or deliverable:N'); continue
+        bad_refs = [r for r in refs if r.partition(':')[0] not in counts or not r.partition(':')[2].isdigit()
+                    or not 1 <= int(r.partition(':')[2]) <= counts[r.partition(':')[0]]]
+        if not refs or bad_refs:
+            refusals.append('unknown '+uid+': cites '+repr(item.get('cites'))+' but the brief has '+str(counts['need'])+
+                            ' needs and '+str(counts['deliverable'])+' deliverables; cite need:N or deliverable:N'
+                            ' (several allowed, separated by |)'); continue
+        item = dict(item, cites=cites, also=refs[1:])
         if item.get('type') not in TYPES:
             refusals.append('unknown '+uid+': type must be one of '+', '.join(TYPES)); continue
         claim, evidence_needed = str(item.get('claim') or '').strip(), str(item.get('evidence_needed') or '').strip()
@@ -372,7 +379,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         # is kept as a hint and never refused.
         unknowns.append(dict(id=uid, claim=claim, evidence_needed=evidence_needed,
                              type=item['type'], quantity=uid, unit=str(item.get('unit') or ''), cites=cites, source=source,
-                             creates=creates))
+                             creates=creates, also=item.get('also') or []))
     # An artifact is verified by agreement with the map, so its unknown must say which knowns (or
     # unknowns minted alongside) its content agrees with. Without that anchor the probe can only check
     # that the file exists: a report with a table of invented stations passed on 2026-09-18.
@@ -497,7 +504,8 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
     for u in accepted['unknowns']:
         args = ['unknown', 'create', u['id'], '--claim', u['claim'], '--evidence', u['evidence_needed'],
                 '--type', u['type'], '--quantity', u['quantity'],
-                '--notes', 'cites '+u['cites']+('; source '+u['source'] if u.get('source') else '')
+                '--notes', 'cites '+u['cites']+('; also '+', '.join(u['also']) if u.get('also') else '')
+                +('; source '+u['source'] if u.get('source') else '')
                 +('; creates '+u['creates'] if u.get('creates') else '')]
         if u['unit']:
             args += ['--unit', u['unit']]

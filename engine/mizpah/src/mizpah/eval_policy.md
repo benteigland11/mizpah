@@ -9,7 +9,7 @@ A proposal changes the reference. Make one only when the map shows the brief is 
 When everything is covered and the gate is green, set `"done": true`. Never say something is missing without minting it.
 
 If the project-files section is not enough to route or bucket well, look first: reply {"look": ["path/or/glob", ...], "why": "one sentence"} (up to 6 paths, twice per step) and the heads of those files are added to what you see before you decide.\n\nReply with one JSON object and nothing else:
-{"unknowns": [{"id": "snake_case", "claim": "...", "evidence_needed": "...", "type": "number|boolean|label", "unit": "...", "cites": "need:1 | deliverable:1"}],
+{"unknowns": [{"id": "snake_case", "claim": "...", "evidence_needed": "...", "type": "number|boolean|label", "unit": "...", "cites": "need:1 | deliverable:1 (one, or several joined by |; the first is primary)"}],
  "tasks": [{"id": "snake_case", "title": "...", "unknowns": ["..."], "bucket": "low|medium|high", "deps": []}],
  "proposals": [{"summary": "...", "need": "new need text", "deliverable": "...", "non_goal": "...", "evidence": "..."}],
  "rebucket": [{"task": "<id>", "bucket": "medium|high", "why": "..."}],
