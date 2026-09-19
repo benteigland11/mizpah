@@ -430,6 +430,15 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         # One unknown may serve several brief entries ("the report states the questions the data could not
         # answer" cites the deliverable and the needs it names); the first reference is the primary cite.
         refs = [r.strip() for r in re.split(r'[|,;]| and ', str(item.get('cites') or '')) if r.strip()]
+        if not refs:
+            # A builder that names a deliverable's file has said what it cites; the field is inferred rather than
+            # refused (the controller saw the ledger, minted the builders, and left `cites` empty — logo_mark4).
+            text = (str(item.get('claim') or '')+' '+str(item.get('creates') or '')+' '+uid.replace('_', ' ')).lower()
+            for index, dtext in enumerate(brief.get('deliverables') or [], start=1):
+                names = [n.lower() for n in re.findall(r'`([^`]+)`|([\w./-]+\.[A-Za-z0-9]{1,5})', str(dtext)) for n in n if n]
+                if any(n.rsplit('/', 1)[-1] in text or n.rsplit('/', 1)[-1].replace('.', ' ').replace('-', ' ') in text for n in names):
+                    refs = ['deliverable:'+str(index)]
+                    break
         cites = refs[0] if refs else ''
         kind, _, index = cites.partition(':')
         if not ID_PATTERN.match(uid):

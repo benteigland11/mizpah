@@ -702,3 +702,6 @@ the current site style css and site index html do not yet define a shared contai
 Build the Open Graph card HTML and CSS
 assets available brand card content description exists follows html name product social
  brand social card html  exists and its content follows the name and product description in  content name md  and  content product md   using available brand assets and tokens 
+Render every candidate mark at the small target size
+candidate inked least mark percent pixels renders
+every candidate mark renders at 16 by 16 pixels with at least 20 percent of pixels inked 

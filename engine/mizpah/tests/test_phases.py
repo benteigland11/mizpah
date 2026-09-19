@@ -461,3 +461,12 @@ def test_a_route_reply_without_the_deliverable_is_sent_back_for_the_builder(proj
     assert accepted['unknowns'] and any('deliverable:1 has no unknown' in r for r in refusals)
     # A later-phase deliverable is not demanded yet.
     assert not any('deliverable:2' in r for r in refusals)
+
+
+def test_a_builder_naming_a_deliverable_file_gets_its_cite_inferred(project: Path) -> None:
+    observation = controller.observe(CONFIG, project)
+    accepted, refusals = controller.guard(dict(unknowns=[
+        dict(id='survey_md_built', type='boolean', creates='report/survey.md', claim='report/survey.md is written from the readings',
+             evidence_needed='read it')],
+        tasks=[dict(id='write', unknowns=['survey_md_built'], bucket='low', title='write')]), observation, project)
+    assert accepted['unknowns'] and accepted['unknowns'][0]['cites'] == 'deliverable:1', refusals
