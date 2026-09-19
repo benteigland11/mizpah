@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass, field
 import io
+import os
 import json
 from pathlib import Path, PurePosixPath
 import re
@@ -145,6 +146,17 @@ class ShellConfig:
     # For the few verbs that are policy today and must be structure: a gate override, a publish, a write to a
     # record only a tool may write. Regexes are compiled once at construction.
     refused_patterns: tuple[tuple[str, str], ...] = ()
+    # Bind mode: /work is this host directory, bound read-write, instead of a tmpfs filled from a snapshot.
+    # Nothing is packed per command and no size cap applies; the directory is the state. For projects whose
+    # builds (a Flutter build/, node_modules, a Mathlib .lake) could never fit a snapshot. `cache_dirs` are
+    # relative directories inside it that are the worker's rebuildable state, never evidence: left out of
+    # `snapshot()` (what a harvest or a re-measurement sees) and, in a detached tmpfs run, bound read-only.
+    workspace_dir: str | None = None
+    cache_dirs: tuple[str, ...] = ()
+    # Bind mode: relative directories that stay snapshot-managed — a tmpfs over the bind, filled from the
+    # tar given to run() and packed back into the result — so whatever guards the host applies to them on
+    # write-back (a map's entitlements) hold exactly as in snapshot mode. Everything else is the directory.
+    state_dirs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if any(not Path(value).is_absolute() for value in
@@ -190,7 +202,7 @@ class ShellResult:
     stderr: str
     timed_out: bool
     output_truncated: bool
-    workspace: bytes
+    workspace: Any   # tar bytes, or the DirectoryWorkspace in bind mode
     output_files: tuple[str, ...]
     elapsed_seconds: float
     detail: str = ''
@@ -258,13 +270,143 @@ def _members(snapshot: bytes, byte_limit: int, file_limit: int) -> list[tuple[ta
     return result
 
 
-def workspace_files(snapshot: bytes, *, byte_limit: int, file_limit: int) -> tuple[str, ...]:
+class DirectoryWorkspace:
+    """A workspace that is a host directory bound at /work (bind mode): the same operations the snapshot
+    helpers offer over tar bytes, over the directory. It stands in for the snapshot everywhere the session
+    threads one; `write` and `edit` return the same object, and `snapshot()` packs the evidence part of the
+    tree (caches and ignored directories left out) for a harvest or a re-measurement."""
+
+    def __init__(self, root: str | Path, *, cache_dirs: tuple[str, ...] = (), snapshot_ignore: tuple[str, ...] = (),
+                 state_dirs: tuple[str, ...] = (), state: bytes = b'', limits: Any = None) -> None:
+        self.root = Path(root).resolve()
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.cache_dirs = tuple(_name(c) for c in cache_dirs)
+        self.snapshot_ignore = tuple(snapshot_ignore)
+        self.state_dirs = tuple(_name(d) for d in state_dirs)
+        self.state = state          # the snapshot-managed part (tar bytes), as of the last command
+        self.limits = limits
+
+    def _in_state(self, name: str) -> bool:
+        parts = PurePosixPath(name).parts
+        return any(parts[:len(PurePosixPath(d).parts)] == PurePosixPath(d).parts for d in self.state_dirs)
+
+    def _excluded(self, relative: PurePosixPath) -> bool:
+        parts = relative.parts
+        return any(part in self.snapshot_ignore for part in parts) or any(
+            parts[:len(PurePosixPath(c).parts)] == PurePosixPath(c).parts for c in self.cache_dirs) \
+            or self._in_state(str(relative))
+
+    def with_state(self, state: bytes) -> DirectoryWorkspace:
+        return DirectoryWorkspace(self.root, cache_dirs=self.cache_dirs, snapshot_ignore=self.snapshot_ignore,
+                                  state_dirs=self.state_dirs, state=state, limits=self.limits)
+
+    def _state_limits(self) -> tuple[int, int]:
+        return ((self.limits.workspace_bytes, self.limits.max_files) if self.limits is not None else (10**9, 10**6))
+
+    def _path(self, name: str, *, user: bool = False) -> Path:
+        canonical = _name(name, user=user)
+        path = self.root/canonical
+        # Never follow a link out of the tree: resolve and check containment.
+        resolved = path.resolve() if path.exists() or path.is_symlink() else (path.parent.resolve()/path.name)
+        if self.root not in resolved.parents and resolved != self.root:
+            raise ValueError('Workspace paths must stay inside the workspace')
+        return path
+
+    def files(self, *, file_limit: int) -> tuple[str, ...]:
+        byte_limit, state_files = self._state_limits()
+        out = list(workspace_files(self.state, byte_limit=byte_limit, file_limit=state_files)) if self.state else []
+        for path in sorted(self.root.rglob('*')):
+            relative = PurePosixPath(str(path.relative_to(self.root)))
+            if self._excluded(relative) or not path.is_file() or path.is_symlink():
+                continue
+            out.append(str(relative))
+            if len(out) >= file_limit:
+                break
+        return tuple(out)
+
+    def read(self, name: str, *, byte_limit: int) -> bytes:
+        if self._in_state(_name(name, user=True)):
+            limit, files = self._state_limits()
+            return read_workspace_file(self.state, name, byte_limit=limit, file_limit=files)
+        path = self._path(name, user=True)
+        if path.is_symlink() or not path.is_file():
+            raise FileNotFoundError(_name(name, user=True))
+        if path.stat().st_size > byte_limit:
+            raise ValueError('File exceeds the workspace byte limit')
+        return path.read_bytes()
+
+    def write(self, name: str, data: bytes, *, byte_limit: int) -> DirectoryWorkspace:
+        if len(data) > byte_limit:
+            raise ValueError('Workspace file content exceeds its limit')
+        if self._in_state(_name(name, user=True)):
+            limit, files = self._state_limits()
+            return self.with_state(write_workspace_file(self.state, name, data, byte_limit=limit, file_limit=files))
+        path = self._path(name, user=True)
+        if path.exists() and (path.is_symlink() or not path.is_file()):
+            raise ValueError('Destination is not a regular file')
+        for parent in path.parents:
+            if parent == self.root:
+                break
+            if parent.exists() and not parent.is_dir():
+                raise ValueError('A workspace parent is not a directory')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return self
+
+    def snapshot(self, *, byte_limit: int, file_limit: int) -> bytes:
+        """The evidence part of the tree as a tar — the directory (caches left out) plus the state part —
+        what a harvest or a fresh sandbox is given."""
+        sink = io.BytesIO()
+        with tarfile.open(fileobj=sink, mode='w:', dereference=False) as archive:
+            if self.state:
+                with tarfile.open(fileobj=io.BytesIO(self.state), mode='r:') as source:
+                    for member in source:
+                        archive.addfile(member, source.extractfile(member) if member.isfile() else None)
+            for path in sorted(self.root.rglob('*')):
+                relative = PurePosixPath(str(path.relative_to(self.root)))
+                if self._excluded(relative):
+                    continue
+                if path.is_symlink():
+                    link = os.readlink(path)
+                    if os.path.isabs(link) or '..' in link.split('/'):
+                        continue
+                info = archive.gettarinfo(str(path), arcname=str(relative))
+                if path.is_file() and not path.is_symlink():
+                    info.type = tarfile.REGTYPE
+                    info.linkname = ''
+                    with path.open('rb') as handle:
+                        archive.addfile(info, handle)
+                else:
+                    archive.addfile(info)
+        data = sink.getvalue()
+        _members(data, byte_limit, file_limit)
+        return data
+
+
+def _only_state(snapshot: bytes, state_dirs: tuple[str, ...], limits: Any) -> bytes:
+    """The members of a snapshot that lie under the state directories (bind mode sends only those)."""
+    if not snapshot or not state_dirs:
+        return b''
+    prefixes = tuple(_name(d)+'/' for d in state_dirs)+tuple(_name(d) for d in state_dirs)
+    sink = io.BytesIO()
+    with tarfile.open(fileobj=io.BytesIO(snapshot), mode='r:') as source, tarfile.open(fileobj=sink, mode='w:') as out:
+        for member in source:
+            if member.name in prefixes or member.name.startswith(tuple(p for p in prefixes if p.endswith('/'))):
+                out.addfile(member, source.extractfile(member) if member.isfile() else None)
+    return sink.getvalue()
+
+
+def workspace_files(snapshot: bytes | DirectoryWorkspace, *, byte_limit: int, file_limit: int) -> tuple[str, ...]:
     """List persisted regular files without extracting the archive on the host."""
+    if isinstance(snapshot, DirectoryWorkspace):
+        return snapshot.files(file_limit=file_limit)
     return tuple(member.name for member, _ in _members(snapshot, byte_limit, file_limit) if member.isfile())
 
 
-def read_workspace_file(snapshot: bytes, name: str, *, byte_limit: int, file_limit: int) -> bytes:
+def read_workspace_file(snapshot: bytes | DirectoryWorkspace, name: str, *, byte_limit: int, file_limit: int) -> bytes:
     """Read a regular member; never follow a workspace symlink on the host."""
+    if isinstance(snapshot, DirectoryWorkspace):
+        return snapshot.read(name, byte_limit=byte_limit)
     canonical = _name(name, user=True)
     for member, data in _members(snapshot, byte_limit, file_limit):
         if member.name == canonical and member.isfile():
@@ -272,8 +414,10 @@ def read_workspace_file(snapshot: bytes, name: str, *, byte_limit: int, file_lim
     raise FileNotFoundError(canonical)
 
 
-def write_workspace_file(snapshot: bytes, name: str, data: bytes, *, byte_limit: int, file_limit: int) -> bytes:
+def write_workspace_file(snapshot: bytes | DirectoryWorkspace, name: str, data: bytes, *, byte_limit: int, file_limit: int) -> bytes | DirectoryWorkspace:
     """Replace a regular member, preserving all other safe workspace members."""
+    if isinstance(snapshot, DirectoryWorkspace):
+        return snapshot.write(name, data, byte_limit=byte_limit)
     canonical = _name(name, user=True)
     records = _members(snapshot, byte_limit, file_limit)
     parents = {str(path) for path in PurePosixPath(canonical).parents if str(path) != '.'}
@@ -304,8 +448,8 @@ class WorkspaceEditError(ValueError):
         self.code = code
 
 
-def edit_workspace_file(snapshot: bytes, name: str, old_text: str, new_text: str, *,
-                        expected_occurrences: int = 1, byte_limit: int, file_limit: int) -> tuple[bytes, dict[str, Any]]:
+def edit_workspace_file(snapshot: bytes | DirectoryWorkspace, name: str, old_text: str, new_text: str, *,
+                        expected_occurrences: int = 1, byte_limit: int, file_limit: int) -> tuple[bytes | DirectoryWorkspace, dict[str, Any]]:
     """Replace exact text in a UTF-8 member; refuse ambiguity instead of guessing.
 
     Returns the new snapshot and a report. The match must occur exactly
@@ -558,9 +702,30 @@ class SandboxedShell:
               for part in ('--setenv', name, value)],
         ]
 
-    def command_argv(self, input_dir: str, unit: str) -> list[str]:
+    def _work_argv(self, *, detached: bool = False) -> list[str]:
+        """/work: the bound directory in bind mode, else a capped tmpfs the snapshot is unpacked into. A
+        detached run in bind mode gets the tmpfs (filled from `snapshot()`) with the caches bound read-only
+        on top, so a build can use what was built without being able to change it."""
+        config, limits = self.config, self.config.limits
+        if config.workspace_dir and not detached:
+            argv = ['--bind', str(Path(config.workspace_dir).resolve()), WORKSPACE_MOUNT]
+            for state in config.state_dirs:
+                argv += ['--size', str(limits.workspace_bytes), '--tmpfs', WORKSPACE_MOUNT+'/'+_name(state)]
+            return argv
+        argv = ['--size', str(limits.workspace_bytes), '--tmpfs', WORKSPACE_MOUNT]
+        if config.workspace_dir and detached:
+            root = Path(config.workspace_dir).resolve()
+            for cache in config.cache_dirs:
+                source = root/_name(cache)
+                if source.is_dir():
+                    argv += ['--ro-bind', str(source), WORKSPACE_MOUNT+'/'+_name(cache)]
+        return argv
+
+    def command_argv(self, input_dir: str, unit: str, *, detached: bool | None = None) -> list[str]:
         """Build the complete resource-control and isolation command for auditing."""
         config, limits = self.config, self.config.limits
+        if detached is None:
+            detached = bool(getattr(self, '_detached', False))
         if not Path(input_dir).is_absolute() or not unit.replace('-', '').isalnum():
             raise ValueError('Invalid input directory or unit name')
         services = self.services_root
@@ -577,7 +742,7 @@ class SandboxedShell:
             '--ro-bind', input_dir, '/input',
             # A command reads every service's log and status; only the host writes there.
             *(('--ro-bind', str(services), SERVICES_MOUNT) if config.services else ()),
-            '--size', str(limits.workspace_bytes), '--tmpfs', '/work', '--remount-ro', '/',
+            *self._work_argv(detached=detached), '--remount-ro', '/',
             '--chdir', '/work',
             '/usr/bin/'+config.python_name, '-B', '-c',
             'import sys; sys.path.insert(0,"/runner"); from sandbox_worker import execute; execute("/input/request.json")',
@@ -601,26 +766,65 @@ class SandboxedShell:
             '--bind', str(home), SERVICES_MOUNT+'/'+name,
             # The workspace as of the last command, refreshed before every command; the service's own
             # writes to it are not kept (its state belongs in /svc/<name>).
-            '--bind', str(home/'work'), '/work', '--remount-ro', '/',
+            # Bind mode: the service sees the project directory itself, read-only (its state is in /svc/<name>);
+            # snapshot mode: the mirror of the workspace as of the last command.
+            *(('--ro-bind', str(Path(config.workspace_dir).resolve()), '/work') if config.workspace_dir
+              else ('--bind', str(home/'work'), '/work')), '--remount-ro', '/',
             '--setenv', 'SVC_NAME', name, '--setenv', 'PYTHONUNBUFFERED', '1', '--chdir', '/work',
             '/usr/bin/'+config.shell_name, '--noprofile', '--norc', '-c',
             'exec >>"/svc/$SVC_NAME/log" 2>&1; exec "$0" --noprofile --norc -c "$(cat "/svc/$SVC_NAME/command")"',
             '/usr/bin/'+config.shell_name,
         ]
 
-    def run(self, command: str, workspace: bytes = b'', *, timeout_seconds: float | None = None) -> ShellResult:
-        """Run one Bash command and return its persisted workspace and bounded output."""
+    @property
+    def directory(self) -> DirectoryWorkspace | None:
+        """The workspace as a directory in bind mode; None in snapshot mode."""
+        config = self.config
+        if not config.workspace_dir:
+            return None
+        if getattr(self, '_directory', None) is None:
+            self._directory = DirectoryWorkspace(config.workspace_dir, cache_dirs=config.cache_dirs, snapshot_ignore=config.snapshot_ignore,
+                                                 state_dirs=config.state_dirs, limits=config.limits)
+        return self._directory
+
+    def snapshot(self) -> bytes:
+        """Bind mode: the evidence part of the directory as a tar (caches left out)."""
+        directory = self.directory
+        if directory is None:
+            raise ValueError('snapshot() is for bind mode; a snapshot-mode shell returns the workspace from run()')
+        limits = self.config.limits
+        return directory.snapshot(byte_limit=limits.workspace_bytes, file_limit=limits.max_files)
+
+    def run(self, command: str, workspace: bytes | DirectoryWorkspace = b'', *, timeout_seconds: float | None = None,
+            detached: bool = False) -> ShellResult:
+        """Run one Bash command and return its persisted workspace and bounded output.
+
+        Bind mode (`workspace_dir` set): the directory is the workspace, `workspace` is ignored unless
+        `detached`, and the result's workspace is the directory. `detached` runs the command on a tmpfs copy
+        of the evidence tree (caches read-only): a check whose changes must not persist."""
         config, limits = self.config, self.config.limits
         if not isinstance(command, str) or not command.strip():
             raise ValueError('A nonempty shell command is required')
         timeout = limits.command_seconds if timeout_seconds is None else timeout_seconds
         if timeout <= 0 or timeout > limits.command_seconds:
             raise ValueError('Timeout exceeds the configured command limit')
+        bound = config.workspace_dir is not None and not detached
+        if isinstance(workspace, DirectoryWorkspace):
+            if detached:
+                workspace = workspace.snapshot(byte_limit=limits.workspace_bytes, file_limit=limits.max_files)
+            else:
+                self._directory = workspace
+                workspace = workspace.state
+        elif config.workspace_dir and detached and not workspace:
+            workspace = self.snapshot()
+        if bound:
+            # Only members under the state directories travel: the rest of the tree is the bind.
+            workspace = _only_state(workspace, config.state_dirs, limits)
         _members(workspace, limits.workspace_bytes, limits.max_files)
         start = time.monotonic()
         named = [p for p in config.refused_paths if p in command]
         if named:
-            return ShellResult('rejected', None, '', '', False, False, workspace, (), time.monotonic()-start,
+            return ShellResult('rejected', None, '', '', False, False, self._state(workspace, bound), (), time.monotonic()-start,
                                'refused: the command names '+', '.join(named)+', which is the toolchain, not your workspace. '
                                'Read tools through their --help and the errors they print; a refusal you cannot resolve '
                                'is a reason to block the task, not source to read.')
@@ -630,15 +834,19 @@ class SandboxedShell:
                                    'refused: '+reason)
         unit = 'isolated-shell-'+uuid4().hex
         if self._services:
-            self._mirror_workspace(workspace)
+            if not bound:
+                self._mirror_workspace(workspace)
             self._cap_logs()
+        Path(config.scratch_root).mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=config.scratch_root, prefix='shell-input-') as directory:
             input_dir = Path(directory)
             (input_dir/'workspace.tar').write_bytes(workspace)
             payload = dict(command=command, timeout=timeout, limits=limits.__dict__, shell='/usr/bin/'+config.shell_name,
                            capture_id=uuid4().hex, workspace_path='/input/workspace.tar',
-                           snapshot_ignore=list(config.snapshot_ignore))
+                           snapshot_ignore=list(config.snapshot_ignore), bind=bound,
+                           state_dirs=[_name(d) for d in config.state_dirs] if bound else [])
             (input_dir/'request.json').write_text(json.dumps(payload))
+            self._detached = detached
             process = subprocess.Popen(self.command_argv(str(input_dir), unit), stdin=subprocess.DEVNULL,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True)
             cap = (limits.workspace_bytes+limits.max_files*2048+10240)*2 + limits.output_bytes*2 + 65536
@@ -649,7 +857,7 @@ class SandboxedShell:
                                timeout=limits.shutdown_seconds, check=False)
                 process.kill()
                 process.wait()
-                return ShellResult('interrupted', None, '', '', False, False, workspace, (), time.monotonic()-start, str(error))
+                return ShellResult('interrupted', None, '', '', False, False, self._state(workspace, bound), (), time.monotonic()-start, str(error))
         try:
             if process.returncode != 0:
                 raise ValueError('Sandbox service failed: '+stderr.decode(errors='replace')[:limits.visible_output_bytes])
@@ -667,13 +875,20 @@ class SandboxedShell:
                                    time.monotonic()-start,
                                    f'{error}. All workspace changes from this command were discarded; '
                                    'the previous workspace is retained.')
+            if bound:
+                # The directory is the tree; the packed part is the state directories as of now.
+                self._directory = self.directory.with_state(snapshot)
+                snapshot = self._directory
             result = ShellResult(response['status'], response['exit_code'], response['stdout'], response['stderr'],
                                  response['timed_out'], response['output_truncated'], snapshot,
                                  tuple(response['output_files']), time.monotonic()-start, response.get('detail', ''))
         except (ValueError, KeyError, TypeError, tarfile.TarError) as error:
             return ShellResult('interrupted', None, '', stderr.decode(errors='replace')[:limits.visible_output_bytes],
-                               False, False, workspace, (), time.monotonic()-start, str(error))
+                               False, False, self._state(workspace, bound), (), time.monotonic()-start, str(error))
         return self._service_requests(result) if config.services else result
+
+    def _state(self, workspace: Any, bound: bool) -> Any:
+        return self.directory.with_state(workspace) if bound else workspace
 
     # ------------------------------------------------------------------ services
 
@@ -683,6 +898,33 @@ class SandboxedShell:
         The request files are removed from the snapshot: they were messages to the host, not files."""
         limits = self.config.limits
         requests: list[tuple[str, bytes]] = []
+        if isinstance(result.workspace, DirectoryWorkspace):
+            directory = result.workspace
+            folder = directory.root/REQUESTS_DIR
+            for path in sorted(folder.glob('*')) if folder.is_dir() else []:
+                if path.is_file():
+                    requests.append((REQUESTS_DIR+'/'+path.name, path.read_bytes()))
+                    path.unlink()
+            kept = io.BytesIO()
+            with tarfile.open(fileobj=io.BytesIO(directory.state), mode='r:') as source, tarfile.open(fileobj=kept, mode='w:') as sink_tar:
+                for member in source:
+                    if member.isfile() and member.name.startswith(REQUESTS_DIR+'/'):
+                        requests.append((member.name, source.extractfile(member).read()))
+                    else:
+                        sink_tar.addfile(member, source.extractfile(member) if member.isfile() else None)
+            if not requests:
+                return result
+            directory = directory.with_state(kept.getvalue())
+            self._directory = directory
+            lines = []
+            for name, data in requests:
+                try:
+                    lines.append(self._service_request(json.loads(data)))
+                except (ValueError, TypeError, KeyError) as error:
+                    lines.append('svc: bad request '+name+': '+str(error))
+            return ShellResult(result.status, result.exit_code, (result.stdout+'\n' if result.stdout else '')+'\n'.join(lines)+'\n',
+                               result.stderr, result.timed_out, result.output_truncated, directory, result.output_files,
+                               result.elapsed_seconds, result.detail)
         with tarfile.open(fileobj=io.BytesIO(result.workspace), mode='r:') as archive:
             for member in archive:
                 if member.isfile() and member.name.startswith(REQUESTS_DIR+'/'):
@@ -736,7 +978,7 @@ class SandboxedShell:
         (home/'work').mkdir(parents=True, exist_ok=True)
         (home/'command').write_text(command)
         (home/'log').write_bytes(b'')
-        if workspace is not None:
+        if workspace is not None and not isinstance(workspace, DirectoryWorkspace) and not self.config.workspace_dir:
             self._mirror_workspace(workspace, only=name)
         unit = 'isolated-service-'+uuid4().hex
         process = subprocess.run(self.service_argv(name, unit), capture_output=True, text=True,

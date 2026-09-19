@@ -21,6 +21,8 @@ def execute(request_path: str) -> None:
     request = json.loads(Path(request_path).read_text())
     limits = request['limits']
     work = Path.cwd()
+    bound = bool(request.get('bind'))
+    state_dirs = [d for d in (request.get('state_dirs') or [])]
     initial = Path(request['workspace_path']).read_bytes()
     if initial:
         with tarfile.open(fileobj=io.BytesIO(initial), mode='r:') as archive:
@@ -73,7 +75,10 @@ def execute(request_path: str) -> None:
     dropped = []
     ignore = set(request.get('snapshot_ignore') or ())
     with tarfile.open(fileobj=sink, mode='w:', dereference=False) as archive:
+        # Bind mode: only the state directories (tmpfs overlays) are packed back; the tree is the bind.
         for target in sorted(work.rglob('*')):
+            if bound and not any(target.relative_to(work).parts[:len(Path(d).parts)] == Path(d).parts for d in state_dirs):
+                continue
             if ignore and any(part in ignore for part in target.relative_to(work).parts):
                 continue
             if target.is_symlink():

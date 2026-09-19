@@ -14,7 +14,7 @@
       "tokenizer_parse_special": true
     },
     "generation": {
-      "model": "gpt-6-astra",
+      "model": "gpt-5.6-luna",
       "temperature": 1.0,
       "top_p": 0.95
     },
@@ -37,7 +37,7 @@
       "tokenizer_parse_special": true
     },
     "generation": {
-      "model": "gpt-6-astra",
+      "model": "gpt-5.6-luna",
       "temperature": 1.0,
       "top_p": 0.95
     },

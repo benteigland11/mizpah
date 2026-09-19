@@ -8,7 +8,7 @@ import tarfile
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from src.sandboxed_shell_execution import (
+from src.sandboxed_shell_execution import (DirectoryWorkspace,
     NetworkPolicy, ServiceLimits, ShellConfig, ShellLimits, SandboxedShell, WorkspaceEditError, edit_workspace_file, read_workspace_file, read_workspace_lines,
     workspace_files, write_workspace_file,
 )
@@ -556,3 +556,72 @@ def test_the_mirror_removes_only_its_own_stale_files_and_leaves_the_services_wri
     shell._mirror_workspace(ws)
     assert (work/'a.txt').read_bytes() == b'1 changed' and not (work/'old.txt').exists()
     assert (work/'.chrome'/'Default'/'lock').read_text() == 'live'   # the service's own files survive
+
+
+def test_bind_mode_contract_binds_the_directory_and_detached_runs_get_caches_read_only(tmp_path):
+    project = tmp_path/'project'
+    (project/'build').mkdir(parents=True)
+    shell = SandboxedShell(ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path/'scratch'), limits(),
+                                       share_network=True, services=services(), workspace_dir=str(project), cache_dirs=('build',)))
+    argv = shell.command_argv(str(tmp_path), 'unit-a')
+    triples = [tuple(argv[i:i+3]) for i in range(len(argv)-2)]
+    assert ('--bind', str(project.resolve()), '/work') in triples and ('--tmpfs', '/work') not in [t[1:] for t in triples]
+    detached = shell.command_argv(str(tmp_path), 'unit-b', detached=True)
+    triples = [tuple(detached[i:i+3]) for i in range(len(detached)-2)]
+    assert ('--tmpfs', '/work') in [t[1:] for t in triples] and ('--bind', str(project.resolve()), '/work') not in triples
+    assert ('--ro-bind', str(project.resolve()/'build'), '/work/build') in triples
+    service = shell.service_argv('web', 'unit-c')
+    triples = [tuple(service[i:i+3]) for i in range(len(service)-2)]
+    assert ('--ro-bind', str(project.resolve()), '/work') in triples
+    # The directory workspace: files, read, write, snapshot without the cache.
+    d = shell.directory
+    (project/'src').mkdir()
+    (project/'src'/'a.py').write_text('x = 1\n')
+    (project/'build'/'big.bin').write_bytes(b'\0'*(20*1024**2))   # larger than the 16 MB snapshot cap
+    assert workspace_files(d, byte_limit=10**9, file_limit=100) == ('src/a.py',)
+    assert read_workspace_file(d, '/work/src/a.py', byte_limit=10**6, file_limit=100) == b'x = 1\n'
+    assert write_workspace_file(d, 'src/b.py', b'y = 2\n', byte_limit=10**6, file_limit=100) is d
+    assert (project/'src'/'b.py').read_text() == 'y = 2\n'
+    names = list(workspace_files(shell.snapshot(), byte_limit=16*1024**2, file_limit=100))
+    assert 'src/a.py' in names and 'src/b.py' in names and not any(n.startswith('build') for n in names)
+    with pytest.raises(ValueError):
+        read_workspace_file(d, '../outside', byte_limit=10**6, file_limit=100)
+
+
+@pytest.mark.skipif(not (Path('/usr/bin/bwrap').exists() and Path('/usr/bin/systemd-run').exists()),
+                    reason='needs bubblewrap and systemd-run')
+def test_bind_mode_runs_in_the_directory_and_a_detached_run_cannot_change_it(tmp_path):
+    project = tmp_path/'project'
+    (project/'build').mkdir(parents=True)
+    shell = SandboxedShell(ShellConfig('/usr/bin/bwrap', '/usr/bin/systemd-run', '/usr/bin/systemctl', '/usr', str(tmp_path/'scratch'),
+                                       ShellLimits(1024**3, 16*1024**2, 8*1024**2, 65536, 8192, 64, 100, 30, 5, 1000),
+                                       workspace_dir=str(project), cache_dirs=('build',), state_dirs=('.terra', '.tool-output')))
+    args = dict(byte_limit=16*1024**2, file_limit=100)
+    try:
+        state = write_workspace_file(b'', '.terra/map.json', b'{"a": 1}', **args)     # the snapshot-managed part
+        r = shell.run('echo hello > note.txt; dd if=/dev/zero of=build/big.bin bs=1M count=24 status=none; '
+                      'cat .terra/map.json; echo \'{"a": 2}\' > .terra/map.json; ls', state)
+        assert r.status == 'ok', (r.status, r.detail, r.stderr)
+        ws = r.workspace
+        assert isinstance(ws, DirectoryWorkspace) and '{"a": 1}' in r.stdout
+        assert (project/'note.txt').read_text() == 'hello\n' and (project/'build'/'big.bin').stat().st_size == 24*1024**2
+        # The state directory travelled as a tar: changed in the result, never written into the project directory.
+        assert read_workspace_file(ws, '.terra/map.json', **args) == b'{"a": 2}\n' and not (project/'.terra'/'map.json').exists()
+        assert set(workspace_files(ws, **args)) == {'.terra/map.json', 'note.txt'} | {f for f in workspace_files(ws, **args) if f.startswith('.tool-output/')}
+        r = shell.run('cat note.txt; cat .terra/map.json; ls -la build | grep big', ws)
+        assert 'hello' in r.stdout and '{"a": 2}' in r.stdout and 'big.bin' in r.stdout   # both parts persist across commands
+        ws = r.workspace
+        # The file tools: a state file edits the tar, a tree file edits the directory.
+        ws = write_workspace_file(ws, '.terra/other.json', b'{}', **args)
+        ws = write_workspace_file(ws, 'src.txt', b'tree', **args)
+        assert (project/'src.txt').read_text() == 'tree' and not (project/'.terra'/'other.json').exists()
+        r = shell.run('cat .terra/other.json src.txt', ws)
+        assert '{}tree' in r.stdout
+        # Detached: a tmpfs copy of the evidence (tree + state), caches read-only; nothing leaks back.
+        r = shell.run('echo changed > note.txt; touch build/extra; ls build; cat note.txt .terra/map.json', ws, detached=True)
+        assert 'changed' in r.stdout and 'big.bin' in r.stdout and '{"a": 2}' in r.stdout, (r.stdout, r.stderr)
+        assert (project/'note.txt').read_text() == 'hello\n' and not (project/'build'/'extra').exists()
+        names = set(workspace_files(shell.snapshot(), **args))
+        assert 'note.txt' in names and '.terra/map.json' in names and not any(n.startswith('build') for n in names)
+    finally:
+        shell.close()

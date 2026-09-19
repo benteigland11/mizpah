@@ -483,9 +483,14 @@ class FocusedSession:
         self.state.setdefault('blocked_reason', None)
         self.workspace()
 
-    def _put_workspace(self, value: bytes) -> str:
+    def _put_workspace(self, value: Any) -> str:
         limits = self.shell.config.limits
-        workspace_files(value, byte_limit=limits.workspace_bytes, file_limit=limits.max_files)
+        if self._directory() is not None:
+            # Bind mode: the directory is the state; the saved snapshot is the empty marker and the file
+            # tools work on the directory through `workspace()`.
+            value = b''
+        else:
+            workspace_files(value, byte_limit=limits.workspace_bytes, file_limit=limits.max_files)
         digest = hashlib.sha256(value).hexdigest()
         store = RevisionStore(self.root/'workspaces'/(digest+'.sqlite3'))
         if not store.read()['revision']:
@@ -493,8 +498,12 @@ class FocusedSession:
             store.commit(0, lambda _: dict(content=encoded))
         return digest
 
-    def workspace(self) -> bytes:
-        """Return the verified opaque worker workspace, never host controller files."""
+    def workspace(self) -> Any:
+        """Return the verified opaque worker workspace, never host controller files.
+        In bind mode this is the DirectoryWorkspace: the same operations, over the project directory."""
+        directory = self._directory()
+        if directory is not None:
+            return directory
         digest = self.state['workspace']
         if len(digest) != 64 or any(ch not in '0123456789abcdef' for ch in digest):
             raise ValueError('Invalid workspace identity')
@@ -503,6 +512,16 @@ class FocusedSession:
         if hashlib.sha256(value).hexdigest() != digest:
             raise ValueError('Saved workspace failed its integrity check')
         return value
+
+    def _directory(self) -> Any:
+        """The bound directory in bind mode; None for a snapshot-mode shell (or a fixture without the notion)."""
+        return getattr(self.shell, 'directory', None)
+
+    def workspace_snapshot(self) -> bytes:
+        """The workspace as tar bytes whichever mode: what a harvest or a re-measurement is given."""
+        if self._directory() is not None:
+            return self.shell.snapshot()
+        return self.workspace()
 
     def _client(self, original: ModelClient) -> ModelClient:
         """The same client with this session's journal added to its observer.
@@ -1464,7 +1483,9 @@ class FocusedSession:
                     raise ValueError('A nonempty check command is required')
                 self.state['pending_io'] = dict(kind='controller_check', call_id=call['id'], command=args['command'])
                 self._save()
-                result = self.shell.run(args['command'], self.workspace())
+                # A check must not change the worker's state: in bind mode it runs detached on a tmpfs copy.
+                result = (self.shell.run(args['command'], self.workspace(), detached=True) if self._directory() is not None
+                          else self.shell.run(args['command'], self.workspace()))
                 record = {key:value for key,value in asdict(result).items() if key != 'workspace'}
                 record.update(workspace_changes_discarded=True, source_workspace=review['workspace'])
                 self._event('controller_check', dict(call_id=call['id'], **record))
