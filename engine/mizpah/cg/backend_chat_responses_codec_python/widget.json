@@ -2,7 +2,7 @@
   "meta": {
     "id": "backend-chat-responses-codec-python",
     "name": "Chat Responses Codec",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "domain": "backend",
     "tags": [
       "openai",
@@ -25,7 +25,7 @@
   },
   "validation": {
     "engine_version": 1,
-    "validated_at": "2026-09-19T16:27:00.020496+00:00",
+    "validated_at": "2026-09-19T17:19:29.350853+00:00",
     "runtime": "python 3.12.13"
   }
 }

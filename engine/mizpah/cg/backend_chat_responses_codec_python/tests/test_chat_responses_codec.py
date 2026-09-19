@@ -68,6 +68,16 @@ def test_request_options() -> None:
     assert chat_to_responses({"messages": [{"role": "user", "content": "u"}], "response_format": {"type": "json_object"}}).body["text"] == {"format": {"type": "json_object"}}
 
 
+def test_reasoning_effort_becomes_reasoning_block() -> None:
+    body = chat_to_responses({"messages": [{"role": "user", "content": "u"}], "reasoning_effort": "high"}).body
+    assert body["reasoning"] == {"effort": "high"}
+    body = chat_to_responses({"messages": [{"role": "user", "content": "u"}], "reasoning_effort": "low",
+                              "reasoning": {"summary": "auto", "effort": "max"}}).body
+    assert body["reasoning"] == {"summary": "auto", "effort": "max"}  # an explicit block wins
+    result = chat_to_responses({"messages": [{"role": "user", "content": "u"}], "reasoning_effort": "low"})
+    assert "reasoning_effort" not in result.dropped_fields
+
+
 def test_request_rejections() -> None:
     with pytest.raises(CodecError):
         chat_to_responses({"messages": []})

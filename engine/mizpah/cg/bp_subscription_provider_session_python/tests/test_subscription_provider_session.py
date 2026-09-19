@@ -23,7 +23,7 @@ from src.subscription_provider_session import (  # noqa: E402
 # The blueprint's own public surface accepts profiles and stores by value; build them through the
 # façade's exposed types so tests never reach past it.
 from src.subscription_provider_session import CredentialStore, ProviderProfile  # noqa: E402
-from src.subscription_provider_session import ApiKeyAuth, DeviceCodeFlow, OAuthPkceFlow  # noqa: E402
+from src.subscription_provider_session import ApiKeyAuth, DeviceCodeFlow, NoAuth, OAuthPkceFlow  # noqa: E402
 from src.subscription_provider_session import QuarantinedCredential, RefreshPolicy  # noqa: E402
 
 NOW = datetime(2030, 1, 1, tzinfo=timezone.utc)
@@ -304,6 +304,53 @@ def test_list_models(store: CredentialStore) -> None:
     with pytest.raises(LookupError):
         session.list_models()
     assert _session(pkce_profile(), store, http).list_models() == []
+
+
+def test_model_info_carries_efforts() -> None:
+    from src.subscription_provider_session import _model_infos
+    codex = {"models": [{"slug": "big", "visibility": "list", "context_window": 272000,
+                         "supported_reasoning_levels": [{"effort": "low"}, {"effort": "high"}], "default_reasoning_level": "high"},
+                        {"slug": "hidden", "visibility": "hide"}]}
+    (info,) = _model_infos(codex)
+    assert info.as_dict() == {"id": "big", "efforts": ["low", "high"], "default_effort": "high", "context_window": 272000}
+    proxy = {"models": {"g": {"info": {"reasoning_efforts": [{"id": "xhigh"}, {"id": "low"}], "reasoning_effort": "xhigh",
+                                       "supports_reasoning_effort": True, "context_window": 500000}},
+                        "plain": {"info": {"supports_reasoning_effort": False, "reasoning_efforts": [{"id": "low"}]}}}}
+    by_id = {i.id: i for i in _model_infos(proxy)}
+    assert by_id["g"].efforts == ("xhigh", "low") and by_id["g"].default_effort == "xhigh"
+    assert by_id["plain"].efforts == () and by_id["plain"].default_effort is None
+    (openai,) = _model_infos({"data": [{"id": "m", "object": "model"}]})
+    assert openai.efforts == () and openai.context_window is None
+
+
+def test_no_auth_profile_is_signed_in_when_reachable(store: CredentialStore) -> None:
+    local = ProviderProfile("local", "Local", NoAuth(), "http://127.0.0.1:9", "/v1/chat/completions", models_path="/v1/models",
+                            models=("m",), default_model="m")
+    http = FakeHttp()
+    session = _session(local, store, http)
+    http.model_answers.append(HttpResponse(200, {}, json.dumps({"data": [{"id": "m-local"}]}).encode()))
+    status = session.status()
+    assert status["signed_in"] and status["reachable"] and status["auth_kind"] == "none"
+    http.model_answers.append(HttpResponse(200, {}, json.dumps({"data": [{"id": "m-local"}]}).encode()))
+    assert session.list_models() == ["m-local"]
+    assert "Authorization" not in http.calls[-1]["headers"]
+    http.model_answers.append(HttpResponse(200, {"content-type": "application/json"}, json.dumps(
+        {"choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+         "usage": {"prompt_tokens": 1, "completion_tokens": 1}}).encode()))
+    response = session.transport()("/v1/chat/completions", {"messages": [{"role": "user", "content": "u"}]})
+    assert response.status == 200
+    http.model_answers.append(HttpResponse(401, {}, b"nope"))
+    response = session.transport()("/v1/chat/completions", {"messages": [{"role": "user", "content": "u"}]})
+    assert response.status == 401 and response.failure_kind == "authentication" and not response.definitive
+    assert session.store.peek("local") is None  # nothing stored, nothing quarantined
+
+    def down(*args) -> HttpResponse:
+        raise OSError("refused")
+
+    session = _session(local, store, down)
+    status = session.status()
+    assert status["signed_in"] is False and "refused" in status["reason"]
+    assert session.login().metadata == {"auth_kind": "none"}
 
 
 def test_endpoint_and_count(store: CredentialStore) -> None:

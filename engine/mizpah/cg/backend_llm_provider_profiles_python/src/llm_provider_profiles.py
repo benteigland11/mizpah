@@ -15,7 +15,7 @@ from typing import Any, Mapping
 
 WIRE_DIALECTS = ("chat_completions", "responses")
 TOKEN_COUNT_STRATEGIES = ("tokenize_endpoint", "usage_calibrated")
-AUTH_KINDS = ("oauth_pkce", "device_code", "api_key")
+AUTH_KINDS = ("oauth_pkce", "device_code", "api_key", "none")
 
 
 @dataclass(frozen=True)
@@ -56,7 +56,14 @@ class ApiKeyAuth:
     header_format: str = "Bearer {key}"
 
 
-AuthSpec = OAuthPkceFlow | DeviceCodeFlow | ApiKeyAuth
+@dataclass(frozen=True)
+class NoAuth:
+    """An endpoint that takes no credential: a local server, or a proxy that authenticates by network."""
+
+    kind: str = field(default="none", init=False)
+
+
+AuthSpec = OAuthPkceFlow | DeviceCodeFlow | ApiKeyAuth | NoAuth
 
 
 @dataclass(frozen=True)
@@ -72,6 +79,8 @@ class ProviderProfile:
     models: tuple[str, ...] = ()
     default_model: str | None = None
     models_path: str | None = None
+    reasoning_efforts: tuple[str, ...] = ()
+    default_reasoning_effort: str | None = None
     token_count: str = "usage_calibrated"
     context_window: int | None = None
     timeout_seconds: float = 600.0
@@ -90,6 +99,8 @@ class ProviderProfile:
             raise ValueError("models_path must begin with a slash")
         if self.default_model is not None and self.models and self.default_model not in self.models:
             raise ValueError("default_model must be one of models")
+        if self.default_reasoning_effort is not None and self.default_reasoning_effort not in self.reasoning_efforts:
+            raise ValueError("default_reasoning_effort must be one of reasoning_efforts")
 
     @property
     def models_url(self) -> str | None:
@@ -125,7 +136,7 @@ def _jsonable(data: dict[str, Any]) -> dict[str, Any]:
 
 def auth_from_dict(data: Mapping[str, Any]) -> AuthSpec:
     kind = data.get("kind")
-    classes = {"oauth_pkce": OAuthPkceFlow, "device_code": DeviceCodeFlow, "api_key": ApiKeyAuth}
+    classes = {"oauth_pkce": OAuthPkceFlow, "device_code": DeviceCodeFlow, "api_key": ApiKeyAuth, "none": NoAuth}
     if kind not in classes:
         raise ValueError(f"auth.kind must be one of {AUTH_KINDS}")
     cls = classes[kind]
@@ -143,8 +154,9 @@ def profile_from_dict(data: Mapping[str, Any]) -> ProviderProfile:
     if "auth" not in kwargs:
         raise ValueError("profile needs an auth block")
     kwargs["auth"] = auth_from_dict(kwargs["auth"])
-    if "models" in kwargs:
-        kwargs["models"] = tuple(kwargs["models"])
+    for key in ("models", "reasoning_efforts"):
+        if key in kwargs:
+            kwargs[key] = tuple(kwargs[key])
     return ProviderProfile(**kwargs)
 
 

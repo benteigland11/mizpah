@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.llm_provider_profiles import (  # noqa: E402
     ApiKeyAuth,
     DeviceCodeFlow,
+    NoAuth,
     OAuthPkceFlow,
     ProfileRegistry,
     ProviderProfile,
@@ -57,6 +58,17 @@ def test_models_url() -> None:
     assert listed.models_url == "https://api.example.org/v1/models"
     with pytest.raises(ValueError):
         ProviderProfile("n", "N", ApiKeyAuth(), "https://api.example.org", "/x", models_path="models")
+
+
+def test_no_auth_and_efforts() -> None:
+    local = profile_from_dict({"name": "local", "display_name": "Local", "api_base_url": "http://127.0.0.1:8080",
+                               "completion_path": "/v1/chat/completions", "auth": {"kind": "none"},
+                               "reasoning_efforts": ["low", "high"], "default_reasoning_effort": "high"})
+    assert isinstance(local.auth, NoAuth) and local.auth.kind == "none"
+    assert local.reasoning_efforts == ("low", "high") and local.to_dict()["reasoning_efforts"] == ["low", "high"]
+    assert local.headers_for("") == {}
+    with pytest.raises(ValueError):
+        ProviderProfile("n", "N", NoAuth(), "http://x", "/v1", reasoning_efforts=("low",), default_reasoning_effort="max")
 
 
 def test_validation() -> None:

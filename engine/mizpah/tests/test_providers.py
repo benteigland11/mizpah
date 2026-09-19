@@ -132,11 +132,90 @@ def test_models_merge_live_list_when_signed_in(tmp_path: Path, capsys: pytest.Ca
 
     session.http = fake_http
     merged, source = providers.available_models(session)
-    assert source == 'live' and merged == ['brand-new', 'mistral-large-latest']  # default first when present
+    assert source == 'live' and [r['id'] for r in merged] == ['brand-new', 'mistral-large-latest']  # default first when present
 
     def broken(*args) -> HttpResponse:
         raise OSError('down')
 
     session.http = broken
     hints, source = providers.available_models(session)
-    assert hints[0] == 'mistral-medium-latest' and source.startswith('list_failed: OSError')
+    assert hints[0]['id'] == 'mistral-medium-latest' and source.startswith('list_failed: OSError')
+
+
+def _serve(handler_body: bytes, status: int = 200):
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    import threading
+
+    class Handler(BaseHTTPRequestHandler):
+        def _reply(self) -> None:
+            self.send_response(status)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(handler_body)
+
+        do_GET = do_POST = _reply
+
+        def log_message(self, *args) -> None:
+            return
+
+    server = HTTPServer(('127.0.0.1', 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f'http://127.0.0.1:{server.server_address[1]}'
+
+
+def test_local_profiles_follow_reachability_and_use_writes_llama_client(tmp_path: Path, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path))
+    engine = tmp_path / 'engine.json'
+    harness = tmp_path / 'harness.json'
+    harness.write_text(json.dumps({'worker': {'generation': {'model': '/x.gguf', 'top_k': 4}}, 'controller': {}}))
+    engine.write_text(json.dumps({'harness_config': 'harness.json'}))
+    assert provider_cli.main(['--config', str(engine), 'models', 'local_llama']) == 0
+    assert json.loads(capsys.readouterr().out)['source'] == 'unreachable'
+    assert provider_cli.main(['--config', str(engine), 'use', 'local_llama', 'anything']) == 2
+    assert 'not answering' in json.loads(capsys.readouterr().out)['error']
+
+    server, base = _serve(json.dumps({'data': [{'id': 'local-7b'}, {'id': 'local-70b'}]}).encode())
+    try:
+        assert provider_cli.main(['--config', str(engine), 'configure', 'local_llama', '--base-url', base + '/']) == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out['override'] == {'api_base_url': base} and out['reachable'] is True
+        assert json.loads(engine.read_text())['providers']['local_llama']['api_base_url'] == base
+        assert provider_cli.main(['--config', str(engine), 'models', 'local_llama']) == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out['source'] == 'live' and out['models'] == ['local-7b', 'local-70b'] and out['details'][0]['efforts'] == []
+        assert provider_cli.main(['--config', str(engine), 'use', 'local_llama', 'local-70b', '--effort', 'high']) == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out['transport'] == 'llama_client' and out['effort'] is None  # no ladder: effort is not sent
+        worker = json.loads(harness.read_text())['worker']
+        assert worker['provider'] == 'llama_client' and 'subscription' not in worker
+        assert worker['endpoint']['base_url'] == base and worker['endpoint']['tokenize_path'] == '/tokenize'
+        assert worker['generation'] == {'model': 'local-70b', 'top_k': 4} and worker['known_issues']['repetition']
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_use_writes_effort_when_the_model_takes_one(tmp_path: Path, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    from cg.bp_subscription_provider_session_python.src.subscription_provider_session import ModelInfo
+    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path))
+    harness = tmp_path / 'harness.json'
+    harness.write_text(json.dumps({'worker': {'generation': {'model': 'old', 'reasoning_effort': 'low'}}, 'controller': {}}))
+    providers.session_for('openai_chatgpt', {}).store.put('openai_chatgpt', {'access_token': 't'}, {})
+    monkeypatch.setattr(providers.ProviderSession, 'list_model_info',
+                        lambda self: [ModelInfo('gpt-x', ('low', 'high', 'ultra'), 'high', 272000), ModelInfo('gpt-plain')])
+    assert provider_cli.main(['models', 'openai_chatgpt']) == 0
+    details = json.loads(capsys.readouterr().out)['details']
+    assert details[0] == {'id': 'gpt-x', 'efforts': ['low', 'high', 'ultra'], 'default_effort': 'high', 'context_window': 272000}
+    assert details[1]['efforts'] == ['low', 'medium', 'high', 'xhigh']  # inherits the profile ladder
+
+    assert provider_cli.main(['use', 'openai_chatgpt', 'gpt-x', '--harness', str(harness), '--role', 'worker']) == 0
+    assert json.loads(capsys.readouterr().out)['effort'] == 'high'  # the model's default
+    assert json.loads(harness.read_text())['worker']['generation']['reasoning_effort'] == 'high'
+    assert provider_cli.main(['use', 'openai_chatgpt', 'gpt-x', '--harness', str(harness), '--effort', 'max']) == 2
+    assert 'not one of' in json.loads(capsys.readouterr().out)['error']
+    assert provider_cli.main(['use', 'openai_chatgpt', 'gpt-x', '--harness', str(harness), '--effort', 'none']) == 0
+    capsys.readouterr()
+    assert 'reasoning_effort' not in json.loads(harness.read_text())['worker']['generation']
+    assert provider_cli.main(['use', 'openai_chatgpt', 'gpt-x', '--harness', str(harness), '--effort', 'ultra', '--role', 'controller']) == 0
+    capsys.readouterr()
+    assert json.loads(harness.read_text())['controller']['generation'] == {'model': 'gpt-x', 'reasoning_effort': 'ultra'}

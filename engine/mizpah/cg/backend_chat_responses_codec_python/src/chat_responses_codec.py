@@ -7,7 +7,8 @@ pure functions:
 * ``chat_to_responses`` rewrites the request. System text becomes
   ``instructions``; messages become typed ``input`` items; tool calls and
   tool results become ``function_call`` / ``function_call_output`` items;
-  Chat-only sampling fields are dropped and reported, never silently kept.
+  ``reasoning_effort`` becomes ``reasoning.effort``; Chat-only sampling
+  fields are dropped and reported, never silently kept.
 * ``fold_sse`` reads a Responses event stream to its end and returns one
   Chat-Completions-shaped response. The terminal ``response.completed`` (or
   ``incomplete`` / ``failed``) object is authoritative; deltas are only
@@ -79,8 +80,12 @@ def chat_to_responses(payload: dict[str, Any], *, store: bool = False, stream: b
     if payload.get("response_format") is not None:
         body["text"] = {"format": _text_format(payload["response_format"])}
     dropped = []
+    if payload.get("reasoning_effort") is not None:
+        reasoning = dict(payload.get("reasoning") or {})
+        reasoning.setdefault("effort", payload["reasoning_effort"])
+        body["reasoning"] = reasoning
     for key, value in payload.items():
-        if key in ("messages", "model", "tools", "tool_choice", "response_format", "stream", "store"):
+        if key in ("messages", "model", "tools", "tool_choice", "response_format", "stream", "store", "reasoning_effort"):
             continue
         if key in RENAMED_FIELDS:
             body[RENAMED_FIELDS[key]] = value

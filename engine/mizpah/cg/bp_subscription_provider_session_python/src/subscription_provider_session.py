@@ -31,6 +31,7 @@ from cg.backend_hosted_token_estimator_python.src.hosted_token_estimator import 
 from cg.backend_llm_provider_profiles_python.src.llm_provider_profiles import (
     ApiKeyAuth,
     DeviceCodeFlow,
+    NoAuth,
     OAuthPkceFlow,
     ProviderProfile,
 )
@@ -76,7 +77,7 @@ __all__ = [
     "ProviderSession", "ProviderTransport", "LoginPrompt", "LoginError", "NotSignedIn",
     "HttpResponse", "HttpCall", "WireResponse", "urllib_http",
     # the inputs a consumer builds (re-exported so nothing reaches past the façade)
-    "ProviderProfile", "OAuthPkceFlow", "DeviceCodeFlow", "ApiKeyAuth",
+    "ProviderProfile", "OAuthPkceFlow", "DeviceCodeFlow", "ApiKeyAuth", "NoAuth", "ModelInfo",
     "CredentialStore", "CredentialRecord", "QuarantinedCredential", "RefreshPolicy", "HostedTokenEstimator",
 ]
 
@@ -128,6 +129,20 @@ class WireResponse:
 
 
 @dataclass(frozen=True)
+class ModelInfo:
+    """One listed model. ``efforts`` is empty when the provider did not say."""
+
+    id: str
+    efforts: tuple[str, ...] = ()
+    default_effort: str | None = None
+    context_window: int | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"id": self.id, "efforts": list(self.efforts), "default_effort": self.default_effort,
+                "context_window": self.context_window}
+
+
+@dataclass(frozen=True)
 class LoginPrompt:
     """What to show the person: a URL to open, or a code to type at a URL."""
 
@@ -173,6 +188,8 @@ class ProviderSession:
               api_key: str | None = None) -> CredentialRecord:
         """Run the profile's flow to completion and store the credential."""
         auth = self.profile.auth
+        if isinstance(auth, NoAuth):
+            return self.store.put(self.profile.name, {"access_token": "", "token_type": "none"}, {"auth_kind": "none"})
         if isinstance(auth, ApiKeyAuth):
             if not api_key:
                 raise LoginError(f"{self.profile.display_name} needs an API key")
@@ -187,7 +204,16 @@ class ProviderSession:
         return self._store_token(token, auth_kind=auth.kind)
 
     def status(self) -> dict[str, Any]:
-        """Public view: signed in or not, expiry, account, quarantine."""
+        """Public view: signed in or not, expiry, account, quarantine.
+
+        A ``NoAuth`` profile has nothing to sign into: it reads as signed in whenever its
+        endpoint answers (``reachable``), so the rest of the vocabulary still applies.
+        """
+        if isinstance(self.profile.auth, NoAuth):
+            reachable, why = self.reachable()
+            return {"provider": self.profile.name, "display_name": self.profile.display_name, "auth_kind": "none",
+                    "signed_in": reachable, "reachable": reachable, "reason": why, "metadata": {},
+                    "quarantined": False, "quarantine_reason": None}
         record = self.store.peek(self.profile.name)
         view: dict[str, Any] = {"provider": self.profile.name, "display_name": self.profile.display_name,
                                 "auth_kind": self.profile.auth.kind, "signed_in": record is not None and record.usable}
@@ -201,9 +227,22 @@ class ProviderSession:
     def logout(self) -> bool:
         return self.store.delete(self.profile.name)
 
+    def reachable(self, *, timeout_seconds: float = 5.0) -> tuple[bool, str]:
+        """Does the endpoint answer at all? Any HTTP status but 503 counts; a socket error does not."""
+        url = self.profile.models_url or self.profile.api_base_url
+        try:
+            response = self.http("GET", url, {"Accept": "application/json"}, None, timeout_seconds)
+        except (OSError, URLError, TimeoutError) as error:
+            return False, f"{type(error).__name__}: {error}"
+        if response.status == 503:
+            return False, "http 503: still loading"
+        return True, f"http {response.status}"
+
     # -- the transport --------------------------------------------------------
 
     def credential(self) -> CredentialRecord:
+        if isinstance(self.profile.auth, NoAuth):
+            return CredentialRecord(self.profile.name, {"access_token": ""}, {"auth_kind": "none"})
         record = self.store.get(self.profile.name)
         if record is None:
             raise NotSignedIn(f"not signed in to {self.profile.display_name}")
@@ -217,14 +256,14 @@ class ProviderSession:
         """Prompt-token estimate in the shape a model client's ``count`` returns."""
         return self.estimator.estimate(payload).as_dict()
 
-    def list_models(self) -> list[str]:
-        """Model ids the provider reports for this credential.
+    def list_model_info(self) -> list[ModelInfo]:
+        """What the provider reports for this credential: ids and, when it says, effort ladders.
 
-        Accepts the OpenAI ``{"data": [{"id"}]}`` shape, a ``{"models": [{"slug"|"id", "visibility"?}]}``
-        catalogue (hidden entries dropped), or a ``{"models": {id: ...}}`` map.
-
-        Empty when the profile has no list endpoint; raises ``NotSignedIn`` / ``QuarantinedCredential``
-        when there is no usable credential, and ``LookupError`` when the endpoint answers badly.
+        Accepts the OpenAI ``{"data": [{"id"}]}`` shape, a ``{"models": [{"slug"|"id", "visibility"?,
+        "supported_reasoning_levels"?, "default_reasoning_level"?, "context_window"?}]}`` catalogue
+        (hidden entries dropped), or a ``{"models": {id: {"info": {...}}}}`` map. Empty when the profile
+        has no list endpoint; raises ``NotSignedIn`` / ``QuarantinedCredential`` without a usable
+        credential and ``LookupError`` when the endpoint answers badly.
         """
         url = self.profile.models_url
         if url is None:
@@ -239,7 +278,11 @@ class ProviderSession:
             payload = json.loads(response.body.decode("utf-8"))
         except ValueError as error:
             raise LookupError("model list is not JSON") from error
-        return _model_ids(payload)
+        return _model_infos(payload)
+
+    def list_models(self) -> list[str]:
+        """Just the ids of ``list_model_info``."""
+        return [info.id for info in self.list_model_info()]
 
     def endpoint(self) -> dict[str, Any]:
         """Fields for an ``EndpointConfig``: where the transport already sends things."""
@@ -333,6 +376,8 @@ class ProviderSession:
     def _refresh(self, record: CredentialRecord) -> CredentialRecord:
         auth = self.profile.auth
         refresh_token = record.secret.get("refresh_token")
+        if isinstance(auth, NoAuth):
+            raise RefreshFailed("endpoint refused the request; it takes no credential", terminal=False)
         if isinstance(auth, ApiKeyAuth) or not refresh_token:
             failure = RefreshFailed("credential cannot be refreshed; sign in again", terminal=True)
             self.store.quarantine(self.profile.name, str(failure))
@@ -452,17 +497,18 @@ class ProviderTransport:
         return WireResponse(response.status, json.dumps(chat), elapsed)
 
 
-def _model_ids(payload: Any) -> list[str]:
+def _model_infos(payload: Any) -> list[ModelInfo]:
     rows: Any = payload
     if isinstance(payload, dict):
         rows = payload.get("data")
         if rows is None:
             rows = payload.get("models")
         if isinstance(rows, dict):
-            rows = [dict(value, id=key) if isinstance(value, dict) else {"id": key} for key, value in rows.items()]
+            rows = [dict(value.get("info") or value, id=key) if isinstance(value, dict) else {"id": key}
+                    for key, value in rows.items()]
     if not isinstance(rows, list):
         raise LookupError("model list has no data or models array")
-    ids: list[str] = []
+    infos: list[ModelInfo] = []
     for row in rows:
         if not isinstance(row, dict):
             continue
@@ -472,8 +518,27 @@ def _model_ids(payload: Any) -> list[str]:
         if not identifier:
             continue
         identifier = str(identifier)
-        ids.append(identifier.split("/", 1)[1] if identifier.startswith("models/") else identifier)
-    return ids
+        if identifier.startswith("models/"):
+            identifier = identifier.split("/", 1)[1]
+        efforts = _efforts(row.get("supported_reasoning_levels") or row.get("reasoning_efforts"))
+        default = row.get("default_reasoning_level") or row.get("reasoning_effort")
+        if row.get("supports_reasoning_effort") is False:
+            efforts, default = (), None
+        context = row.get("context_window") or row.get("context_length")
+        infos.append(ModelInfo(identifier, efforts, str(default) if default in efforts else None,
+                               int(context) if isinstance(context, (int, float)) and context > 0 else None))
+    return infos
+
+
+def _efforts(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    found: list[str] = []
+    for item in value:
+        name = item.get("effort") or item.get("id") or item.get("value") if isinstance(item, dict) else item
+        if isinstance(name, str) and name and name not in found:
+            found.append(name)
+    return tuple(found)
 
 
 def _json_object(text: str) -> dict[str, Any] | None:
