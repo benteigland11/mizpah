@@ -115,7 +115,9 @@ def drone(project: Path) -> None:
           'its motors and ESCs from catalog.json and re-check the sizing with the real component masses, so the bill '
           'of materials is traceable to readings.', needs, deliverables, budget=500,
           notes='Numbers by two independent methods where possible; the report and the script print the same figures; '
-                'the selection phase consumes the sizing phase\'s knowns by id.')
+                'the selection phase consumes the sizing phase\'s knowns by id.',
+          non_goals=['No `re-sizing` of the pack in the selection phase: if the selection breaks the requirement, the report says so',
+                     'No `catalog edit`: catalog.json and drone.json are inputs, never changed'])
     phase(project, 'sizing', 'Size the pack', needs='1-13', deliverables='1-2', points=200)
     phase(project, 'selection', 'Choose motors and ESCs, re-check the sizing', needs='14-20', deliverables='3-4', points=200)
     # key

@@ -295,3 +295,28 @@ def test_a_pack_ships_its_procedures_and_installs_them(instrumented: Path, tmp_p
     (p/'x').mkdir(parents=True)
     doc = capabilities.install(config2, p, enabler)
     assert doc['procedures_installed'] == ['render-page-layout-readings'] and (other/'render-page-layout-readings.json').exists()
+
+
+def test_non_goals_reach_the_worker_and_refuse_artifacts_that_build_them(tmp_path: Path) -> None:
+    from mizpah import worker
+    p = tmp_path/'ng'
+    p.mkdir()
+    terra(p, 'init')
+    terra(p, 'brief', 'init', '--title', 'Page', '--mission', 'build')
+    terra(p, 'brief', 'set', '--status', 'active', '--budget-points', '50',
+          '--need', 'Know the number of requests outside site/', '--deliverable', 'site/index.html: the page',
+          '--non-goal', 'No `framework`: hand-written HTML')
+    terra(p, 'route', 'init')
+    observation = controller.observe(CONFIG, p)
+    accepted, refusals = controller.guard(dict(unknowns=[
+        dict(id='external_request_count', cites='need:1', type='number', claim='requests to any framework CDN', evidence_needed='count'),
+        dict(id='framework_bundle', cites='deliverable:1', type='boolean', creates='site/framework.js',
+             claim='site/framework.js bundles a framework for the page', evidence_needed='exists'),
+    ], tasks=[dict(id='count', unknowns=['external_request_count'], bucket='low', title='count'),
+              dict(id='bundle', unknowns=['framework_bundle'], bucket='low', title='bundle')]), observation, p)
+    assert [u['id'] for u in accepted['unknowns']] == ['external_request_count']
+    assert any('framework_bundle' in r and 'non-goal' in r for r in refusals)
+    text = worker.render_assignment(dict(id='count', bucket='low', title='count', map_id='external_request_count'),
+                                    [dict(id='external_request_count', claim='c', type='number', evidence_needed='e')], 'm', None,
+                                    ['No `framework`: hand-written HTML'])
+    assert 'Non-goals of the brief' in text and 'No `framework`' in text

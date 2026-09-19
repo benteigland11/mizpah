@@ -86,7 +86,10 @@ def improve(project: Path, source: Path = DEFAULT_SOURCE) -> None:
           'complex untested public function, give it tests and a real complexity reduction, and prove the suite still '
           'passes — without ever holding the whole codebase in view.', needs, deliverables, budget=400,
           notes='Two phases: survey first (needs 1 to 7 are readings over the tree, taken before any file changes), then '
-                'the change (needs 8 to 11). '+NOTE)
+                'the change (needs 8 to 11). '+NOTE,
+          non_goals=['No `public signature` change: the chosen function keeps its name, parameters and return type',
+                     'No `test edit` to make the suite pass: existing tests are the reference; only the new test file is added',
+                     'No `wrapper`: moving the body into a new function and leaving a one-line wrapper is not a reduction'])
     # Two phases: the controller routes the survey to closure before a single change unknown can be minted.
     phase(project, 'survey', 'Survey the package into readings', needs='1-7', points=150)
     phase(project, 'change', 'Change one function with the suite as the reference', needs='8-11', deliverables='1-3', points=200)

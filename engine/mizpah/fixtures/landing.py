@@ -153,6 +153,9 @@ def landing(project: Path, *, enablers: bool = False) -> None:
           needs, deliverables, budget=400,
           notes='Build the page first, then measure it; a reading is taken off the rendered page or the files, never '
                 'estimated. '+RENDER_NOTE,
+          non_goals=['No `framework`, `bundler` or `build step`: the page is HTML and CSS written by hand',
+                     'No `external request`: no fonts, scripts or images from outside site/',
+                     'No `javascript` for layout or content: the page reads the same with scripts off'],
           enablers=[('page_readings', 'Headless page readings', 'cg/frontend-headless-page-cli-python',
                      'A command-line instrument over headless chromium: serve or open a page, read its text, element boxes, '
                      'computed styles and requests, take a screenshot at a viewport width. The readings that name it are '

@@ -340,3 +340,25 @@ the total page weight of site index html and every file it references is unknown
 the number of distinct margin and padding values declared in site style css is unknown 
 the number of  img  elements without alt text in site index html is unknown 
 the number of distinct colors declared in site style css is unknown 
+Write and verify component bill of materials
+cost catalog four json mass quantity selected unit equal motor selection totals
+ bom csv  has a motor row with the selected motor id  quantity four  unit mass  and unit cost agreeing with catalog json 
+ bom csv  has an esc row with the selected esc id  quantity four  unit mass  and unit cost agreeing with catalog json 
+the totals row in  bom csv  has cost equal to selection cost 
+Write and verify the selection report
+report selection mass states chosen equal minimum names readings selected checked continuous
+ report selection md  names selected motor id as the motor chosen by the maximum thrust and minimum mass readings 
+ report selection md  names selected esc id as the esc chosen by the continuous current and minimum mass readings 
+ report selection md  states selection all up mass equal to selection all up mass kg 
+ report selection md  states re checked flight time equal to selection hover flight time min 
+ report selection md  plainly states whether the sized pack meets the reserve requirement  agreeing with selection meets reserve 
+Render the final page and measure its visual, typographic, contrast, overflow, font, request, and CTA properties
+rendered page text 1280 action background body button call contrast distinct families
+the contrast ratio of the primary call to action text against its button background is unknown 
+it is unknown whether the page overflows horizontally when rendered 1280 px wide 
+the number of distinct font families used by the rendered page is unknown 
+the rendered body paragraph text size in pixels is unknown 
+the number of requests the rendered page makes to urls outside site  is unknown 
+Install and validate the page_readings instrument
+exists instrument page path readings specified validates
+the page readings instrument exists at its specified path and validates 

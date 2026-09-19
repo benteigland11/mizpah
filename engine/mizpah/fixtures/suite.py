@@ -32,8 +32,9 @@ def terra(project: Path, *args: str) -> None:
 
 
 def brief(project: Path, title: str, mission: str, needs: list[str], deliverables: list[str], budget: int,
-          notes: str = '', enablers: list[tuple[str, str, str, str]] = ()) -> None:
-    """`enablers`: (id, title, path, notes) — instruments the brief needs; a need that names an id waits for it."""
+          notes: str = '', enablers: list[tuple[str, str, str, str]] = (), non_goals: list[str] = ()) -> None:
+    """`enablers`: (id, title, path, notes) — instruments the brief needs; a need that names an id waits for it.
+    `non_goals`: constraints on method, shown to the worker; a backticked term in one is refused as an artifact."""
     terra(project, 'init')
     terra(project, 'brief', 'init', '--title', title, '--mission', mission)
     args = ['brief', 'set', '--status', 'active', '--budget-points', str(budget)]
@@ -43,6 +44,8 @@ def brief(project: Path, title: str, mission: str, needs: list[str], deliverable
         args += ['--need', need]
     for deliverable in deliverables:
         args += ['--deliverable', deliverable]
+    for non_goal in non_goals:
+        args += ['--non-goal', non_goal]
     for eid, etitle, path, _ in enablers:
         args += ['--enabler', eid+':'+etitle+(':'+path if path else '')]
     terra(project, *args)

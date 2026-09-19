@@ -212,13 +212,18 @@ def known_ids_named(project: Path, unknown: dict[str, Any]) -> list[str]:
 
 
 def render_assignment(task: dict[str, Any], unknowns: list[dict[str, Any]], map_id: str,
-                      inputs: dict[str, list[str]] | None = None) -> str:
-    """The task, its unknowns and the map: nothing about method and nothing from the brief.
+                      inputs: dict[str, list[str]] | None = None, non_goals: list[str] = ()) -> str:
+    """The task, its unknowns and the map: nothing about method and nothing from the brief — except its non-goals,
+    which are constraints on method and so belong to whoever does the work.
     `inputs` maps an unknown id to the knowns its probe declares; the worker reads them from ctx["inputs"]."""
     lines = ['Route task `'+task['id']+'` (bucket '+task['bucket']+': '+BUCKET_MODES.get(task['bucket'], '')+'): '+task['title'],
              'It resolves '+('one unknown' if len(unknowns) == 1 else str(len(unknowns))+' unknowns')+':']
     for unknown in unknowns:
         lines += describe_unknown(unknown)
+    if non_goals:
+        lines.append('Non-goals of the brief (constraints on how, not what; a reading that a non-goal is respected is '
+                     'welcome, doing the non-goal blocks the task):')
+        lines += ['  - '+str(n) for n in non_goals]
     acceptance = [a for a in task.get('acceptance') or [] if not str(a).startswith('unknown:')]
     if acceptance:
         lines.append('Acceptance: '+'; '.join(acceptance))
@@ -1432,7 +1437,8 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         task = pick_task(config, project, task_id)
         map_id = open_task_map(config, project, task)
         unknowns = [read_unknown(project, uid, map_id) for uid in task_unknown_ids(task)]
-        assignment = render_assignment(task, unknowns, map_id, probe_inputs(project, task))
+        assignment = render_assignment(task, unknowns, map_id, probe_inputs(project, task),
+                                       list(json.loads((project/'.terra'/'brief.json').read_text()).get('non_goals') or []))
         parts = library_parts(config, project, unknowns)
         if parts:
             assignment += ('The library already has parts near this work; install and extend one where it nearly fits '
