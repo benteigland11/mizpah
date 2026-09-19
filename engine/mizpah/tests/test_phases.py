@@ -316,7 +316,10 @@ def test_non_goals_reach_the_worker_and_refuse_artifacts_that_build_them(tmp_pat
               dict(id='bundle', unknowns=['framework_bundle'], bucket='low', title='bundle')]), observation, p)
     assert [u['id'] for u in accepted['unknowns']] == ['external_request_count']
     assert any('framework_bundle' in r and 'non-goal' in r for r in refusals)
-    text = worker.render_assignment(dict(id='count', bucket='low', title='count', map_id='external_request_count'),
-                                    [dict(id='external_request_count', claim='c', type='number', evidence_needed='e')], 'm', None,
-                                    ['No `framework`: hand-written HTML'])
-    assert 'Non-goals of the brief' in text and 'No `framework`' in text
+    text = worker.render_reference(p, dict(id='count', bucket='low', title='count', map_id='external_request_count'),
+                                   [dict(id='external_request_count', claim='c', type='number', evidence_needed='e',
+                                         notes='cites need:1')])
+    assert 'Non-goal: No `framework`' in text
+    assignment = worker.render_assignment(dict(id='count', bucket='low', title='count', map_id='external_request_count'),
+                                          [dict(id='external_request_count', claim='c', type='number', evidence_needed='e')], 'm')
+    assert 'framework' not in assignment
