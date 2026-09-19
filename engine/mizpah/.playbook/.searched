@@ -395,3 +395,109 @@ landing page content brand come constraints follows framework hand html index pi
 site index html with site style css is a hand written landing page with no framework
 the landing page s words come from content pitch md
 the landing page follows the constraints in content brand md
+Measure the rendered docs page and its referenced files
+html index site appears content docs elements file heading horizontal order overflow
+the number of   h2   elements in  site index html  is not known 
+it is not known whether every heading in  content docs md  appears in  site index html  in the same order 
+the total weight of  site index html  and every file it references is not known 
+it is not known whether the page renders without horizontal overflow at a 375 px viewport width 
+Measure the rendered page with page_readings
+rendered 1280 paragraph text action background body call contrast horizontally overflows page
+the contrast ratio of body paragraph text against its background as rendered at 1280 px is not known 
+the contrast ratio of the primary call to action s text against its button background is not known 
+it is not known whether the page overflows horizontally when rendered 375 px wide 
+it is not known whether the page overflows horizontally when rendered 1280 px wide 
+it is not known whether the primary call to action is visible above the fold at 1280 by 800 
+the body paragraph text size in pixels as rendered is not known 
+Capture the final desktop and mobile landing-page screenshots
+exists html index rendered shots shows site style 1280 desktop mobile
+site shots desktop 1280 png exists and shows site index html with site style css rendered at 1280 px 
+site shots mobile 375 png exists and shows site index html with site style css rendered at 375 px 
+Write report/docs.md with one row for every page reading
+contains docs report reporting body horizontal overflow 1280 chars contrast headings length
+report docs md contains a row reporting the h2 count reading and its value 
+report docs md contains a row reporting the headings in order reading and its value 
+report docs md contains a row reporting the page weight kb reading and its value 
+report docs md contains a row reporting the no horizontal overflow 375 reading and its value 
+report docs md contains a row reporting the body contrast reading and its value 
+report docs md contains a row reporting the mean line length chars reading and its value 
+Validate the hand-written docs artifact and its dependencies
+html index site based content docs exists hand page style stylesheet used
+site style css exists and is the stylesheet used by site index html 
+site index html is a hand written docs page whose content is based on content docs md 
+Inventory source lines and public functions
+under functions public appear file level lines names python tests whose
+the number of lines of python under src  is not known 
+the number of top level public functions under src  is not known 
+the number of public functions under src  whose names appear in no file under tests  is not known 
+Measure the final page's typography, CTA, list, and rendered spacing details
+rendered final landing measured page action call primary body centered exactly font
+the rendered h1 to body paragraph font size ratio is measured for the final landing page 
+the hero h1 is centered as rendered on the final landing page 
+the final landing page s rendered headings form the intended typographic scale 
+the rendered height of the primary call to action is measured 
+the rendered horizontal padding of the primary call to action is measured 
+every item in the steps list renders exactly one number 
+Measure the baseline test suite
+collected passes suite test tests
+whether the pre change test suite passes is not known 
+the number of tests collected before any change is not known 
+Measure the docs page design targets at 1280 px
+docs page rendered measured body text 1280 contrast font horizontal length line
+the rendered docs page body text has a measured contrast ratio 
+the rendered docs page body text has a measured font size 
+the rendered docs page has a measured mean prose line length 
+the rendered docs page has no horizontal overflow at 1280 px 
+Audit margin and padding declarations against the spacing scale
+margin measured padding site spacing style token zero
+whether every margin and padding value in site style css is a spacing token or zero is measured 
+Add the missing h2_count row to report/docs.md
+contains docs report reporting
+report docs md contains a row reporting the h2 count reading and its value 
+Select the most complex untested public function
+branch function public untested highest selected
+the untested public function with the highest branch count is not known 
+the branch count before any change of the selected untested public function is not known 
+Verify the report closing target-count line
+closing counting design line report targets
+report design md has a closing line counting the targets met 
+Rewrite the docs page by hand from content/docs.md and verify no framework or bundler is used
+based content docs hand html index page site written
+site index html is a hand written docs page based on content docs md
+Verify the report closing target count matches the measured rows
+accurately closing counts design line need report rows sixteen targets
+the closing line in report design md accurately counts the targets met by its sixteen need rows 
+Rewrite the docs report with exact values for every map reading
+docs report reports true body horizontal overflow 1280 7083 8962 9316 chars
+report docs md reports the body contrast value 4 8962 from the map
+report docs md reports the body text size value 16 0 from the map
+report docs md reports the h2 count value 3 0 from the map
+report docs md reports the headings in order value true from the map
+report docs md reports the mean line length chars value 38 7083 from the map
+report docs md reports the no horizontal overflow 1280 value true from the map
+Add and run the selected function tests
+collect exists file passes status test tests
+the file tests test collect map status py exists and every test in it passes 
+Refactor the selected function and measure the changed suite
+suite branch calls collected combined complete function functions have introduced newly passes
+the selected function and any newly introduced functions it calls have a combined branch count after the change that is known 
+the complete test suite passes after the change 
+the number of tests collected by the suite after the change is known 
+Capture desktop-1280.png and mobile-375.png of the rendered page
+1280 chromium desktop exist final headless mobile page rendered screenshots shots site
+site shots desktop 1280 png and site shots mobile 375 png exist and are screenshots of the final page rendered by headless chromium at 1280 and 375 px wide 
+Repair the handwritten docs page to match the source content without a framework
+content docs hand html index matches page site whose written
+site index html is a hand written docs page whose content matches content docs md
+Validate the refactor, tests, and improvement report against the brief
+collect status test tests branch least combined contains different exercising exists file
+tests test collect map status py exists and is the test file named for collect map status 
+tests test collect map status py contains at least three tests of collect map status  each exercising a different branch 
+every test in tests test collect map status py passes 
+the combined post change branch count is at least one quarter lower than the pre change count of 119 
+Write report/design.md with one measured-property row per need 1–16
+brief closing content counting design json line meets need report stating target
+report design md has one row per brief need  1 to 16  stating the reading on the map and whether it meets the target in content targets json  with a closing line counting the targets met 
+Verify the in-place refactor and unchanged public signature
+collect complete deliverable green leaves refactored status suite test
+the refactored collect map status deliverable leaves the complete test suite green 

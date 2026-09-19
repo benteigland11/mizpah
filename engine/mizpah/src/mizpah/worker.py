@@ -17,7 +17,7 @@ import argparse
 import io
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import sys
@@ -37,6 +37,28 @@ PLAYBOOK_PREFIX = '.playbook'
 WRITEBACK_EXCLUDE = ('.tool-output/', '.session-history', PLAYBOOK_PREFIX+'/')
 # Project paths that never enter the worker's workspace.
 PACK_EXCLUDE = ('.git', '.venv', '__pycache__')
+# Bind mode: the project directory is /work; these stay snapshot-managed (tmpfs over the bind, tar in, write-back
+# out with the map's entitlements), so a worker's reach into `.terra/` is exactly what it is in snapshot mode.
+STATE_DIRS = ('.terra', PLAYBOOK_PREFIX, '.svc', '.tool-output', '.session-history')
+
+
+def bind_mode(config: dict[str, Any]) -> bool:
+    return str(config['mizpah']['sandbox'].get('workspace') or 'snapshot') == 'bind'
+
+
+def cache_dirs(config: dict[str, Any]) -> tuple[str, ...]:
+    return tuple(config['mizpah']['sandbox'].get('cache_dirs') or ())
+
+
+def evidence(session: Any) -> bytes:
+    """The workspace as tar bytes whichever mode the shell runs in: what harvest and the checklists read."""
+    snapshot = getattr(session, 'workspace_snapshot', None)
+    return snapshot() if callable(snapshot) else session.workspace()
+
+
+def state_of(workspace: Any) -> bytes:
+    """The snapshot-managed part (all of it in snapshot mode; the state tar in bind mode): what write-back reads."""
+    return workspace if isinstance(workspace, (bytes, bytearray)) else bytes(getattr(workspace, 'state', b''))
 # Library procedures that are the loop's own method, not a worker's to rewrite or get credit for.
 BOOTSTRAP_PROCEDURES = ('mizpah-resolve-unknown',)
 # A bucket is the mode of work, not just its price (points 3 / 8 / 21 on the route).
@@ -305,13 +327,21 @@ def render_reference(project: Path, task: dict[str, Any], unknowns: list[dict[st
     return '\n'.join(lines)+'\n'
 
 
-def pack_workspace(project: Path, playbook_store: Path | None = None) -> bytes:
-    """The project tree plus a copy of the playbook store, as the harness's relative tar."""
+def pack_workspace(project: Path, playbook_store: Path | None = None, *, only: tuple[str, ...] = (),
+                   exclude: tuple[str, ...] = ()) -> bytes:
+    """The project tree plus a copy of the playbook store, as the harness's relative tar.
+    `only`: pack just these top-level directories (bind mode packs the state directories, the tree is bound).
+    `exclude`: relative directories left out (caches, in a re-measurement pack)."""
     buffer = io.BytesIO()
+    excluded = tuple(PurePosixPath(e).parts for e in exclude)
     with tarfile.open(fileobj=buffer, mode='w:') as archive:
         for path in sorted(project.rglob('*')):
             relative = path.relative_to(project)
             if any(part in PACK_EXCLUDE for part in relative.parts) or relative.parts[0] == PLAYBOOK_PREFIX:
+                continue
+            if only and relative.parts[0] not in only:
+                continue
+            if any(tuple(relative.parts[:len(e)]) == e for e in excluded):
                 continue
             if path.is_symlink() or path.is_file() or path.is_dir():
                 archive.add(path, arcname=relative.as_posix(), recursive=False)
@@ -669,13 +699,15 @@ def remeasure(config: dict[str, Any], project: Path, root: Path, known_ids: list
     scratch = root/'remeasure'
     scratch.mkdir(parents=True, exist_ok=True)
     network = NetworkPolicy(**sandbox['network']) if sandbox.get('network') else None
+    bound = dict(workspace_dir=str(project.resolve()), cache_dirs=cache_dirs(config), state_dirs=STATE_DIRS) if bind_mode(config) else {}
     shell = SandboxedShell(ShellConfig(**(config['shell'] | dict(
         scratch_root=str(scratch), limits=ShellLimits(**config['shell']['limits']),
         read_only_binds=tuple(sandbox['read_only_binds']), environment=dict(sandbox['environment']),
         share_network=bool(sandbox.get('share_network', False)) and network is None, network=network,
-        refused_paths=tuple(sandbox.get('refused_paths') or ()), refused_patterns=REFUSED_PATTERNS))))
+        refused_paths=tuple(sandbox.get('refused_paths') or ()), refused_patterns=REFUSED_PATTERNS) | bound)))
     try:
-        workspace = pack_workspace(project)
+        # Bind mode: the evidence tree without the caches; the caches are bound read-only by the detached run.
+        workspace = pack_workspace(project, exclude=cache_dirs(config)) if bind_mode(config) else pack_workspace(project)
         for known_id in known_ids:
             known = read_known(project, known_id)
             if known is None:
@@ -687,7 +719,8 @@ def remeasure(config: dict[str, Any], project: Path, root: Path, known_ids: list
             expected = extract_known_value(known)
             result = shell.run('terra probe run '+probe_id+' --to \'{"kind": "file"}\' --json 2>/dev/null; '
                                'cat .terra/map/probes/'+probe_id+'/_last_reading.json 2>/dev/null', workspace,
-                               timeout_seconds=min(80, config['shell']['limits']['command_seconds']))
+                               timeout_seconds=min(80, config['shell']['limits']['command_seconds']),
+                               **(dict(detached=True) if bind_mode(config) else {}))
             reading = None
             text = result.stdout
             start = text.rfind('{"to"') if '{"to"' in text else text.rfind('{\n  "to"')
@@ -1136,7 +1169,8 @@ def observe_model(root: Path):
     return observe
 
 
-def bindings(config: dict[str, Any], root: Path, map_id: str, checkins: bool | None = None) -> tuple[ModelClient, ModelClient | None, SandboxedShell]:
+def bindings(config: dict[str, Any], root: Path, map_id: str, checkins: bool | None = None,
+             project: Path | None = None) -> tuple[ModelClient, ModelClient | None, SandboxedShell]:
     observe = observe_model(root)
     worker = client_for(config['worker'], observe, config)
     if checkins is None:
@@ -1148,11 +1182,13 @@ def bindings(config: dict[str, Any], root: Path, map_id: str, checkins: bool | N
     environment = dict(sandbox['environment'], TERRA_MAP=map_id, XDG_DATA_HOME='/work/'+PLAYBOOK_PREFIX)
     services = ServiceLimits(**sandbox['services']) if sandbox.get('services') else None
     network = NetworkPolicy(**sandbox['network']) if sandbox.get('network') else None
+    bound = dict(workspace_dir=str(project.resolve()), cache_dirs=cache_dirs(config), state_dirs=STATE_DIRS) \
+        if bind_mode(config) and project is not None else {}
     shell = ShellConfig(**(config['shell'] | dict(scratch_root=str(scratch), limits=ShellLimits(**config['shell']['limits']),
                                                  read_only_binds=tuple(sandbox['read_only_binds']), environment=environment,
                                                  share_network=bool(sandbox.get('share_network', False)), services=services,
                                                  refused_paths=tuple(sandbox.get('refused_paths') or ()),
-                                                 refused_patterns=REFUSED_PATTERNS, network=network)))
+                                                 refused_patterns=REFUSED_PATTERNS, network=network) | bound))
     return worker, checkin, SandboxedShell(shell)
 
 
@@ -1413,7 +1449,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         probes_before = tuple(saved.get('probes_before') or ())
         task = pick_task(config, project, task['id']) | dict(bucket=next(
             t['bucket'] for t in terra(config, project, 'route', 'status')['tasks'] if t['id'] == task['id']))
-        worker_client, checkin, shell = bindings(config, root, map_id)
+        worker_client, checkin, shell = bindings(config, root, map_id, project=project)
         holder['shell'] = shell
         try:
             session = FocusedSession.open(root, worker=worker_client, shell=shell, controller=checkin)
@@ -1446,11 +1482,13 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             assignment += ('The playbook already has methods near this work; search for them, open the best with '
                            '`playbook open <id> --for ...` and follow it before working the method out yourself:\n'
                            +'\n'.join('  - '+m for m in methods)+'\n')
-        worker_client, checkin, shell = bindings(config, root, map_id)
+        worker_client, checkin, shell = bindings(config, root, map_id, project=project)
         holder['shell'] = shell
         reference = render_reference(project, task, unknowns)
+        # Bind mode: only the state directories are packed in; the tree is the project directory itself.
+        initial = pack_workspace(project, store, only=STATE_DIRS) if bind_mode(config) else pack_workspace(project, store)
         session = FocusedSession.create(root, build_settings(config, assignment, reference, unknowns), worker=worker_client,
-                                        shell=shell, controller=checkin, initial_workspace=pack_workspace(project, store))
+                                        shell=shell, controller=checkin, initial_workspace=initial)
         probes_before = protected_probes(project, task)
         (root/'task.json').write_text(json.dumps(dict(task=task, unknowns=unknowns, map=map_id, assignment=assignment,
                                                       reference=reference, probes_before=probes_before), indent=1))
@@ -1471,7 +1509,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         # Run to the next estimate boundary; the worker judges its own effort there.
         boundary = min(remaining, max(1, estimate*(overruns+1)-status['completed_worker_turns']))
         status = run_through_outages(session, config, root, maximum_worker_turns=boundary)
-        written = writeback(session.workspace(), project, task, map_id, probes_before)
+        written = writeback(state_of(session.workspace()), project, task, map_id, probes_before)
         refused = [w for w in written if w.startswith('refused:')]
         if refused:
             (root/'writeback.jsonl').open('a').write(json.dumps(dict(turns=status['completed_worker_turns'], refused=refused))+'\n')
@@ -1502,7 +1540,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             checked = remeasure(config, project, root, [k for k in gate['knowns'] if k in task_unknown_ids(task)] or task_unknown_ids(task))
             if checked:
                 gate = dict(gate, ok=False, problems=checked)
-        unticked = open_checklists(session.workspace())
+        unticked = open_checklists(evidence(session))
         if unticked:
             gate = dict(gate, ok=False, problems=gate['problems']+unticked)
         previous = rounds[-1].get('problems') if rounds else None
@@ -1519,12 +1557,12 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         # Only after green: the method goes into the library, and only through the harvest.
         followed = procedures_used(root)
         session.continue_with(green_message(gate, task_unknown_ids(task), followed, tool_fight(root),
-                                            checklist_skips(session.workspace()),
+                                            checklist_skips(evidence(session)),
                                             uncovered_by_procedures(config, followed, unknowns)))
         status = run_through_outages(session, config, root, maximum_worker_turns=budget-status['completed_worker_turns'])
         session.prune_workspaces()
-        widgets = harvest_widgets(session.workspace(), root, config)
-        playbook = harvest_playbook(session.workspace(), store, config,
+        widgets = harvest_widgets(evidence(session), root, config)
+        playbook = harvest_playbook(evidence(session), store, config,
                                     allowed=tuple(procedures_used(root)+procedures_created(root)))
         deps = declare_artifact_deps(config, project, unknowns)
         rounds.append(dict(turns=status['completed_worker_turns'], session=status['status'], gate='playbook',
