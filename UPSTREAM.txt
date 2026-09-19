@@ -120,3 +120,8 @@ diverged:
 - playbook: a step may link another procedure (`procedure: <id>`; `add-step`/`edit-step --procedure`); validate
   refuses a dangling link; `open` renders the step as the exact `playbook open <id> --for …` command. Procedures
   compose by linking, never by copying steps. data-gofai-procedure widget STEP_KEYS gains "procedure".
+- harness: infra-sandboxed-shell-execution 1.8.1 → 1.9.0: every command and service scope carries kernel hardening
+  through systemd's user manager (seccomp: no @debug/ptrace, @module, @raw-io, @reboot, @swap, @obsolete,
+  @cpu-emulation, io_uring; NoNewPrivileges; RestrictAddressFamilies unix/inet/inet6/netlink; RestrictRealtime,
+  RestrictSUIDSGID, LockPersonality). @mount stays for bwrap; W^X not enforced (V8). Verified: chromium, CDP,
+  PyPI and services all run under it. Modelled on Anthropic's sandbox-runtime.

@@ -451,3 +451,13 @@ def test_a_command_naming_a_refused_path_is_rejected_unexecuted(tmp_path):
     assert result.status == 'rejected' and result.exit_code is None and 'not your workspace' in result.detail
     with pytest.raises(ValueError):
         ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits(), refused_paths=('relative',))
+
+
+def test_every_scope_carries_the_kernel_hardening(tmp_path):
+    from src.sandboxed_shell_execution import HARDENING_PROPERTIES
+    shell = SandboxedShell(ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits(),
+                                       share_network=True, services=services()))
+    for argv in (shell.command_argv(str(tmp_path), 'unit-h'), shell.service_argv('web', 'unit-s')):
+        assert all(prop in argv for prop in HARDENING_PROPERTIES)
+        assert argv.index('--property=NoNewPrivileges=yes') < argv.index('/bin/bwrap')
+    assert any('io_uring_setup' in p and '@debug' in p and '@mount' not in p for p in HARDENING_PROPERTIES)

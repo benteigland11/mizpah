@@ -58,6 +58,24 @@ class ServiceLimits:
             raise ValueError('All service limits must be positive')
 
 
+# Kernel-level hardening applied to every command and service scope, enforced by systemd's user manager
+# (seccomp, so no root needed). Debugging/ptrace, kernel modules, raw I/O, reboot, swap and io_uring are
+# what escape attempts reach for; a shell, a package install and a headless browser never need them.
+# @mount stays allowed because bwrap builds the namespace inside the scope; inside it, mounts are already
+# impossible (all capabilities dropped, no nested user namespaces). Raw and packet sockets are refused;
+# memory W^X is not enforced because JITs (V8) need it.
+HARDENING_PROPERTIES = (
+    '--property=NoNewPrivileges=yes',
+    '--property=SystemCallFilter=~@debug @module @raw-io @reboot @swap @obsolete @cpu-emulation '
+    'io_uring_setup io_uring_enter io_uring_register',
+    '--property=SystemCallErrorNumber=EPERM',
+    '--property=RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK',
+    '--property=RestrictRealtime=yes',
+    '--property=RestrictSUIDSGID=yes',
+    '--property=LockPersonality=yes',
+)
+
+
 @dataclass(frozen=True)
 class ShellConfig:
     """Host paths are explicit; virtual paths belong to the sandbox protocol."""
@@ -408,6 +426,7 @@ class SandboxedShell:
             '--property=TasksMax='+str(limits.processes), '--property=CPUQuota='+str(limits.cpu_percent)+'%',
             '--property=RuntimeMaxSec='+str(limits.command_seconds+limits.shutdown_seconds),
             '--property=TimeoutStopSec='+str(limits.shutdown_seconds), '--property=KillMode=control-group',
+            *HARDENING_PROPERTIES,
             *self._isolation_argv(),
             '--ro-bind', input_dir, '/input',
             # A command reads every service's log and status; only the host writes there.
@@ -430,6 +449,7 @@ class SandboxedShell:
             '--property=TasksMax='+str(limits.processes), '--property=CPUQuota='+str(config.limits.cpu_percent)+'%',
             '--property=RuntimeMaxSec='+str(limits.lifetime_seconds),
             '--property=TimeoutStopSec='+str(config.limits.shutdown_seconds), '--property=KillMode=control-group',
+            *HARDENING_PROPERTIES,
             *self._isolation_argv(),
             '--ro-bind', str(self.services_root), SERVICES_MOUNT,
             '--bind', str(home), SERVICES_MOUNT+'/'+name,
