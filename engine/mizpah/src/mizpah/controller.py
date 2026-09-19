@@ -424,7 +424,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         if creates and not source:
             source = creates
         if project is not None and source and not creates and not source_exists(project, source) and cites.startswith('deliverable:') \
-                and relative_path(source):
+                and relative_path(source) and item.get('type') == 'boolean':
             # An unknown about a deliverable names the file it is about; when that file does not exist yet, the
             # task builds it. Let it through and derive `creates` (in the deliverable's own spelling when it
             # names the file) rather than refusing over a field choice; the worker owns building it.
