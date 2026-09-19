@@ -134,7 +134,8 @@ def target_rows(project: Path, key: dict) -> list[dict]:
     rows = []
     for kid, rec in knowns(project).items():
         need = cited_need(project, kid)
-        if need in targets:
+        # A design brief measures before and after the change; the target is for after.
+        if need in targets and not re.search(r'(^|_)before(_|$)', kid):
             rows.append(dict(kind='target', id=kid, need=need, target=targets[need], found=rec['value'],
                              ok=meets(rec['value'], targets[need])))
     return rows
