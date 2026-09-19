@@ -17,7 +17,7 @@ from typing import Any
 from cg.bp_focused_agent_session_python.src import EndpointConfig, ModelClient, llama_model_client
 from cg.backend_persistent_model_session_python.src.persistent_model_session import parse_turn
 
-from . import briefs
+from . import briefs, phases
 from .worker import terra
 
 ID_PATTERN = re.compile(r'^[a-z][a-z0-9_]*$')
@@ -153,6 +153,7 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
     brief = observation['brief']
     lines = ['# Brief (reference, v'+str(brief.get('version'))+', '+str(brief.get('status'))+')',
              'Mission: '+str(brief.get('mission'))]
+    lines += phases.render(brief)
     cited: dict[str, list[str]] = {}
     for u in observation['unknowns']:
         notes = str(u.get('notes') or '')
@@ -164,7 +165,7 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
         lines.append(key.capitalize()+':'+('' if entries else ' (none)'))
         for i, entry in enumerate(entries):
             ref = key[:-1].replace('non_goal', 'non-goal')+':'+str(i+1)
-            lines.append('  '+ref+' '+str(entry))
+            lines.append('  '+ref+' '+str(entry)+(phases.tag(brief, ref) if key != 'non_goals' else ''))
             if key == 'deliverables':
                 for line in cited.get(ref, []):
                     lines.append('      ↳ '+line[:160])
@@ -237,10 +238,12 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
                      ', done '+str(budget.get('points_done'))+', unallocated '+str(budget.get('points_remaining_budget'))+
                      ' — tasks draw on the budget (low 3, medium 8, high 21); Terra refuses a task the budget cannot cover.')
     lines.append('')
+    now = phases.current(brief)
+    scope = ' (phase '+now['id']+': its needs and deliverables are what is owed now; "done" means this phase is met)' if now else ''
     if mode == 'route':
-        lines.append('Step: route. What does the map still owe the brief? Mint the unknowns and one task each.')
+        lines.append('Step: route. What does the map still owe the brief'+scope+'? Mint the unknowns and one task each.')
     else:
-        lines.append('Step: project eval. A task just closed or the route is empty. Judge the map against the brief: '
+        lines.append('Step: project eval. A task just closed or the route is empty. Judge the map against the brief'+scope+': '
                      'new unknowns if something is still owed, proposals if the evidence shows the brief itself '
                      'should change, or nothing.')
     if refusals:
@@ -296,7 +299,8 @@ def source_exists(project: Path, source: str) -> bool:
     return (project/source).exists()
 
 
-def uncovered_deliverable_terms(observation: dict[str, Any], extra_unknowns: list[dict[str, Any]] = ()) -> list[str]:
+def uncovered_deliverable_terms(observation: dict[str, Any], extra_unknowns: list[dict[str, Any]] = (), *,
+                                open_phases_only: bool = False) -> list[str]:
     """Backticked names in each deliverable that no unknown citing it mentions.
 
     The brief's own backticks are its vocabulary of named things (commands, files, invocations);
@@ -307,6 +311,8 @@ def uncovered_deliverable_terms(observation: dict[str, Any], extra_unknowns: lis
     unknowns = list(observation['unknowns'])+[dict(id=u['id'], claim=u['claim'], notes='cites '+u['cites']) for u in extra_unknowns]
     for index, text in enumerate(observation['brief'].get('deliverables') or [], start=1):
         ref = 'deliverable:'+str(index)
+        if open_phases_only and phases.refused_cites(observation['brief'], [ref]):
+            continue   # a later phase's deliverable is not owed yet
         citing_unknowns = [u for u in unknowns if ('cites '+ref) in str(u.get('notes') or '')]
         if not citing_unknowns:
             # No backticks does not mean nothing named: a deliverable no unknown cites is not covered at all.
@@ -359,6 +365,9 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             refusals.append('unknown '+uid+': cites '+repr(item.get('cites'))+' but the brief has '+str(counts['need'])+
                             ' needs and '+str(counts['deliverable'])+' deliverables; cite need:N or deliverable:N'
                             ' (several allowed, separated by |)'); continue
+        later = phases.refused_cites(brief, refs)
+        if later:
+            refusals.append('unknown '+uid+': '+'; '.join(later)); continue
         item = dict(item, cites=cites, also=refs[1:])
         if item.get('type') not in TYPES:
             refusals.append('unknown '+uid+': type must be one of '+', '.join(TYPES)); continue
@@ -510,7 +519,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
     done = decision.get('done')
     done = bool(done) if isinstance(done, bool) else None
     if done is True:
-        uncovered = uncovered_deliverable_terms(observation, unknowns)
+        uncovered = uncovered_deliverable_terms(observation, unknowns, open_phases_only=True)
         if uncovered:
             done = False
             refusals.append('done refused: '+'; '.join(uncovered)+' — mint one unknown per named thing (with `creates`), '
@@ -532,10 +541,13 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
             args += ['--unit', u['unit']]
         terra(config, project, *args)
         done['unknowns'].append(u['id'])
+    now = phases.current(terra(config, project, 'brief', 'show')) if accepted['tasks'] else None
     for t in accepted['tasks']:
         ids = t.get('unknowns') or [t['unknown']]
         args = ['route', 'add', t['id'], '--title', t['title'], '--map', ids[0], '--bucket', t['bucket'],
                 '--skill', 'terra-probe']
+        if now:
+            args += ['--phase', now['id']]
         for extra in ids[1:]:
             args += ['--accept', 'unknown:'+extra]  # the task resolves these too; Terra's map_id holds only one
         for dep in t['deps']:
@@ -559,6 +571,25 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
         terra(config, project, 'route', 'unblock', r['task'])
         done['rebucket'].append(r['task']+'→'+r['bucket'])
     return done
+
+
+def close_ready_phase(config: dict[str, Any], project: Path) -> dict[str, Any] | None:
+    """Close the current phase when everything it owns is resolved and covered; returns what closed, or None.
+
+    Mechanical, like the gate: the controller's judgment inside a phase is "done" for the phase, and the
+    loop moves on only when the map says the phase's entries are met. The next route step sees the next
+    phase as current."""
+    observation = observe(config, project)
+    now = phases.current(observation['brief'])
+    if now is None:
+        return None
+    problems = phases.exit_problems(observation, now, uncovered_deliverable_terms(observation))
+    if problems:
+        return dict(phase=now['id'], closed=False, problems=problems[:6])
+    reason = 'every need and deliverable it owns has a resolved unknown and no task of it is open'
+    terra(config, project, 'brief', 'phase-close', now['id'], '--reason', reason)
+    following = phases.current(terra(config, project, 'brief', 'show'))
+    return dict(phase=now['id'], closed=True, next=following['id'] if following else None)
 
 
 def decide_through_outages(client: Any, config: dict[str, Any], system: str, user: str, wait_seconds: int = 300,

@@ -94,6 +94,26 @@ def _loop_alive(root: Path) -> bool:
     return probe.returncode == 0
 
 
+def phase_open(config: dict[str, Any], project: Path) -> bool:
+    """A phase the map has not met is still open: the controller's "done" is not the brief's."""
+    from . import phases
+    return phases.current(terra(config, project, 'brief', 'show')) is not None
+
+
+def close_phase(config: dict[str, Any], project: Path, record: dict[str, Any], log: Path) -> bool:
+    """Close the current phase if the map says it is met; records the outcome on the cycle; never raises."""
+    try:
+        outcome = controller.close_ready_phase(config, project)
+    except Exception as error:  # noqa: BLE001
+        with log.open('a') as handle:
+            handle.write(json.dumps(dict(at=time.time(), where='phase', error=str(error)[:500]))+'\n')
+        return False
+    if outcome is None:
+        return False
+    record.setdefault('phases', []).append(outcome)
+    return bool(outcome.get('closed'))
+
+
 def failing_step(config: dict[str, Any], project: Path, journal: Path, mode: str, log: Path) -> dict[str, Any]:
     """A controller step that records its own failure instead of ending the run."""
     try:
@@ -216,6 +236,8 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                             handle.write(json.dumps(dict(at=time.time(), where='settle:'+task['id'], error=str(error)[:500]))+'\n')
                     if settled:
                         record.setdefault('settled', []).append(settled)
+                # A phase whose entries are all met closes here, so the eval that follows sees the next phase.
+                close_phase(config, project, record, log)
                 # The controller works between tasks: it sees the new known as state and may
                 # mint the next unknowns while the route still has work. Its writes are safe
                 # against the worker's entitlement writeback.
@@ -235,11 +257,15 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                 break
             minted = record['eval']['applied']
             if not any(minted[k] for k in ('unknowns', 'tasks', 'rebucket')) and not pickable(config, project, root):
+                if close_phase(config, project, record, log):
+                    # The eval judged the phase met and the map agrees: the next cycle routes the next phase.
+                    stalled_evals = 0
+                    continue
                 if blocked(config, project):
                     stop = 'blocked'
                 elif minted['proposals']:
                     stop = 'proposals_pending'
-                elif record['eval'].get('done') is True:
+                elif record['eval'].get('done') is True and not phase_open(config, project):
                     stop = 'nothing_owed'
                 elif stalled_evals < 1:
                     # One empty eval is one bad draw (each step is a fresh window): a second cycle gets a route

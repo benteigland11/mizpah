@@ -1,0 +1,1 @@
+diverged: brief phases own needs/deliverables (`terra brief phase <id> --needs 1-7 --deliverables 1`; `parse_index_spec`); Mizpah routes one phase at a time and closes a phase when its entries resolve

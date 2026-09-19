@@ -345,12 +345,34 @@ def set_enabler_status(
     return load_brief(project_root)
 
 
+def parse_index_spec(spec: str) -> list[int]:
+    """'1-7', '1,3,5' or '1-3,9' → sorted 1-based indices; '' → []."""
+    out: set[int] = set()
+    for part in (spec or "").replace(" ", "").split(","):
+        if not part:
+            continue
+        if "-" in part:
+            lo, _, hi = part.partition("-")
+            if not (lo.isdigit() and hi.isdigit()) or int(lo) > int(hi):
+                raise ValueError(f"bad index range {part!r}")
+            out.update(range(int(lo), int(hi) + 1))
+        elif part.isdigit():
+            out.add(int(part))
+        else:
+            raise ValueError(f"bad index {part!r}")
+    if any(i < 1 for i in out):
+        raise ValueError("indices are 1-based")
+    return sorted(out)
+
+
 def add_phase(
     project_root: Path,
     phase_id: str,
     *,
     title: str = "",
     description: str = "",
+    needs: list[int] | None = None,
+    deliverables: list[int] | None = None,
 ) -> dict[str, Any]:
     if not _SLUG_RE.match(phase_id):
         raise ValueError(f"phase id must match {_SLUG_RE.pattern}")
@@ -358,12 +380,24 @@ def add_phase(
     phases = list(rec.get("phases") or [])
     if any(p.get("id") == phase_id for p in phases):
         raise FileExistsError(f"phase already exists: {phase_id}")
+    # A phase owns brief entries: the needs and deliverables that must resolve before it can close.
+    # Without them a phase is a label on tasks; with them it is a scope the controller routes within.
+    for key, idx in (("needs", needs or []), ("deliverables", deliverables or [])):
+        n = len(rec.get(key) or [])
+        bad = [i for i in idx if i > n]
+        if bad:
+            raise ValueError(f"phase {key} {bad} exceed the brief's {n} {key}")
+        taken = {i for p in phases for i in (p.get(key) or [])} & set(idx)
+        if taken:
+            raise ValueError(f"{key} {sorted(taken)} already belong to another phase")
     phases.append(
         {
             "id": phase_id,
             "title": (title or phase_id).strip(),
             # What the phase delivers, for the humans reading the brief.
             "description": (description or "").strip(),
+            "needs": list(needs or []),
+            "deliverables": list(deliverables or []),
             "status": "open",
         }
     )

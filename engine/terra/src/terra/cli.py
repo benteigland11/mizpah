@@ -409,13 +409,15 @@ def cmd_brief_set(args: argparse.Namespace) -> int:
 
 def cmd_brief_phase(args: argparse.Namespace) -> int:
     from .agent_io import emit, error, success
-    from .brief import add_phase, brief_summary
+    from .brief import add_phase, brief_summary, parse_index_spec
 
     try:
         root = require_project_root()
         rec = add_phase(
             root, args.id, title=args.title or "",
             description=getattr(args, "description", "") or "",
+            needs=parse_index_spec(getattr(args, "needs", "") or ""),
+            deliverables=parse_index_spec(getattr(args, "deliverables", "") or ""),
         )
     except (FileNotFoundError, ValueError, FileExistsError, OSError) as e:
         return emit(error(str(e), code="brief_phase"))
@@ -4865,6 +4867,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_bph.add_argument("id", help="Phase slug")
     p_bph.add_argument("--title", default="")
     p_bph.add_argument("--description", default="", help="What the phase delivers")
+    p_bph.add_argument("--needs", default="", help="Brief need numbers this phase owns, e.g. 1-7 or 1,3,5")
+    p_bph.add_argument("--deliverables", default="", help="Brief deliverable numbers this phase owns")
     p_bph.set_defaults(func=cmd_brief_phase)
 
     p_bpc = br_sub.add_parser(

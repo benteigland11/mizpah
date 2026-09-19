@@ -3,7 +3,7 @@
 Usage: python -m fixtures.improve <target_dir> [source_dir]   (from engine/mizpah; makes <target_dir>/improve)
 
 The project is a copy of a real package (default: engine/terra, ~21K lines, 400+ tests). The brief has two
-phases the controller must honour: survey (readings over the tree — size, public surface, what has no direct
+declared phases: survey (readings over the tree — size, public surface, what has no direct
 test, the most complex untested function) and change (a test for that function and a complexity reduction,
 with the suite still green). "Improve" is a reading or it is nothing. The key is the test suite; targets are
 relative where they must be (`<=0.75*need:5`). The worker edits the copy under /work; the terra it runs as a
@@ -17,7 +17,7 @@ import shutil
 import sys
 import textwrap
 
-from .suite import brief, key_path
+from .suite import brief, key_path, terra
 
 DEFAULT_SOURCE = Path(__file__).resolve().parents[2]/'terra'
 
@@ -69,6 +69,10 @@ def improve(project: Path, source: Path = DEFAULT_SOURCE) -> None:
           'passes — without ever holding the whole codebase in view.', needs, deliverables, budget=400,
           notes='Two phases: survey first (needs 1 to 7 are readings over the tree, taken before any file changes), then '
                 'the change (needs 8 to 11). '+NOTE)
+    # Two phases: the controller routes the survey to closure before a single change unknown can be minted.
+    terra(project, 'brief', 'phase', 'survey', '--title', 'Survey the package into readings', '--needs', '1-7')
+    terra(project, 'brief', 'phase', 'change', '--title', 'Change one function with the suite as the reference',
+          '--needs', '8-11', '--deliverables', '1-3')
     key_path(project).write_text(json.dumps(dict(fixture='improve', key=dict(
         by_need={}, targets={'6': True, '8': '<=0.75*need:5', '9': True, '10': True, '11': '>=need:7'})), indent=1)+'\n')
 

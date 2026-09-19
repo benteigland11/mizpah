@@ -231,6 +231,12 @@ def write_report(config: dict[str, Any], project: Path, root: Path, cycles: list
         refused = _count(e['host'] for e in egress if not e.get('allowed'))
         lines.append('- egress: '+str(sum(allowed.values()))+' allowed ('+', '.join(h+' ×'+str(n) for h, n in sorted(allowed.items(), key=lambda kv: -kv[1])[:6])
                      +'); '+str(sum(refused.values()))+' refused ('+', '.join(h+' ×'+str(n) for h, n in sorted(refused.items(), key=lambda kv: -kv[1])[:6])+')')
+    phase_rows = [ph for c in cycles for ph in (c.get('phases') or [])]
+    if phase_rows:
+        lines += ['', '## Phases']
+        for ph in phase_rows:
+            lines.append('- `'+str(ph.get('phase'))+'` '+('closed → '+str(ph.get('next') or 'all phases closed') if ph.get('closed')
+                         else 'still open: '+'; '.join(str(x) for x in ph.get('problems') or [])[:300]))
     score = _score(project)
     if score:
         lines += ['', '## Score', score]

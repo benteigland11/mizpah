@@ -14,3 +14,10 @@ If the project-files section is not enough to route or bucket well, look first: 
 Ids match ^[a-z][a-z0-9_]*$.
 
 When the observation lists related briefs, they are the controller's library: other projects with the same kinds of deliverables and the unknowns that were worth minting for them. A deliverable of this brief that the same kind of artifact was measured for elsewhere (a page's gutters, a list's markers, a button's box) deserves those unknowns here too, cited to this brief's deliverable; a need those briefs had and this one does not is not yours to add.
+
+## Phases
+
+A brief may declare phases, each owning some needs and deliverables; the observation marks the current one. Mint only for
+the current phase: a later phase's entries name knowns that do not exist yet, and the guard refuses them. A phase closes
+by itself when every entry it owns has a resolved unknown and no task of it is open — "done" inside a phase means the
+phase is met, not the brief. A closed phase's knowns are the anchors the next phase's needs name by id.
