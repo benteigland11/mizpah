@@ -143,7 +143,7 @@
         "kind": "device_code",
         "device_authorization_endpoint": "https://github.com/login/device/code",
         "token_endpoint": "https://github.com/login/oauth/access_token",
-        "client_id": "",
+        "client_id": "Ov23liK1lbaR3d1oNLPS",
         "scopes": [
           "read:user"
         ]
@@ -172,7 +172,7 @@
       "token_count": "usage_calibrated",
       "context_window": 128000,
       "timeout_seconds": 900,
-      "notes": "GitHub's Copilot SDK route for third parties: register your own GitHub OAuth App (Settings > Developer settings > OAuth Apps, enable Device Flow) and set MIZPAH_GITHUB_CLIENT_ID. The device-flow token is sent as the bearer with X-GitHub-Api-Version, as OpenCode does. GitHub tokens do not expire; a 401 means sign in again. The static model list is a hint; the live /models list is used once signed in.",
+      "notes": "GitHub's Copilot SDK route for third parties: the Mizpah GitHub OAuth App (device flow, no secret; MIZPAH_GITHUB_CLIENT_ID overrides). The device-flow token is sent as the bearer with X-GitHub-Api-Version, as OpenCode does. GitHub tokens do not expire; a 401 means sign in again. Models are listed live from /models once signed in.",
       "reasoning_efforts": [
         "low",
         "medium",

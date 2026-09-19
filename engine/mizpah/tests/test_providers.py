@@ -14,7 +14,7 @@ def test_shipped_profiles_load_and_xai_needs_a_client_id() -> None:
     assert {'openai_api', 'openai_chatgpt', 'xai_api', 'xai_grok', 'zai_coding', 'kimi_coding', 'minimax_coding', 'deepseek_api',
             'github_copilot', 'google_gemini', 'anthropic_api', 'mistral_api', 'openrouter_api', 'groq_api'} <= set(reg.names())
     copilot = reg.get('github_copilot')
-    assert copilot.auth.kind == 'device_code' and 'MIZPAH_GITHUB_CLIENT_ID' in (providers.missing_client_id(copilot) or '')
+    assert copilot.auth.kind == 'device_code' and providers.missing_client_id(copilot) is None
     assert copilot.models_url == 'https://api.githubcopilot.com/models'
     anthropic = reg.get('anthropic_api')
     assert anthropic.headers_for('k') == {'anthropic-version': '2023-06-01', 'Authorization': 'Bearer k', 'x-api-key': 'k'}
