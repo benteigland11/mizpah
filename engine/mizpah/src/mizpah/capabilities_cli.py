@@ -5,7 +5,7 @@ import argparse
 import json
 from pathlib import Path
 
-from . import capabilities
+from . import capabilities, worker
 
 
 def main() -> None:
@@ -13,7 +13,7 @@ def main() -> None:
     parser.add_argument('--config', required=True)
     parser.add_argument('--json', action='store_true')
     args = parser.parse_args()
-    config = json.loads(Path(args.config).read_text())
+    config = worker.load_config(Path(args.config))
     rows = capabilities.registered(config)
     if args.json:
         print(json.dumps(rows, indent=1))
