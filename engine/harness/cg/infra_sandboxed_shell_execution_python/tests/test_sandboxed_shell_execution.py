@@ -461,3 +461,13 @@ def test_every_scope_carries_the_kernel_hardening(tmp_path):
         assert all(prop in argv for prop in HARDENING_PROPERTIES)
         assert argv.index('--property=NoNewPrivileges=yes') < argv.index('/bin/bwrap')
     assert any('io_uring_setup' in p and '@debug' in p and '@mount' not in p for p in HARDENING_PROPERTIES)
+
+
+def test_a_command_matching_a_refused_pattern_is_rejected_with_its_reason(tmp_path):
+    shell = SandboxedShell(ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits(),
+                                       refused_patterns=((r'--skip-gate\b', 'the gate is not yours to skip'),
+                                                         (r'>\s*\.terra/brief\.json', 'the brief moves by proposal'))))
+    assert shell.run('terra route complete t --skip-gate "x"', b'').detail == 'refused: the gate is not yours to skip'
+    assert shell.run("echo '{}' > .terra/brief.json", b'').status == 'rejected'
+    with pytest.raises(ValueError):
+        ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits(), refused_patterns=(('(', 'bad'),))

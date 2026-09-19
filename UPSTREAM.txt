@@ -125,3 +125,10 @@ diverged:
   @cpu-emulation, io_uring; NoNewPrivileges; RestrictAddressFamilies unix/inet/inet6/netlink; RestrictRealtime,
   RestrictSUIDSGID, LockPersonality). @mount stays for bwrap; W^X not enforced (V8). Verified: chromium, CDP,
   PyPI and services all run under it. Modelled on Anthropic's sandbox-runtime.
+- harness: infra-sandboxed-shell-execution 1.9.0 → 1.10.0 gains ShellConfig.refused_patterns ((regex, reason) pairs;
+  a matching command is refused unexecuted with the reason). bp-focused-agent-session 0.27.0 → 0.28.0: `run()`
+  takes `stop_when` (a kill switch asked between turns; status 'stopped', session reopens where it paused) and
+  SessionSettings.protected_paths (globs write/edit refuse). Mizpah: --skip-gate/--freehand/cartograph checkin/
+  systemctl/model-server signals and shell writes to brief/route/knowns/runs refused; write/edit refuse Terra's
+  records; a STOP file in the run root (or two levels up) pauses at the next boundary; SIGTERM runs the finally
+  blocks; the loop sweeps orphaned isolated-service scopes at start.

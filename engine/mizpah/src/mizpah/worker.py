@@ -821,7 +821,8 @@ def bindings(config: dict[str, Any], root: Path, map_id: str, checkins: bool | N
     shell = ShellConfig(**(config['shell'] | dict(scratch_root=str(scratch), limits=ShellLimits(**config['shell']['limits']),
                                                  read_only_binds=tuple(sandbox['read_only_binds']), environment=environment,
                                                  share_network=bool(sandbox.get('share_network', False)), services=services,
-                                                 refused_paths=tuple(sandbox.get('refused_paths') or ()))))
+                                                 refused_paths=tuple(sandbox.get('refused_paths') or ()),
+                                                 refused_patterns=REFUSED_PATTERNS)))
     return worker, checkin, SandboxedShell(shell)
 
 
@@ -972,6 +973,22 @@ COMMAND_TOOLS: tuple[dict[str, Any], ...] = (
 )
 
 
+# Records only a tool may write. The writeback would drop hand edits anyway; refusing them at the tool saves the
+# turns spent making them and the turns spent wondering why they did not take.
+PROTECTED_PATHS = ('.terra/brief.json', '.terra/route.json', '.terra/map/knowns/*', '.terra/map/runs/*',
+                   '.terra/map/sessions/*/knowns/*', '.terra/map/sessions/*/runs/*', '.terra/map/unknowns/*')
+REFUSED_PATTERNS = (
+    (r'--skip-gate\b', 'the gate is not yours to skip: a red gate says what is missing, and a block says why you cannot'),
+    (r'--freehand\b', 'a claim-shaped task completes on map evidence (--run/--known), never on prose'),
+    (r'\bcartograph\s+(checkin|publish)\b', 'widgets are checked in by the harness after green, never by the worker'),
+    (r'\bplaybook\s+(remove-step|edit)\s+mizpah-', 'the bootstrap procedure is not yours to rewrite'),
+    (r'(>>?|\btee\b|-i)\s*[^|;&]*\.terra/(brief|route)\.json', 'the brief moves by proposal and the route by terra route; neither is a file to write'),
+    (r'(>>?|\btee\b|-i)\s*[^|;&]*\.terra/map/(knowns|runs|unknowns)/', 'knowns, runs and unknowns are born by terra commands, never by writing their files'),
+    (r'\bsystemctl\b|\bsystemd-run\b|\bloginctl\b', 'the host\'s service manager is outside the sandbox; services start with `svc start`'),
+    (r'\bcurl\b[^|;&]*(/stop\b|/shutdown\b|/slots\b)', 'the model server is not yours to signal'),
+)
+
+
 def build_settings(config: dict[str, Any], assignment: str, reference: str,
                    unknowns: list[dict[str, Any]] = ()) -> SessionSettings:
     # The check-in controller reviews on the v10 cadence against the task reference; routing and
@@ -989,6 +1006,7 @@ def build_settings(config: dict[str, Any], assignment: str, reference: str,
         repeated_failure_rollover=config['mizpah'].get('repeated_failure_rollover'),
         repeated_success_rollover=config['mizpah'].get('repeated_success_rollover'),
         review_focus_globs=focus_globs(list(unknowns)), review_focus_characters=12000,
+        protected_paths=PROTECTED_PATHS,
         **{key: config[key] for key in ('worker_tools', 'maximum_tool_argument_characters', 'maximum_write_characters',
                                         'maximum_edit_characters', 'maximum_read_lines') if key in config})
 
@@ -1012,9 +1030,14 @@ def run_through_outages(session: FocusedSession, config: dict[str, Any], root: P
     """
     import time
     outages = 0
+    stop_files = (root/'STOP', root.parent/'STOP', root.parent.parent/'STOP')
+
+    def stop_requested() -> bool:
+        return any(p.exists() for p in stop_files)
+
     while True:
         try:
-            return session.run(maximum_worker_turns=maximum_worker_turns)
+            return session.run(maximum_worker_turns=maximum_worker_turns, stop_when=stop_requested)
         except RejectedGeneration:
             raise
         except ModelTransportError as error:
@@ -1131,6 +1154,11 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             rounds.append(dict(turns=status['completed_worker_turns'], session=status['status'], gate='blocked',
                                blocked_reason=blocked_reason, final_text=status['final_text']))
             break
+        if status['status'] == 'stopped':
+            # The operator's STOP file: the session paused at a turn boundary and reopens where it is; the task
+            # stays in_progress on the route so the next run resumes it.
+            rounds.append(dict(turns=status['completed_worker_turns'], session='stopped', gate='stopped'))
+            break
         if status['status'] == 'paused':
             overruns += 1
             rounds.append(dict(turns=status['completed_worker_turns'], session=status['status'], gate='effort',
@@ -1165,7 +1193,8 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         deps = declare_artifact_deps(config, project, unknowns)
         rounds.append(dict(turns=status['completed_worker_turns'], session=status['status'], gate='playbook',
                            final_text=status['final_text'], playbook=playbook, widgets=widgets, artifact_deps=deps))
-    verdict = 'complete' if gate['ok'] else ('blocked_by_worker' if blocked_reason is not None else 'incomplete')
+    verdict = ('complete' if gate['ok'] else 'blocked_by_worker' if blocked_reason is not None
+               else 'stopped' if status['status'] == 'stopped' else 'incomplete')
     result = dict(task=task['id'], unknown=task['map_id'], unknowns=task_unknown_ids(task), map=map_id, resumed=resuming,
                   verdict=verdict,
                   blocked_reason=blocked_reason, problems=gate['problems'], knowns=gate['knowns'],

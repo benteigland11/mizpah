@@ -109,6 +109,10 @@ class ShellConfig:
     # source) but is not the worker's to read. A command whose text contains one is refused unexecuted
     # with the reason; the tools still run because the bind stays. Prefixes, matched as substrings.
     refused_paths: tuple[str, ...] = ()
+    # (regex, reason) pairs a command's text is matched against; a match is refused unexecuted with the reason.
+    # For the few verbs that are policy today and must be structure: a gate override, a publish, a write to a
+    # record only a tool may write. Regexes are compiled once at construction.
+    refused_patterns: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         if any(not Path(value).is_absolute() for value in
@@ -130,6 +134,15 @@ class ShellConfig:
         object.__setattr__(self, 'refused_paths', tuple(self.refused_paths))
         if any(not Path(entry).is_absolute() for entry in self.refused_paths):
             raise ValueError('refused_paths must be absolute host paths')
+        patterns = tuple((str(p), str(r)) for p, r in self.refused_patterns)
+        for pattern, reason in patterns:
+            if not pattern or not reason:
+                raise ValueError('refused_patterns entries are (regex, reason) pairs')
+            try:
+                re.compile(pattern)
+            except re.error as error:
+                raise ValueError('refused_patterns: bad regex '+repr(pattern)+': '+str(error)) from error
+        object.__setattr__(self, 'refused_patterns', patterns)
         object.__setattr__(self, 'snapshot_ignore', tuple(self.snapshot_ignore))
         if any('/' in name or not name for name in self.snapshot_ignore):
             raise ValueError('snapshot_ignore entries are directory basenames')
@@ -478,6 +491,10 @@ class SandboxedShell:
                                'refused: the command names '+', '.join(named)+', which is the toolchain, not your workspace. '
                                'Read tools through their --help and the errors they print; a refusal you cannot resolve '
                                'is a reason to block the task, not source to read.')
+        for pattern, reason in config.refused_patterns:
+            if re.search(pattern, command):
+                return ShellResult('rejected', None, '', '', False, False, workspace, (), time.monotonic()-start,
+                                   'refused: '+reason)
         unit = 'isolated-shell-'+uuid4().hex
         if self._services:
             self._mirror_workspace(workspace)

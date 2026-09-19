@@ -1512,3 +1512,37 @@ def test_read_shows_an_image_only_to_a_model_that_can_see(tmp_path):
 
 def transport_tools(item):
     return item.session.tools
+
+
+def test_stop_when_pauses_at_a_turn_boundary_and_the_session_resumes(tmp_path):
+    settings, worker, shell, controller, transport, _ = setup(tmp_path, total=6, enabled=False, rollover=False)
+    item = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, controller=controller)
+    calls = {'n': 0}
+    def stop_after_two():
+        calls['n'] += 1
+        return calls['n'] > 2
+    result = item.run(stop_when=stop_after_two)
+    assert result['status'] == 'stopped' and 0 < result['completed_worker_turns'] < 6
+    assert any(getattr(e, 'event_type', None) == 'stopped' for e in item.journal.read_strict('session'))
+    # Nothing was lost: the same session runs on to completion.
+    reopened = FocusedSession.open(tmp_path/'session', worker=worker, shell=shell, controller=controller)
+    assert reopened.run()['status'] == 'complete'
+
+
+def test_write_and_edit_refuse_protected_paths(tmp_path):
+    settings, _, shell, controller, _, _ = setup(tmp_path, total=0, enabled=False, rollover=False)
+    settings = replace(settings, worker_tools=('bash', 'write', 'edit'), protected_paths=('.terra/brief.json', '.terra/map/knowns/*'))
+    class T(FileToolTransport):
+        def __init__(self):
+            super().__init__()
+            self.script = [('write', dict(path='.terra/brief.json', content='{}')),
+                           ('write', dict(path='/work/.terra/map/knowns/k.json', content='{}')),
+                           ('write', dict(path='notes.md', content='ok\n')),
+                           ('edit', dict(path='.terra/brief.json', old_text='a', new_text='b'))]
+    transport = T()
+    worker = ModelClient(EndpointConfig('http://example.invalid', 5, 1000000, {}, '/complete', '/template', '/tokenize', False, True), transport=transport)
+    item = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, controller=controller)
+    item.run()
+    outcomes = [json.loads(m['content']) for m in transport.requests[-1]['messages'] if m.get('role') == 'tool']
+    assert [o['status'] for o in outcomes] == ['error', 'error', 'ok', 'error']
+    assert all('a tool owns' in o['error'] for o in outcomes if o['status'] == 'error')

@@ -98,6 +98,8 @@ class SessionSettings:
     maximum_read_lines: int = 200
     # An image the worker reads is shown whole (a projector needs the pixels); this bounds the request body.
     maximum_image_bytes: int = 2*1024*1024
+    # Workspace paths (fnmatch globs) write and edit refuse: records a tool owns and the worker only reads.
+    protected_paths: tuple[str, ...] = ()
     # When false, write only creates files or fills an emptied one: replacing a file's
     # content in one call is a block replacement, which the method forbids.
     write_existing_files: bool = True
@@ -584,6 +586,15 @@ class FocusedSession:
             raise GenerationRetryExceeded(self.state['blocked_reason'])
         return None
 
+    def _refuse_protected(self, path: str) -> None:
+        clean = path.removeprefix('/work/')
+        while clean.startswith('./'):
+            clean = clean[2:]
+        for pattern in self.settings.protected_paths:
+            if fnmatch.fnmatch(clean, pattern) or fnmatch.fnmatch(path, pattern):
+                raise ValueError(path+' is a record a tool owns, not a file to write: change it through that tool\'s '
+                                 'commands, or leave it')
+
     def _finish_turn(self) -> None:
         self.progress.observe(self.state['active_turn'])
         self._event('worker_turn', deepcopy(self.state['active_turn']))
@@ -734,6 +745,7 @@ class FocusedSession:
                 elif name == 'write':
                     if set(args) != {'path', 'content'} or not all(isinstance(args[k], str) for k in args):
                         raise ValueError('write requires exactly path and content strings')
+                    self._refuse_protected(args['path'])
                     limit = self.settings.maximum_write_characters
                     if limit is not None and len(args['content']) > limit:
                         raise ValueError('write content is too long for one call; write the skeleton first and fill it in with edit')
@@ -749,6 +761,7 @@ class FocusedSession:
                     keys = {'path', 'old_text', 'new_text'}
                     if not keys <= set(args) <= keys | {'expected_occurrences'} or not all(isinstance(args[k], str) for k in keys):
                         raise ValueError('edit requires path, old_text and new_text strings and an optional expected_occurrences integer')
+                    self._refuse_protected(args['path'])
                     if self.settings.edit_requires_read:
                         try:
                             current = hashlib.sha256(read_workspace_file(self.workspace(), args['path'], **options)).hexdigest()
@@ -1519,8 +1532,12 @@ class FocusedSession:
                 raise
             return self.status()
 
-    def run(self, *, maximum_worker_turns: int | None = None) -> dict[str, Any]:
-        """Run until completion, or pause at a resolved boundary after a requested burst."""
+    def run(self, *, maximum_worker_turns: int | None = None, stop_when: Any = None) -> dict[str, Any]:
+        """Run until completion, or pause at a resolved boundary after a requested burst.
+
+        `stop_when` is asked between steps (a kill switch the operator flips, a file, a signal): when it answers
+        true the session pauses at the boundary it is on and reports status 'stopped'; nothing mid-flight is lost
+        and the session reopens where it paused."""
         if maximum_worker_turns is not None and (type(maximum_worker_turns) is not int or maximum_worker_turns <= 0):
             raise ValueError('A requested burst must contain a positive number of worker turns')
         initial = self.progress.turns
@@ -1528,6 +1545,9 @@ class FocusedSession:
             if (maximum_worker_turns is not None and self.progress.turns-initial >= maximum_worker_turns
                     and self.state['phase'] == 'worker'):
                 return self.status() | dict(status='paused')
+            if stop_when is not None and self.state['phase'] == 'worker' and self.state.get('pending_io') is None and stop_when():
+                self._event('stopped', dict(turns=self.progress.turns))
+                return self.status() | dict(status='stopped')
             self.step()
         return self.status()
 

@@ -92,6 +92,35 @@ class Health:
         return ok
 
 
+# ---------------------------------------------------------------- stop and sweep
+
+def stop_requested(root: Path) -> bool:
+    """A STOP file in the run root, or one or two levels up (a whole queue), pauses the loop at the next boundary."""
+    return any((p/'STOP').exists() for p in (root, root.parent, root.parent.parent))
+
+
+def sweep_services(live_roots: list[Path] = ()) -> list[str]:
+    """Stop every `isolated-service-*` scope no live run owns: a loop killed with -9 leaves its browser running
+    until the service lifetime, and nothing else reaps it."""
+    listing = subprocess.run(['systemctl', '--user', 'list-units', '--type=service', '--type=scope', '--all',
+                              '--no-legend', '--plain', 'isolated-service-*'], capture_output=True, text=True, timeout=30)
+    units = [line.split()[0] for line in listing.stdout.splitlines() if line.strip()]
+    owned: set[str] = set()
+    for root in live_roots:
+        for status in Path(root).glob('tasks/*/scratch/services/*/status.json'):
+            try:
+                owned.add(json.loads(status.read_text()).get('unit') or '')
+            except (OSError, ValueError):
+                continue
+    stopped = []
+    for unit in units:
+        if unit in owned:
+            continue
+        subprocess.run(['systemctl', '--user', 'stop', unit], capture_output=True, timeout=30, check=False)
+        stopped.append(unit)
+    return stopped
+
+
 # ---------------------------------------------------------------- notify
 
 def notify(config: dict[str, Any], root: Path, title: str, body: str) -> None:
