@@ -91,10 +91,10 @@ def logo_mark(project: Path) -> None:
         'Know whether brand/marks/report.md states, per candidate, the readings above and the rationale, every number a reading on the map',  # 8
     ]
     deliverables = [
-        'brand/marks/<candidate>/mark.svg, mark-mono.svg, wordmark.svg and rationale.md for exactly three candidates, each a '
+        'brand/marks/<candidate>/`mark.svg`, `mark-mono.svg`, `wordmark.svg` and `rationale.md` for exactly three candidates, each a '
         'different idea drawn from content/name.md (the witness heap, the split coin, the watchtower are starting points, not '
         'a list to copy), hand-written SVG, no raster, no external reference',
-        'brand/marks/report.md: one section per candidate with its readings (needs 2 to 7) and rationale, and a closing table; '
+        '`brand/marks/report.md`: one section per candidate with its readings (needs 2 to 7) and rationale, and a closing table; '
         'the choice between candidates is not made here — a person makes it',
     ]
     brief(project, 'Logo mark candidates', 'Draw three candidate marks for Mizpah as hand-written SVG, prove each renders '
@@ -125,10 +125,10 @@ def palette(project: Path) -> None:
         'Know whether brand/palette.md documents every token with its role, both values and the pairs it may be used in',        # 8
     ]
     deliverables = [
-        'brand/tokens.css: the colour system as custom properties on :root with a dark scheme, named by role '
+        '`brand/tokens.css`: the colour system as custom properties on :root with a dark scheme, named by role '
         '(--bg, --fg, --accent, --muted, --surface, --border and what else is needed), no colour literal anywhere but here',
-        'brand/pairs.json: the text/background pairs the system allows, each with both schemes\' ratios',
-        'brand/palette.md: the system explained, every number a reading on the map',
+        '`brand/pairs.json`: the text/background pairs the system allows, each with both schemes\' ratios',
+        '`brand/palette.md`: the system explained, every number a reading on the map',
     ]
     brief(project, 'Colour system', 'Define the mizpah.ai colour tokens for light and dark, prove every allowed text/'
           'background pair clears AA, and document the system.', needs, deliverables, budget=250,
@@ -153,11 +153,11 @@ def type_system(project: Path) -> None:
         'Know whether brand/type.md documents the scale, the families, the sizes at each step and the measures, every number a reading on the map',  # 7
     ]
     deliverables = [
-        'brand/type.css: the type system as custom properties and element rules (h1 to h4, p, small, code), one display face '
+        '`brand/type.css`: the type system as custom properties and element rules (h1 to h4, p, small, code), one display face '
         'and one text face or one family with two weights, sizes from a named ratio',
-        'brand/type-sample.html: a page using brand/type.css and brand/tokens.css (copy it from the palette drill\'s result '
+        '`brand/type-sample.html`: a page using brand/type.css and brand/tokens.css (copy it from the palette drill\'s result '
         'if present, else define minimal tokens) showing every level with real content from content/product.md',
-        'brand/type.md: the system explained, every number a reading on the map',
+        '`brand/type.md`: the system explained, every number a reading on the map',
     ]
     brief(project, 'Type system', 'Define the mizpah.ai type scale and faces, render a sample, and prove the measures.',
           needs, deliverables, budget=250, notes='Measure (60-75 characters) is the constraint that matters most (content/voice.md).',
@@ -178,9 +178,9 @@ def social_card(project: Path) -> None:
         'Know whether the card states the name and the one-line description from content/product.md verbatim',              # 5
     ]
     deliverables = [
-        'brand/social/card.html with its CSS inline or in brand/social/card.css: the Open Graph card, 1200 by 630, using '
+        '`brand/social/card.html` with its CSS inline or in brand/social/card.css: the Open Graph card, 1200 by 630, using '
         'brand tokens and type if present under brand/, the name, the mark if present, and one line',
-        'brand/social/card.png: the card rendered by headless chromium at exactly 1200 by 630',
+        '`brand/social/card.png`: the card rendered by headless chromium at exactly 1200 by 630',
     ]
     brief(project, 'Social card', 'Make the 1200 by 630 Open Graph card for mizpah.ai from the brand and prove its dimensions '
           'and contrast.', needs, deliverables, budget=150, notes='The PNG is a reading of the HTML; the HTML is the source.',
@@ -251,9 +251,9 @@ def headline(project: Path) -> None:
         'Know whether copy/headlines.md shows every candidate with its readings and a one-line note on what it leads with',        # 7
     ]
     deliverables = [
-        'copy/headlines.json: ten candidates, each {"headline": ..., "subhead": ..., "leads_with": ...}, headlines at most 60 '
+        '`copy/headlines.json`: ten candidates, each {"headline": ..., "subhead": ..., "leads_with": ...}, headlines at most 60 '
         'characters, subheads at most 140, from content/product.md and content/name.md, no banned word',
-        'copy/headlines.md: the candidates with their readings (needs 2 to 6) and a closing table; the choice is a person\'s',
+        '`copy/headlines.md`: the candidates with their readings (needs 2 to 6) and a closing table; the choice is a person\'s',
     ]
     brief(project, 'Headline candidates', 'Write ten headline and subhead pairs for mizpah.ai that carry the most of what '
           'matters in the fewest words, invent nothing, and report the readings so a person can choose.', needs, deliverables,
@@ -278,10 +278,10 @@ def pitch_copy(project: Path) -> None:
         'Know whether copy/home.md documents its readings in copy/home-readings.md, every number a reading on the map',          # 9
     ]
     deliverables = [
-        'copy/home.md: the home page copy — under 350 words, four sections in order (what it is, how it works, the evidence, '
+        '`copy/home.md`: the home page copy — under 350 words, four sections in order (what it is, how it works, the evidence, '
         'how to start), every fact from content/facts.json carried, every number from content/evidence.json with its source, '
         'no banned word, no sentence that is not traceable to content/',
-        'copy/home-readings.md: the readings (needs 1 to 8) as a table',
+        '`copy/home-readings.md`: the readings (needs 1 to 8) as a table',
     ]
     brief(project, 'Home page copy', 'Write the mizpah.ai home page copy that carries every fact that matters in under 350 '
           'words with nothing invented, and prove it by readings.', needs, deliverables, budget=250,

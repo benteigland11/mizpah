@@ -581,3 +581,46 @@ the wcag contrast ratio of body text against the page background in the dark sch
 the wcag contrast ratios of the accent against both scheme backgrounds and their lowest value are measured 
 the measured number of distinct hues  rounded to 15 degrees  used by non neutral tokens is known 
 every text background pair listed in brand pairs json clears 4 5 1 in both light and dark schemes 
+Measure qualifying count and cheapest catalog part
+json meeting spec cost lowest part catalog grams mass parts
+the number of parts in catalog json meeting spec json is not known 
+the id of the lowest cost part in catalog json meeting spec json is not known 
+the cost of the lowest cost part meeting spec json is not known 
+the mass in grams of the lowest cost part meeting spec json is not known 
+Verify colour literals are confined to brand/tokens.css
+brand colour containing file literals only system tokens
+brand tokens css is the only file containing colour literals for the colour system 
+Build the hand-written docs page
+agrees content docs hand headings html index page prose site written
+ site index html  is the hand written docs page and agrees with the headings and prose in  content docs md  
+Write pick.json with the selected part, cost, and mass
+cheapest contain equal json matching part pick cost mass
+pick json must contain a part value equal to the known cheapest matching part id 
+pick json must contain a cost value equal to the known cheapest matching part cost 
+pick json must contain a mass g value equal to the known cheapest matching part mass g 
+Draw three distinct Mizpah candidate mark sets
+candidate content deliverable describing distinct does idea name paragraph prove rationale
+the deliverable does not yet prove that each candidate has a one paragraph rationale md describing its distinct idea from content name md 
+Install and validate the graduated page readings instrument
+exists frontend headless instrument page python readings validates
+the headless page readings instrument exists at  cg frontend headless page cli python  and validates 
+Measure the rendered docs page
+page html index rendered site body text appears content contrast docs elements
+the number of   h2   elements in  site index html  is not known 
+it is not known whether every heading in  content docs md  appears in  site index html  in the same order 
+the total page weight of  site index html  and every file it references is not known 
+it is not known whether the page renders without horizontal overflow at 375 px 
+the rendered page s body text contrast is not known 
+the rendered page s mean prose line length is not known 
+Build the colour token file and measure its declarations and hues
+tokens brand colour color custom dark prefers properties root scheme under contains
+the number of colour tokens declared as css custom properties on  root in brand tokens css is not known 
+the number of tokens with a value under prefers color scheme  dark in brand tokens css is not known 
+the number of distinct hues  rounded to 15 degrees  used by non neutral tokens is not known 
+ brand tokens css  declares the required colour tokens as css custom properties on   root  
+ brand tokens css  contains a dark scheme value for the colour system under  prefers color scheme  dark  
+Audit candidate directories and SVG constraints
+mark brand candidate directories external file image largest marks raster reference script
+the number of candidate mark directories under brand marks  is not known 
+it is not known whether every mark svg is valid svg with a viewbox  no raster image  no external reference  and no script 
+the file size of the largest mark svg is not known 

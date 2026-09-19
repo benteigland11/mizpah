@@ -698,6 +698,7 @@ def task_gate(config: dict[str, Any], project: Path, task: dict[str, Any], map_i
         project_unknown = read_unknown(project, unknown_id)
         if project_unknown.get('status') != 'resolved':
             problems.append('project unknown '+unknown_id+' is '+str(project_unknown.get('status')))
+    problems += vacuous_truth_problems(project, unknown_ids)
     resynced = readopt_retaken(config, project, map_id, unknown_ids)
     if resynced:
         (root/'resynced.jsonl').open('a').write(json.dumps(dict(at=time.time(), readopted=resynced))+'\n') if root else None
@@ -835,6 +836,34 @@ def artifact_agreement_problems(project: Path, unknown_ids: list[str]) -> list[s
                             'artifact measures a different quantity than the known (the same name at another mass, '
                             'another point, another unit), do not bend it to the map: block the task naming both '
                             'quantities, so the brief can be made to name them apart')
+    return problems
+
+
+def vacuous_truth_problems(project: Path, unknown_ids: list[str]) -> list[str]:
+    """'Every mark.svg is valid' read true over zero files (logo_mark3): a universal that is true because there
+    is nothing to check is a reading of nothing. When a boolean whose claim quantifies over things reads true and a
+    number known of the same task reads 0, the true is refused with both named."""
+    problems: list[str] = []
+    zeros = []
+    for uid in unknown_ids:
+        known = read_known(project, uid)
+        if known and (known.get('stats') or {}).get('kind') == 'number' and extract_known_value(known) == 0:
+            zeros.append(uid)
+    if not zeros:
+        return problems
+    for uid in unknown_ids:
+        try:
+            unknown = read_unknown(project, uid)
+        except (OSError, ValueError):
+            continue
+        known = read_known(project, uid)
+        if not known or unknown.get('type') != 'boolean' or extract_known_value(known) is not True:
+            continue
+        if re.search(r'\b(every|all|each|no)\b', str(unknown.get('claim') or '').lower()):
+            problems.append(uid+' reads true ("'+str(unknown.get('claim') or '')[:80]+'") while '+', '.join(zeros)+' reads 0: a '
+                            'universal over nothing is vacuous, not a reading. The things it quantifies over do not exist yet; '
+                            'the true is refused until they do (or the unknown is about their absence, in which case say so '
+                            'and block naming the deliverable that builds them)')
     return problems
 
 
