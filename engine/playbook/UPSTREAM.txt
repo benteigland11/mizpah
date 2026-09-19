@@ -1,0 +1,1 @@
+diverged: a step may not link its own procedure (add-step, edit-step refuse; validate reports) — a self-link is a loop, "see step N" is prose

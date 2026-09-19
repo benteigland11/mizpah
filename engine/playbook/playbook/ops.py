@@ -228,14 +228,19 @@ def _append_steps(
             raise ValueError(f"steps[{position}].do must be a non-empty string")
         linked = entry.get("procedure")
         if linked is not None:
-            _require_procedure(str(linked))
+            _require_procedure(str(linked), owner=str(updated.get("id") or ""))
         updated = widget.add_step(updated, title, do, after=cursor, procedure=str(linked) if linked else None)
         cursor = title.strip()
     return updated
 
 
-def _require_procedure(procedure_id: str) -> None:
-    """A linked step must point at a procedure that exists: a dangling link is a step nobody can walk."""
+def _require_procedure(procedure_id: str, owner: str = "") -> None:
+    """A linked step must point at a procedure that exists and is another one: a dangling link is a step nobody
+    can walk, and a self-link is a loop (a step that says "run this procedure" from inside it — drone-pack-sizing-probe
+    linked six of its own steps to itself, 2026-09-19). "See step N" is prose in `do`, not a link."""
+    if owner and procedure_id == owner:
+        raise ValueError(f"a step may not link to its own procedure {procedure_id!r}; a link runs another procedure "
+                         "as this step — refer to another step of this one in the step's text instead")
     if not store.procedure_path(procedure_id).is_file():
         raise ValueError(f"linked procedure {procedure_id!r} does not exist; search for its id or create it first")
 
@@ -322,17 +327,21 @@ def validate_procedure(procedure_id: str) -> dict[str, Any]:
     steps = document.get("steps")
     step_summaries = []
     dangling = []
+    self_links = []
     if isinstance(steps, list):
         for step in steps:
             if isinstance(step, dict):
                 step_summaries.append({"id": step.get("id"), "title": step.get("title"),
                                        **({"procedure": step["procedure"]} if step.get("procedure") else {})})
-                if step.get("procedure") and not store.procedure_path(str(step["procedure"])).is_file():
+                if step.get("procedure") and str(step["procedure"]) == str(document.get("id")):
+                    self_links.append(str(step.get("title")))
+                elif step.get("procedure") and not store.procedure_path(str(step["procedure"])).is_file():
                     dangling.append(str(step["procedure"]))
     return {
-        "valid": result.valid and not dangling,
+        "valid": result.valid and not dangling and not self_links,
         "errors": [{"path": err.path, "message": err.message} for err in result.errors]
-        + [{"path": "$.steps", "message": f"linked procedure {d!r} does not exist"} for d in dangling],
+        + [{"path": "$.steps", "message": f"linked procedure {d!r} does not exist"} for d in dangling]
+        + [{"path": "$.steps", "message": f"step {t!r} links to its own procedure; a link runs another procedure"} for t in self_links],
         "id": document.get("id"),
         "description": document.get("description"),
         "tags": document.get("tags", []),
@@ -392,7 +401,7 @@ def edit_step(
     target = store.procedure_path(procedure_id)
     document = read_document(target)
     if procedure:
-        _require_procedure(procedure)
+        _require_procedure(procedure, owner=str(document.get("id") or procedure_id))
     updated = widget.edit_step(document, title, new_title=new_title, do=do, procedure=procedure)
     write_document(target, updated)
     marker = (new_title or title).strip()

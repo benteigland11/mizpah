@@ -265,3 +265,21 @@ def test_a_step_can_link_another_procedure_and_open_renders_the_walk(tmp_path: P
     assert main(["edit-step", "build-page", "--title", "Gutters", "--procedure", "measure-gutters"]) == 0
     procedure_path("measure-gutters").unlink()
     assert main(["validate", "build-page"]) == 2
+
+
+def test_a_step_may_not_link_its_own_procedure(tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    assert main(["create", "size-pack", "--title", "Size a pack", "--description", "d", "--tags", "power"]) == 0
+    assert main(["add-step", "size-pack", "--title", "Mass", "--do", "Compute the mass."]) == 0
+    # Refused at add and at edit time.
+    assert main(["add-step", "size-pack", "--title", "Again", "--do", "See step 1.", "--procedure", "size-pack"]) == 1
+    assert "link to its own procedure" in capsys.readouterr().out
+    assert main(["edit-step", "size-pack", "--title", "Mass", "--procedure", "size-pack"]) == 1
+    assert "link to its own procedure" in capsys.readouterr().out
+    # A self-link written by hand shows up in validate.
+    path = procedure_path("size-pack")
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["steps"][0]["procedure"] = "size-pack"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    assert main(["validate", "size-pack"]) != 0
+    assert "links to its own procedure" in capsys.readouterr().out
