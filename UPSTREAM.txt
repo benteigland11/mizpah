@@ -98,3 +98,9 @@ diverged:
   n>=3 unanimous, high at n>=5 unanimous + two methods agreeing; corroboration compares per-method modes;
   `extract_value` → mode. Reason: three briefs on 2026-09-19 needed a name-valued reading and the controller could
   only mint it as a number, which the ladder rightly refused (the worker blocked instead of encoding it).
+- harness: capability detection — ModelClient.capabilities() reads llama.cpp /props (modalities, chat-template caps,
+  context); the focused session stores it at create and re-reads on every open; the `read` tool shows an image
+  file (png/jpg/gif/webp, own byte bound) only when vision is loaded and says so in its description, else refuses
+  with "measure it with a tool"; an image is a user message of text+image parts appended at the turn boundary,
+  counted as a fixed 1,600-token allowance (template endpoint renders strings), and only the latest image stays in
+  the wire view. persistent-model-session 1.8.0 → 1.9.0, bp-focused-agent-session 0.25.0 → 0.26.0

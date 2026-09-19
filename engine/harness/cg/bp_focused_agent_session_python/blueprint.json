@@ -2,7 +2,7 @@
   "id": "bp-focused-agent-session-python",
   "name": "focused-agent-session",
   "language": "python",
-  "version": "0.25.0",
+  "version": "0.26.0",
   "description": "Persistent worker sessions with agentic controller investigation, full-project document memory, disposable sandbox checks and durable recovery. Bounded worker file actions: write and edit tools with exact-occurrence edits and a per-call argument bound with feedback.",
   "tags": [
     "agent-session",
@@ -14,7 +14,7 @@
   "dependencies": [
     {
       "id": "backend-persistent-model-session-python",
-      "version": "1.7.0"
+      "version": "1.9.0"
     },
     {
       "id": "infra-sandboxed-shell-execution-python",

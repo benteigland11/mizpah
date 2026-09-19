@@ -1453,3 +1453,62 @@ def test_a_generation_block_is_lifted_on_reopen_with_a_fresh_window(tmp_path):
     assert reopened.run()['status'] == 'complete'
     events = [json.loads(line) for line in (tmp_path/'session'/'events'/'session.jsonl').read_text().splitlines()]
     assert any(e['event_type'] == 'generation_block_reset' for e in events) and any(e['event_type'] == 'rollover_forced' for e in events)
+
+
+class ImageReadTransport:
+    """Scripted worker: write a png, read it, then finish; `vision` decides what the server reports."""
+
+    def __init__(self, vision):
+        self.vision = vision
+        self.requests = []
+        self.script = [('write', dict(path='shot.png', content='not really a png')), ('read', dict(path='shot.png'))]
+        self.step = 0
+
+    def props(self):
+        return {'modalities': {'vision': self.vision}}
+
+    def __call__(self, path, payload, **kwargs):
+        if path == '/template':
+            assert all(isinstance(m['content'], str) for m in payload['messages'])
+            value = dict(prompt='x'*100)
+        elif path == '/tokenize':
+            value = dict(tokens=[1]*len(payload['content']))
+        else:
+            self.requests.append(deepcopy(payload))
+            if self.step < len(self.script):
+                name, args = self.script[self.step]; self.step += 1
+                value = response('Step '+str(self.step), [dict(id='img-'+str(self.step), type='function',
+                    function=dict(name=name, arguments=json.dumps(args)))])
+            else:
+                value = response('Verified final report.')
+        return WireResponse(200, json.dumps(value), 0)
+
+
+def test_read_shows_an_image_only_to_a_model_that_can_see(tmp_path):
+    settings, _, shell, controller, _, _ = setup(tmp_path, total=0, enabled=False, rollover=False)
+    # An image costs a fixed allowance at the count; the window must have room for one.
+    settings = replace(settings, worker_tools=('bash', 'read', 'write'),
+                       session_policy=replace(settings.session_policy, context_capacity=20000, rollover_threshold=10000))
+    endpoint = EndpointConfig('http://example.invalid', 5, 1000000, {}, '/complete', '/template', '/tokenize', False, True)
+    for vision in (True, False):
+        transport = ImageReadTransport(vision)
+        item = FocusedSession.create(tmp_path/('session-'+str(vision)), settings,
+                                     worker=ModelClient(endpoint, transport=transport), shell=shell, controller=controller)
+        assert item.state['capabilities']['vision'] is vision
+        read_description = next(t for t in transport_tools(item) if t['function']['name'] == 'read')['function']['description']
+        assert ('shown to you as an image' in read_description) is vision
+        result = item.run()
+        assert result['status'] == 'complete'
+        last = transport.requests[-1]['messages']
+        outcome = json.loads([m for m in last if m.get('role') == 'tool'][-1]['content'])
+        shown = [m for m in last if m.get('role') == 'user' and isinstance(m.get('content'), list)]
+        if vision:
+            assert outcome['status'] == 'ok' and outcome['image'] is True and outcome['mime'] == 'image/png'
+            assert len(shown) == 1 and shown[0]['content'][1]['image_url']['url'].startswith('data:image/png;base64,')
+            assert any(getattr(e, 'event_type', None) == 'image_shown' for e in item.journal.read_strict('session'))
+        else:
+            assert outcome['status'] == 'error' and 'cannot see images' in outcome['error'] and not shown
+
+
+def transport_tools(item):
+    return item.session.tools

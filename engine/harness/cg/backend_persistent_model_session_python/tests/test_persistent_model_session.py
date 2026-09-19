@@ -6,7 +6,7 @@ from urllib.error import HTTPError, URLError
 import pytest
 
 from src.persistent_model_session import (
-    DirectJsonTransport, EndpointConfig, ModelClient, ModelTransportError,
+    IMAGE_TOKEN_ALLOWANCE, DirectJsonTransport, EndpointConfig, ModelClient, ModelTransportError,
     PersistentSession, RejectedGeneration, SessionPolicy, WireResponse, parse_turn, project_completed_arguments,
     wire_messages,
 )
@@ -388,3 +388,41 @@ def test_argument_projection_disabled_by_default_and_handles_shapes():
     assert shown.startswith('first line\n[transcript note') and '(3 lines)' in shown and 'second line' not in shown
     assert project_completed_arguments(messages, None) == messages
     with pytest.raises(ValueError): project_completed_arguments(messages, -1)
+
+
+def test_capabilities_read_from_transport_props_and_default_text_only():
+    class Transport:
+        def __call__(self, path, body):
+            return WireResponse(200, '{}', .1)
+        def props(self):
+            return {'modalities': {'vision': True, 'audio': False}, 'chat_template_caps': {'supports_parallel_tool_calls': True},
+                    'model_path': '/m.gguf', 'default_generation_settings': {'n_ctx': 61440}}
+    caps = ModelClient(config(), transport=Transport()).capabilities()
+    assert caps['vision'] is True and caps['audio'] is False and caps['context'] == 61440 and caps['error'] is None
+    assert caps['template']['supports_parallel_tool_calls'] is True
+    # No /props behind the endpoint: text-only, never an exception.
+    blind = ModelClient(config(), transport=lambda path, body: WireResponse(200, '{}', .1)).capabilities(timeout_seconds=0.2)
+    assert blind['vision'] is False and blind['error']
+
+
+def test_images_count_as_an_allowance_and_only_the_latest_stays_in_view():
+    def transport(path, body):
+        if path == '/template':
+            # Content parts must never reach the template endpoint: it renders strings.
+            assert all(isinstance(m['content'], str) for m in body['messages'])
+            return WireResponse(200, json.dumps({'prompt': 'rendered'}), .1)
+        return WireResponse(200, json.dumps({'tokens': [1, 2]}), .1)
+    item = session()
+    item.append_image('read a.png (image):', 'image/png', 'AAAA')
+    item.append_guidance('what do you see')
+    item.append_image('read b.png (image):', 'image/png', 'BBBB')
+    counted = ModelClient(config(), transport=transport).count(item.payload(), 'count')
+    assert counted['images'] == 1 and counted['tokens'] == 2+IMAGE_TOKEN_ALLOWANCE   # the wire view holds one image
+    view = item.payload()['messages']
+    with_image = [m for m in view if isinstance(m.get('content'), list)]
+    assert len(with_image) == 2
+    assert with_image[0]['content'][1]['type'] == 'text' and 'no longer in view' in with_image[0]['content'][1]['text']
+    assert with_image[1]['content'][1]['type'] == 'image_url' and with_image[1]['content'][1]['image_url']['url'].endswith('BBBB')
+    # Stored messages keep both images: the wire view is a projection.
+    assert sum(1 for m in item.messages if isinstance(m.get('content'), list)
+               and m['content'][1]['type'] == 'image_url') == 2

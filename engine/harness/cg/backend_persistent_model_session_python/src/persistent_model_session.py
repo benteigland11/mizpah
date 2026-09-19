@@ -22,11 +22,12 @@ class EndpointConfig:
     tokenize_path: str
     tokenizer_add_special: bool
     tokenizer_parse_special: bool
+    props_path: str = '/props'   # llama.cpp: modalities, chat-template capabilities, context size
 
     def __post_init__(self) -> None:
         if not self.base_url.startswith(('http://', 'https://')) or self.timeout_seconds <= 0 or self.maximum_response_bytes <= 0:
             raise ValueError('Invalid endpoint or transport limits')
-        if any(not path.startswith('/') for path in (self.completion_path, self.template_path, self.tokenize_path)):
+        if any(not path.startswith('/') for path in (self.completion_path, self.template_path, self.tokenize_path, self.props_path)):
             raise ValueError('Endpoint paths must begin with a slash')
 
 
@@ -129,7 +130,54 @@ class ModelClient:
     def complete(self, payload: dict[str, Any], purpose: str, *, timeout_seconds: float | None = None) -> dict[str, Any]:
         return self.post(self.config.completion_path, payload, purpose, timeout_seconds=timeout_seconds)
 
+    def capabilities(self, *, timeout_seconds: float = 10.0) -> dict[str, Any]:
+        """What the serving model can do, read from the server, never assumed from its name.
+
+        llama.cpp's /props reports `modalities` (vision/audio/video: whether a projector is loaded) and
+        `chat_template_caps`. A server without the endpoint yields empty modalities: the session then
+        treats the model as text-only, which is the safe reading."""
+        request_id = str(uuid4())
+        url = self.config.base_url.rstrip('/')+self.config.props_path
+        if self.observer:
+            self.observer('model_request', dict(request_id=request_id, path=self.config.props_path,
+                                                purpose='capabilities', body=None, timeout_seconds=timeout_seconds))
+        started = time.monotonic()
+        try:
+            # A transport that answers property reads itself (tests, other backends) is asked first.
+            props_call = getattr(self.transport, 'props', None)
+            if callable(props_call):
+                props, status, raw = props_call(), 200, ''
+            else:
+                with urlopen(Request(url, headers=dict(self.config.headers)), timeout=timeout_seconds) as response:
+                    status, raw = response.status, response.read(self.config.maximum_response_bytes).decode('utf-8', errors='replace')
+                props = json.loads(raw)
+            error = None if isinstance(props, dict) else 'props is not an object'
+        except (OSError, URLError, TimeoutError, ValueError) as exc:
+            status, raw, props, error = None, '', {}, f'{type(exc).__name__}: {exc}'
+        if self.observer:
+            self.observer('model_response', dict(request_id=request_id, purpose='capabilities', status=status,
+                                                 body=raw[:4000], elapsed_seconds=time.monotonic()-started, error=error))
+        modalities = props.get('modalities') if isinstance(props, dict) else None
+        return dict(vision=bool((modalities or {}).get('vision')), audio=bool((modalities or {}).get('audio')),
+                    video=bool((modalities or {}).get('video')),
+                    template=dict(props.get('chat_template_caps') or {}) if isinstance(props, dict) else {},
+                    model=props.get('model_path') if isinstance(props, dict) else None,
+                    context=(props.get('default_generation_settings') or {}).get('n_ctx') if isinstance(props, dict) else None,
+                    error=error)
+
     def count(self, payload: dict[str, Any], purpose: str) -> dict[str, Any]:
+        # The template endpoint renders text; an image part is counted as a fixed allowance instead
+        # (a projector's token count depends on resolution and is not exposed), so a prompt with images
+        # is over-counted rather than under-counted at the rollover.
+        images = 0
+        countable = deepcopy(payload)
+        for message in countable.get('messages') or []:
+            if isinstance(message.get('content'), list):
+                parts = message['content']
+                images += sum(1 for part in parts if isinstance(part, dict) and part.get('type') == 'image_url')
+                message['content'] = ' '.join(str(part.get('text') or '') for part in parts
+                                              if isinstance(part, dict) and part.get('type') == 'text') or '[image]'
+        payload = countable
         rendered = self.post(self.config.template_path, payload, purpose+':template')
         prompt = rendered.get('prompt')
         if not isinstance(prompt, str):
@@ -140,7 +188,12 @@ class ModelClient:
         tokens = tokenized.get('tokens')
         if not isinstance(tokens, list) or any(type(token) is not int for token in tokens):
             raise ModelTransportError('Tokenizer did not return integer tokens')
-        return dict(prompt=prompt, tokens=len(tokens))
+        return dict(prompt=prompt, tokens=len(tokens)+images*IMAGE_TOKEN_ALLOWANCE, **(dict(images=images) if images else {}))
+
+
+# One image at the resolutions a screenshot takes (≈1280×800) costs a Qwen-family projector about
+# 1,300 tokens; the allowance errs high so the rollover fires early, never late.
+IMAGE_TOKEN_ALLOWANCE = 1600
 
 
 REASONING_RETENTION = ('all', 'latest', 'none')
@@ -157,6 +210,14 @@ def wire_messages(messages: list[dict[str, Any]], retention: str) -> list[dict[s
     if retention not in REASONING_RETENTION:
         raise ValueError('reasoning_retention must be one of '+', '.join(REASONING_RETENTION))
     projected = deepcopy(messages)
+    # An image is shown once, in the message that carried it, and thereafter read through what the
+    # model said about it: every earlier image part becomes a note, so the window holds one image.
+    with_images = [i for i, m in enumerate(projected) if isinstance(m.get('content'), list)
+                   and any(isinstance(p, dict) and p.get('type') == 'image_url' for p in m['content'])]
+    for index in with_images[:-1]:
+        projected[index]['content'] = [p if not (isinstance(p, dict) and p.get('type') == 'image_url')
+                                       else dict(type='text', text='[an image was shown here earlier; it is no longer in view]')
+                                       for p in projected[index]['content']]
     if retention == 'all':
         return projected
     last = next((index for index in range(len(projected)-1, -1, -1)
@@ -419,6 +480,16 @@ class PersistentSession:
         self.messages = fresh+[dict(role='user', content=self.policy.resume_prefix+'\n'+json.dumps(resumed, ensure_ascii=False))]
         self.window_index += 1
         return dict(window_index=self.window_index, old_messages=old, new_messages=deepcopy(self.messages), handoff=handoff)
+
+    def append_image(self, note: str, mime: str, data_base64: str) -> None:
+        """Show the model an image the worker asked to read: a user message of a text part and an image part.
+
+        It is appended at a tool boundary like guidance; the note says which file it is, so the transcript
+        reads the same whether or not the image is still in the wire view."""
+        if self.pending_tools or not note.strip() or not data_base64:
+            raise ValueError('An image requires a completed tool boundary, a note and data')
+        self.messages.append(dict(role='user', content=[dict(type='text', text=note),
+                                                        dict(type='image_url', image_url=dict(url='data:'+mime+';base64,'+data_base64))]))
 
     def append_guidance(self, content: str, *, standing: bool = False) -> None:
         if self.pending_tools or not content.strip():

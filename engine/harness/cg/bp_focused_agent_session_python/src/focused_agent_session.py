@@ -96,6 +96,8 @@ class SessionSettings:
     maximum_write_characters: int | None = None
     maximum_edit_characters: int | None = None
     maximum_read_lines: int = 200
+    # An image the worker reads is shown whole (a projector needs the pixels); this bounds the request body.
+    maximum_image_bytes: int = 2*1024*1024
     # When false, write only creates files or fills an emptied one: replacing a file's
     # content in one call is a block replacement, which the method forbids.
     write_existing_files: bool = True
@@ -213,10 +215,16 @@ def edit_tool(bounded: bool = False, requires_read: bool = False) -> dict[str, A
             required=['path', 'old_text', 'new_text'], additionalProperties=False)))
 
 
-def read_tool() -> dict[str, Any]:
+IMAGE_TYPES = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp'}
+
+
+def read_tool(vision: bool = False) -> dict[str, Any]:
     return dict(type='function', function=dict(name='read',
         description='Read numbered lines of one UTF-8 workspace file, starting at a 1-based line offset, '
-                    'at most limit lines. Use grep -n first to find the region, then read just that range.',
+                    'at most limit lines. Use grep -n first to find the region, then read just that range.'
+                    + (' A .png/.jpg/.gif/.webp path is shown to you as an image instead (one at a time; '
+                       'an earlier image leaves view when a new one is read).' if vision else
+                       ' Image files cannot be shown to you (this model has no vision); measure them with a tool.'),
         parameters=dict(type='object', properties=dict(path=dict(type='string'),
             offset=dict(type='integer', minimum=1), limit=dict(type='integer', minimum=1)),
             required=['path'], additionalProperties=False)))
@@ -225,10 +233,13 @@ def read_tool() -> dict[str, Any]:
 WORKER_TOOLS = dict(bash=bash_tool, read=read_tool, write=write_tool, edit=edit_tool)
 
 
-def worker_tools(names: tuple[str, ...], settings: 'SessionSettings | None' = None) -> list[dict[str, Any]]:
+def worker_tools(names: tuple[str, ...], settings: 'SessionSettings | None' = None,
+                 capabilities: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     tools = []
     for name in names:
-        if name == 'write' and settings is not None:
+        if name == 'read':
+            tools.append(read_tool(vision=bool((capabilities or {}).get('vision'))))
+        elif name == 'write' and settings is not None:
             tools.append(write_tool(create_only=not settings.write_existing_files,
                                     bounded=settings.maximum_write_characters is not None))
         elif name == 'edit' and settings is not None:
@@ -321,6 +332,14 @@ def _empty_worker_response(response: dict[str, Any]) -> bool:
             and not (message.get('tool_calls') or (message.get('content') or '').strip()))
 
 
+def _capabilities(client: ModelClient) -> dict[str, Any]:
+    """Read from the server when the client can; a client without the call (tests, other backends) is text-only."""
+    probe = getattr(client, 'capabilities', None)
+    if not callable(probe):
+        return dict(vision=False, audio=False, video=False, template={}, model=None, context=None, error='no probe')
+    return probe()
+
+
 def _identity(client: ModelClient | None) -> dict[str, Any] | None:
     if client is None:
         return None
@@ -372,12 +391,14 @@ class FocusedSession:
             if settings.reference is not None and controller is None:
                 raise ValueError('An enabled controller requires its own explicit client binding')
             result.settings = settings
+            capabilities = _capabilities(worker)
             result.session = PersistentSession([
                 dict(role='system', content=settings.worker_system),
                 dict(role='user', content=settings.assignment),
-            ], worker_tools(settings.worker_tools, settings), settings.generation, settings.session_policy)
+            ], worker_tools(settings.worker_tools, settings, capabilities), settings.generation, settings.session_policy)
             result.progress = ControllerProgress(settings.review_policy, initial_project_document)
             result.state = dict(schema=2, settings=asdict(settings), worker_identity=_identity(worker),
+                capabilities=capabilities,
                 controller_identity=_identity(controller) if settings.reference is not None else None,
                 shell_config=_shell_identity(shell), phase='worker', pending_io=None,
                 workspace=result._put_workspace(initial_workspace), input_cursor=0,
@@ -398,6 +419,14 @@ class FocusedSession:
                     or result.state['controller_identity'] != (
                         _identity(controller) if result.settings.reference is not None else None)):
                 raise ValueError('Reopen requires the saved model and shell bindings')
+            # The serving model may have changed behind the same endpoint (a projector loaded, or not):
+            # capabilities are re-read on every open and the read tool's contract follows them.
+            capabilities = _capabilities(worker)
+            if capabilities != result.state.get('capabilities'):
+                result.state['capabilities'] = capabilities
+                result.session.tools = worker_tools(result.settings.worker_tools, result.settings, capabilities)
+                result._event('capabilities', capabilities)
+                result._save()
         return result
 
     @contextmanager
@@ -559,6 +588,10 @@ class FocusedSession:
         self.progress.observe(self.state['active_turn'])
         self._event('worker_turn', deepcopy(self.state['active_turn']))
         self.state['active_turn'] = None
+        image = self.state.pop('pending_image', None)
+        if image:
+            self.session.append_image('read '+image['path']+' (image):', image['mime'], image['data'])
+            self._event('image_shown', dict(path=image['path'], mime=image['mime'], bytes=len(image['data'])*3//4))
         final = self.state['proposed_final'] is not None
         review = self.settings.reference is not None and (
             self.progress.due() or (final and self.settings.review_on_completion))
@@ -674,9 +707,26 @@ class FocusedSession:
                 if name == 'read':
                     if not {'path'} <= set(args) <= {'path', 'offset', 'limit'} or not isinstance(args['path'], str):
                         raise ValueError('read requires a path string and optional offset and limit integers')
-                    limit = min(int(args.get('limit', self.settings.maximum_read_lines)), self.settings.maximum_read_lines)
-                    report = read_workspace_lines(self.workspace(), args['path'], offset=int(args.get('offset', 1)),
-                        limit=limit, **options)
+                    mime = IMAGE_TYPES.get(Path(args['path']).suffix.lower())
+                    if mime is not None:
+                        if not (self.state.get('capabilities') or {}).get('vision'):
+                            raise ValueError('this model cannot see images (no vision modality is loaded on the server); '
+                                             'measure the image with a tool instead of reading it')
+                        data = read_workspace_file(self.workspace(), args['path'], **options)
+                        if len(data) > self.settings.maximum_image_bytes:
+                            raise ValueError('image is larger than '+str(self.settings.maximum_image_bytes)+' bytes; '
+                                             'downscale or crop it first')
+                        # The image itself is shown at the turn boundary, as a user message the wire view keeps
+                        # only the latest of; the tool result records what was shown.
+                        self.state['pending_image'] = dict(path=args['path'], mime=mime,
+                                                           data=base64.b64encode(data).decode('ascii'))
+                        report = dict(path=args['path'], image=True, mime=mime, bytes=len(data),
+                                      note='shown to you after this tool batch')
+                        limit = None
+                    else:
+                        limit = min(int(args.get('limit', self.settings.maximum_read_lines)), self.settings.maximum_read_lines)
+                        report = read_workspace_lines(self.workspace(), args['path'], offset=int(args.get('offset', 1)),
+                            limit=limit, **options)
                     # Remember what the worker saw: an edit must anchor on a read of the current content.
                     self.state.setdefault('read_hashes', {})[args['path']] = hashlib.sha256(
                         read_workspace_file(self.workspace(), args['path'], **options)).hexdigest()
