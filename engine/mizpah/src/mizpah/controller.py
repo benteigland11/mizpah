@@ -249,6 +249,9 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
 
 def model_client(config: dict[str, Any]) -> ModelClient:
     spec = config['controller']
+    if spec.get('provider') == 'subscription':
+        from mizpah.providers import hosted_model_client
+        return hosted_model_client(spec, config)
     endpoint = EndpointConfig(**spec['endpoint'])
     if spec.get('provider', 'direct_json') == 'llama_client':
         return llama_model_client(endpoint, known_issues=spec.get('known_issues'))

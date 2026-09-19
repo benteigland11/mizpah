@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import time
 from typing import Any
+import urllib.error
 import urllib.request
 
 
@@ -31,9 +32,13 @@ def settings(config: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------- health
 
 def model_up(base_url: str, timeout: float = 5.0) -> bool:
+    """llama.cpp answers /health with 200 (ready) or 503 (loading); a hosted API has no /health and
+    answers 404 or 401, which still means the host is reachable, and that is the question here."""
     try:
         with urllib.request.urlopen(base_url.rstrip('/')+'/health', timeout=timeout) as response:
             return response.status == 200
+    except urllib.error.HTTPError as error:
+        return error.code != 503
     except OSError:
         return False
 

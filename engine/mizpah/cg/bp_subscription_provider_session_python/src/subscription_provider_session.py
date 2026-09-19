@@ -1,0 +1,437 @@
+"""A signed-in LLM provider as one object: login, status, logout, transport.
+
+The composition: a ``ProviderProfile`` says which sign-in flow and wire
+dialect a provider uses; the OAuth leaves run the flow; the credential store
+keeps the result owner-only with quarantine; the refresh policy keeps it
+fresh; the codec lets a Chat-Completions caller talk to a Responses-only
+endpoint; the estimator stands in for a tokenizer the provider does not
+expose. ``transport()`` returns the one callable a ``ModelClient`` takes.
+
+HTTP is injected through ``HttpCall`` so tests and examples never touch the
+network; ``urllib_http`` is the stdlib default for real use.
+"""
+
+from __future__ import annotations
+
+import json
+import time
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Callable, Mapping
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+
+from cg.backend_chat_responses_codec_python.src.chat_responses_codec import (
+    chat_to_responses,
+    fold_sse,
+    responses_to_chat,
+)
+from cg.backend_hosted_token_estimator_python.src.hosted_token_estimator import HostedTokenEstimator
+from cg.backend_llm_provider_profiles_python.src.llm_provider_profiles import (
+    ApiKeyAuth,
+    DeviceCodeFlow,
+    OAuthPkceFlow,
+    ProviderProfile,
+)
+from cg.infra_local_http_server_python.src.single_request_capture import SingleRequestCapture
+from cg.security_credential_store_python.src.credential_store import (
+    CredentialRecord,
+    CredentialStore,
+    QuarantinedCredential,
+)
+from cg.security_jwt_claims_unverified_python.src.jwt_claims_unverified import (
+    MalformedJwt,
+    namespaced_claim,
+    unverified_claims,
+)
+from cg.universal_bearer_refresh_policy_python.src.bearer_refresh_policy import (
+    BearerSession,
+    RefreshFailed,
+    RefreshPolicy,
+    classify_refresh_failure,
+)
+from cg.universal_oauth_device_code_python.src.oauth_device_code import (
+    DeviceCodeConfig,
+    DeviceFlowError,
+    RequestDescriptor,
+    run_device_flow,
+)
+from cg.universal_oauth_pkce_python.src.oauth_pkce import (
+    OAuthPkceConfig,
+    build_authorization_url,
+    build_refresh_token_request,
+    build_token_exchange_request,
+    create_pkce_authorization,
+    parse_oauth_callback,
+)
+from cg.universal_oauth_token_response_python.src.oauth_token_response import (
+    OAuthTokenRecord,
+    normalize_oauth_token_response,
+)
+from cg.universal_open_in_browser_python.src.open_in_browser import open_url
+
+__all__ = [
+    # the feature
+    "ProviderSession", "ProviderTransport", "LoginPrompt", "LoginError", "NotSignedIn",
+    "HttpResponse", "HttpCall", "WireResponse", "urllib_http",
+    # the inputs a consumer builds (re-exported so nothing reaches past the façade)
+    "ProviderProfile", "OAuthPkceFlow", "DeviceCodeFlow", "ApiKeyAuth",
+    "CredentialStore", "CredentialRecord", "QuarantinedCredential", "RefreshPolicy", "HostedTokenEstimator",
+]
+
+DEFAULT_LOGIN_TIMEOUT_SECONDS = 300.0
+DEFAULT_MAXIMUM_RESPONSE_BYTES = 16_000_000
+JSON_HEADERS = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
+
+
+@dataclass(frozen=True)
+class HttpResponse:
+    status: int
+    headers: dict[str, str]
+    body: bytes
+
+
+HttpCall = Callable[[str, str, Mapping[str, str], bytes | None, float], HttpResponse]
+"""``http(method, url, headers, body, timeout_seconds) -> HttpResponse``."""
+
+
+def urllib_http(maximum_response_bytes: int = DEFAULT_MAXIMUM_RESPONSE_BYTES) -> HttpCall:
+    """The stdlib ``HttpCall``: single attempt, bounded read, non-2xx returned not raised."""
+
+    def call(method: str, url: str, headers: Mapping[str, str], body: bytes | None, timeout: float) -> HttpResponse:
+        request = Request(url, body, dict(headers), method=method)
+        try:
+            response = urlopen(request, timeout=timeout)
+        except HTTPError as error:
+            response = error
+        with response:
+            raw = response.read(maximum_response_bytes + 1)
+            if len(raw) > maximum_response_bytes:
+                raise OSError("response exceeded the configured byte limit")
+            return HttpResponse(response.status, {k.lower(): v for k, v in response.headers.items()}, raw)
+
+    return call
+
+
+@dataclass(frozen=True)
+class WireResponse:
+    """Same shape as a model client's wire response: status, body, timing, error."""
+
+    status: int | None
+    body: str
+    elapsed_seconds: float
+    error: str | None = None
+    failure_kind: str | None = None
+    evidence: dict[str, Any] | None = None
+    definitive: bool = False
+
+
+@dataclass(frozen=True)
+class LoginPrompt:
+    """What to show the person: a URL to open, or a code to type at a URL."""
+
+    kind: str
+    url: str
+    user_code: str | None = None
+    verification_uri_complete: str | None = None
+    browser_opened: bool = False
+    browser_note: str = ""
+
+
+class LoginError(RuntimeError):
+    pass
+
+
+class NotSignedIn(LookupError):
+    pass
+
+
+@dataclass
+class ProviderSession:
+    """One provider, one credential slot in the store.
+
+    ``profile`` is the provider; ``store`` keeps the credential under
+    ``profile.name``. ``http`` is the only way out to the network. ``open_browser``
+    False keeps the sign-in URL in the prompt without launching anything.
+    """
+
+    profile: ProviderProfile
+    store: CredentialStore
+    http: HttpCall = field(default_factory=urllib_http)
+    open_browser: bool = True
+    login_timeout_seconds: float = DEFAULT_LOGIN_TIMEOUT_SECONDS
+    refresh_policy: RefreshPolicy = field(default_factory=RefreshPolicy)
+    estimator: HostedTokenEstimator = field(default_factory=HostedTokenEstimator)
+    clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
+    sleep: Callable[[float], None] = time.sleep
+    browser_opener: Callable[[str], Any] | None = None
+
+    # -- sign in / out ------------------------------------------------------
+
+    def login(self, *, on_prompt: Callable[[LoginPrompt], None] | None = None,
+              api_key: str | None = None) -> CredentialRecord:
+        """Run the profile's flow to completion and store the credential."""
+        auth = self.profile.auth
+        if isinstance(auth, ApiKeyAuth):
+            if not api_key:
+                raise LoginError(f"{self.profile.display_name} needs an API key")
+            return self.store.put(self.profile.name, {"access_token": api_key, "token_type": "api_key"},
+                                  {"auth_kind": "api_key"})
+        if isinstance(auth, OAuthPkceFlow):
+            token = self._login_pkce(auth, on_prompt)
+        elif isinstance(auth, DeviceCodeFlow):
+            token = self._login_device(auth, on_prompt)
+        else:
+            raise LoginError(f"unsupported auth kind {auth.kind!r}")
+        return self._store_token(token, auth_kind=auth.kind)
+
+    def status(self) -> dict[str, Any]:
+        """Public view: signed in or not, expiry, account, quarantine."""
+        record = self.store.peek(self.profile.name)
+        view: dict[str, Any] = {"provider": self.profile.name, "display_name": self.profile.display_name,
+                                "auth_kind": self.profile.auth.kind, "signed_in": record is not None and record.usable}
+        if record is not None:
+            view.update(record.public())
+            expires = record.metadata.get("expires_at")
+            if expires:
+                view["expired"] = self.refresh_policy.needs_refresh(datetime.fromisoformat(expires), self.clock())
+        return view
+
+    def logout(self) -> bool:
+        return self.store.delete(self.profile.name)
+
+    # -- the transport --------------------------------------------------------
+
+    def credential(self) -> CredentialRecord:
+        record = self.store.get(self.profile.name)
+        if record is None:
+            raise NotSignedIn(f"not signed in to {self.profile.display_name}")
+        return record
+
+    def transport(self) -> ProviderTransport:
+        """A ``(path, payload) -> WireResponse`` callable for a model client."""
+        return ProviderTransport(self)
+
+    def count(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Prompt-token estimate in the shape a model client's ``count`` returns."""
+        return self.estimator.estimate(payload).as_dict()
+
+    def endpoint(self) -> dict[str, Any]:
+        """Fields for an ``EndpointConfig``: where the transport already sends things."""
+        return {"base_url": self.profile.api_base_url, "completion_path": self.profile.completion_path,
+                "timeout_seconds": self.profile.timeout_seconds, "headers": dict(self.profile.static_headers)}
+
+    # -- flows ---------------------------------------------------------------
+
+    def _login_pkce(self, auth: OAuthPkceFlow, on_prompt: Callable[[LoginPrompt], None] | None) -> OAuthTokenRecord:
+        with SingleRequestCapture(auth.redirect_path, host=auth.redirect_host, port=auth.redirect_port) as capture:
+            redirect_uri = auth.redirect_uri if auth.redirect_port else capture.url
+            config = OAuthPkceConfig(auth.authorization_endpoint, auth.token_endpoint, auth.client_id,
+                                     redirect_uri, auth.scopes)
+            authorization = create_pkce_authorization()
+            url = build_authorization_url(config, authorization)
+            if auth.extra_authorization_params:
+                url += "&" + urlencode(auth.extra_authorization_params)
+            self._prompt(on_prompt, LoginPrompt("browser", url))
+            target = capture.wait(self.login_timeout_seconds)
+        callback = parse_oauth_callback("http://" + auth.redirect_host + target, expected_path=auth.redirect_path,
+                                        expected_state=authorization.state)
+        exchange = build_token_exchange_request(config, code=callback.code, code_verifier=authorization.code_verifier)
+        status, payload = self._post_form(exchange.url, exchange.headers, exchange.body)
+        if status != 200 or payload.get("error"):
+            raise LoginError(str(payload.get("error_description") or payload.get("error") or f"token exchange http {status}"))
+        return normalize_oauth_token_response(payload, received_at=self.clock())
+
+    def _login_device(self, auth: DeviceCodeFlow, on_prompt: Callable[[LoginPrompt], None] | None) -> OAuthTokenRecord:
+        config = DeviceCodeConfig(auth.device_authorization_endpoint, auth.token_endpoint, auth.client_id, auth.scopes,
+                                  tuple(auth.extra_authorization_params.items()), tuple(auth.extra_token_params.items()))
+
+        def post(request: RequestDescriptor) -> tuple[int, dict[str, Any]]:
+            return self._post_form(request.url, request.headers, request.body)
+
+        def show(device: Any) -> None:
+            self._prompt(on_prompt, LoginPrompt("device", device.verification_uri_complete or device.verification_uri,
+                                                user_code=device.user_code,
+                                                verification_uri_complete=device.verification_uri_complete))
+
+        try:
+            payload = run_device_flow(config, post, sleep=self.sleep, clock=lambda: self.clock().timestamp(),
+                                      on_authorization=show)
+        except DeviceFlowError as error:
+            raise LoginError(str(error)) from error
+        return normalize_oauth_token_response(payload, received_at=self.clock())
+
+    def _prompt(self, on_prompt: Callable[[LoginPrompt], None] | None, prompt: LoginPrompt) -> None:
+        if self.open_browser:
+            if self.browser_opener is not None:
+                self.browser_opener(prompt.url)
+                prompt = LoginPrompt(prompt.kind, prompt.url, prompt.user_code, prompt.verification_uri_complete, True)
+            else:
+                launched = open_url(prompt.url)
+                prompt = LoginPrompt(prompt.kind, prompt.url, prompt.user_code, prompt.verification_uri_complete,
+                                     launched.opened, launched.reason)
+        if on_prompt is not None:
+            on_prompt(prompt)
+
+    # -- credential plumbing -------------------------------------------------
+
+    def _store_token(self, token: OAuthTokenRecord, *, auth_kind: str) -> CredentialRecord:
+        metadata: dict[str, Any] = {"auth_kind": auth_kind, "scopes": list(token.scopes)}
+        if token.expires_at is not None:
+            metadata["expires_at"] = token.expires_at.isoformat()
+        metadata.update(self._claims_metadata(token))
+        secret = {"access_token": token.access_token, "token_type": token.token_type}
+        if token.refresh_token:
+            secret["refresh_token"] = token.refresh_token
+        if token.id_token:
+            secret["id_token"] = token.id_token
+        return self.store.put(self.profile.name, secret, metadata)
+
+    def _claims_metadata(self, token: OAuthTokenRecord) -> dict[str, Any]:
+        auth = self.profile.auth
+        if not isinstance(auth, OAuthPkceFlow) or not token.id_token:
+            return {}
+        try:
+            claims = unverified_claims(token.id_token)
+        except MalformedJwt:
+            return {}
+        metadata: dict[str, Any] = {}
+        for key in ("email", "sub"):
+            if claims.get(key):
+                metadata[key] = claims[key]
+        if auth.account_claim_namespace and auth.account_claim_key:
+            account = namespaced_claim(claims, auth.account_claim_namespace, auth.account_claim_key)
+            if account:
+                metadata["account_id"] = account
+        return metadata
+
+    def _refresh(self, record: CredentialRecord) -> CredentialRecord:
+        auth = self.profile.auth
+        refresh_token = record.secret.get("refresh_token")
+        if isinstance(auth, ApiKeyAuth) or not refresh_token:
+            failure = RefreshFailed("credential cannot be refreshed; sign in again", terminal=True)
+            self.store.quarantine(self.profile.name, str(failure))
+            raise failure
+        config = OAuthPkceConfig("", auth.token_endpoint, auth.client_id, "")
+        request = build_refresh_token_request(config, refresh_token=refresh_token)
+        status, payload = self._post_form(request.url, request.headers, request.body)
+        if status != 200 or payload.get("error") or not payload.get("access_token"):
+            failure = classify_refresh_failure(status, payload)
+            if failure.terminal:
+                self.store.quarantine(self.profile.name, f"{failure.error_code or status}: {failure}")
+            raise failure
+        if not payload.get("refresh_token"):
+            payload = dict(payload, refresh_token=refresh_token)
+        token = normalize_oauth_token_response(payload, received_at=self.clock())
+        stored = self._store_token(token, auth_kind=auth.kind)
+        return stored
+
+    def _bearer(self) -> BearerSession[CredentialRecord]:
+        def expires_at(record: CredentialRecord) -> datetime | None:
+            value = record.metadata.get("expires_at")
+            return datetime.fromisoformat(value) if value else None
+
+        return BearerSession(self.credential(), self._refresh, expires_at, policy=self.refresh_policy, clock=self.clock)
+
+    def _post_form(self, url: str, headers: Mapping[str, str], body: str) -> tuple[int, dict[str, Any]]:
+        response = self.http("POST", url, headers, body.encode("utf-8"), self.profile.timeout_seconds)
+        try:
+            payload = json.loads(response.body.decode("utf-8") or "{}")
+        except ValueError:
+            payload = {"error": f"http_{response.status}", "error_description": response.body[:200].decode("utf-8", "replace")}
+        return response.status, payload if isinstance(payload, dict) else {}
+
+
+class ProviderTransport:
+    """The callable a model client posts through. Chat Completions in, Chat Completions out."""
+
+    def __init__(self, session: ProviderSession) -> None:
+        self.session = session
+        self.profile = session.profile
+
+    def request_metadata(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """What changed on the wire, with no authentication material."""
+        metadata = {"provider": self.profile.name, "wire": self.profile.wire, "url": self._url(path)}
+        if self.profile.wire == "responses":
+            try:
+                metadata["dropped_fields"] = list(chat_to_responses(payload).dropped_fields)
+            except ValueError as error:
+                metadata["codec_error"] = str(error)
+        return metadata
+
+    def __call__(self, path: str, payload: dict[str, Any], *, timeout_seconds: float | None = None) -> WireResponse:
+        started = time.monotonic()
+        timeout = self.profile.timeout_seconds if timeout_seconds is None else min(timeout_seconds, self.profile.timeout_seconds)
+        try:
+            bearer = self.session._bearer()
+        except (NotSignedIn, QuarantinedCredential, RefreshFailed) as error:
+            return WireResponse(None, "", time.monotonic() - started, f"{type(error).__name__}: {error}",
+                                failure_kind="authentication", definitive=True)
+        body_bytes, error = self._encode(payload)
+        if error:
+            return WireResponse(None, "", time.monotonic() - started, error, failure_kind="codec", definitive=True)
+
+        def send(record: CredentialRecord) -> tuple[int, HttpResponse | str]:
+            headers = dict(JSON_HEADERS)
+            headers.update(self.profile.headers_for(record.secret["access_token"], record.metadata))
+            try:
+                response = self.session.http("POST", self._url(path), headers, body_bytes, timeout)
+            except (OSError, URLError, TimeoutError) as exc:
+                return 0, f"{type(exc).__name__}: {exc}"
+            return response.status, response
+
+        try:
+            status, result = bearer.call(send)
+        except RefreshFailed as failure:
+            return WireResponse(401, "", time.monotonic() - started, f"RefreshFailed: {failure}",
+                                failure_kind="authentication", definitive=failure.terminal)
+        elapsed = time.monotonic() - started
+        if isinstance(result, str):
+            return WireResponse(None, "", elapsed, result)
+        return self._decode(result, elapsed, payload)
+
+    def _url(self, path: str) -> str:
+        return self.profile.api_base_url.rstrip("/") + path
+
+    def _encode(self, payload: dict[str, Any]) -> tuple[bytes, str | None]:
+        body = dict(payload)
+        if not body.get("model") and self.profile.default_model:
+            body["model"] = self.profile.default_model
+        if self.profile.wire == "responses":
+            try:
+                body = chat_to_responses(body).body
+            except ValueError as error:
+                return b"", f"CodecError: {error}"
+        return json.dumps(body, allow_nan=False).encode("utf-8"), None
+
+    def _decode(self, response: HttpResponse, elapsed: float, payload: dict[str, Any]) -> WireResponse:
+        text = response.body.decode("utf-8", errors="replace")
+        if not 200 <= response.status < 300:
+            return WireResponse(response.status, text, elapsed)
+        if self.profile.wire == "chat_completions":
+            chat = _json_object(text)
+        elif response.headers.get("content-type", "").startswith("text/event-stream") or text.lstrip().startswith(("event:", "data:")):
+            chat = fold_sse(text.splitlines(keepends=True))
+        else:
+            chat = _json_object(text)
+            if chat is not None and "choices" not in chat:
+                chat = responses_to_chat(chat)
+        if chat is None:
+            return WireResponse(response.status, text, elapsed, "Response is not a JSON object")
+        usage = chat.get("usage") or {}
+        if isinstance(usage.get("prompt_tokens"), int) and usage["prompt_tokens"] > 0:
+            self.session.estimator.calibrate(payload, usage["prompt_tokens"])
+        if chat.get("error") and chat.get("choices", [{}])[0].get("finish_reason") == "error":
+            return WireResponse(response.status, json.dumps(chat), elapsed, str(chat["error"].get("message") or chat["error"]),
+                                failure_kind="provider_error")
+        return WireResponse(response.status, json.dumps(chat), elapsed)
+
+
+def _json_object(text: str) -> dict[str, Any] | None:
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+

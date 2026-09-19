@@ -1,0 +1,71 @@
+{
+  "id": "bp-subscription-provider-session-python",
+  "name": "subscription-provider-session",
+  "language": "python",
+  "version": "0.1.0",
+  "description": "Sign a user into an LLM provider with their subscription (browser PKCE or device code) or an API key, keep the credential fresh and quarantined on terminal failure, and expose a ModelClient-compatible transport that speaks the provider's wire dialect (Chat Completions, or Responses over SSE) behind the Chat Completions shape the caller already uses.",
+  "tags": [
+    "oauth",
+    "subscription",
+    "llm-provider",
+    "transport",
+    "responses-api"
+  ],
+  "dependencies": [
+    {
+      "id": "universal-oauth-pkce-python",
+      "version": "1.0.0"
+    },
+    {
+      "id": "universal-oauth-device-code-python",
+      "version": "1.0.0"
+    },
+    {
+      "id": "universal-oauth-token-response-python",
+      "version": "1.0.0"
+    },
+    {
+      "id": "universal-open-in-browser-python",
+      "version": "1.0.0"
+    },
+    {
+      "id": "infra-local-http-server-python",
+      "version": "1.1.0"
+    },
+    {
+      "id": "security-jwt-claims-unverified-python",
+      "version": "1.0.0"
+    },
+    {
+      "id": "security-credential-store-python",
+      "version": "1.0.0"
+    },
+    {
+      "id": "universal-bearer-refresh-policy-python",
+      "version": "1.0.0"
+    },
+    {
+      "id": "backend-chat-responses-codec-python",
+      "version": "1.0.0"
+    },
+    {
+      "id": "backend-llm-provider-profiles-python",
+      "version": "1.0.0"
+    },
+    {
+      "id": "backend-hosted-token-estimator-python",
+      "version": "1.0.0"
+    }
+  ],
+  "domains": [
+    "backend",
+    "infra",
+    "security",
+    "universal"
+  ],
+  "validation": {
+    "engine_version": 1,
+    "validated_at": "2026-09-19T16:37:00.370711+00:00",
+    "runtime": "python 3.12.13"
+  }
+}

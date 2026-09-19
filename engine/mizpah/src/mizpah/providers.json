@@ -1,0 +1,226 @@
+{
+  "_comment": "Provider profiles the engine ships. Every value here is public client configuration; credentials never live in this file. openai_chatgpt constants come from the Apache-2.0 openai/codex source (codex-rs/login). xai_grok endpoints come from the Apache-2.0 xai-org/grok-build source (crates/codegen/xai-grok-login); its OAuth2 client id is not published there and must be supplied (GROK_OAUTH2_CLIENT_ID or the providers override in the engine config).",
+  "profiles": [
+    {
+      "name": "openai_chatgpt",
+      "display_name": "ChatGPT (Plus/Pro/Team subscription)",
+      "auth": {
+        "kind": "oauth_pkce",
+        "authorization_endpoint": "https://auth.openai.com/oauth/authorize",
+        "token_endpoint": "https://auth.openai.com/oauth/token",
+        "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
+        "redirect_host": "localhost",
+        "redirect_port": 1455,
+        "redirect_path": "/auth/callback",
+        "scopes": [
+          "openid",
+          "profile",
+          "email",
+          "offline_access"
+        ],
+        "extra_authorization_params": {
+          "id_token_add_organizations": "true",
+          "codex_cli_simplified_flow": "true",
+          "originator": "mizpah"
+        },
+        "account_claim_namespace": "https://api.openai.com/auth",
+        "account_claim_key": "chatgpt_account_id"
+      },
+      "api_base_url": "https://chatgpt.com/backend-api/codex",
+      "completion_path": "/responses",
+      "wire": "responses",
+      "static_headers": {
+        "originator": "mizpah",
+        "OpenAI-Beta": "responses=experimental"
+      },
+      "credential_headers": {
+        "Authorization": "Bearer {token}",
+        "chatgpt-account-id": "{account_id}"
+      },
+      "models": [
+        "gpt-5.5",
+        "gpt-5.5-codex",
+        "gpt-5.4",
+        "gpt-5.4-mini"
+      ],
+      "default_model": "gpt-5.5",
+      "token_count": "usage_calibrated",
+      "context_window": 400000,
+      "timeout_seconds": 900,
+      "notes": "OpenAI lets ChatGPT plans back third-party OSS harnesses (Codex for Open Source). The model list is a starting point; the engine config may override it."
+    },
+    {
+      "name": "xai_grok",
+      "display_name": "Grok (SuperGrok / X Premium+ subscription)",
+      "auth": {
+        "kind": "device_code",
+        "device_authorization_endpoint": "https://auth.x.ai/oauth2/device/code",
+        "token_endpoint": "https://auth.x.ai/oauth2/token",
+        "client_id": "",
+        "scopes": [
+          "openid",
+          "profile",
+          "email",
+          "offline_access",
+          "grok-cli:access",
+          "api:access"
+        ]
+      },
+      "api_base_url": "https://api.x.ai/v1",
+      "completion_path": "/responses",
+      "wire": "responses",
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [
+        "grok-4.6",
+        "grok-4.5",
+        "grok-build-0.1",
+        "grok-4.3"
+      ],
+      "default_model": "grok-4.6",
+      "token_count": "usage_calibrated",
+      "context_window": 256000,
+      "timeout_seconds": 900,
+      "notes": "Device-code flow against auth.x.ai as Grok Build does. Set the client id via GROK_OAUTH2_CLIENT_ID or providers.xai_grok.auth.client_id in the engine config. Grok Build's own proxy is https://cli-chat-proxy.grok.com/v1 if api.x.ai refuses the subscription token. xAI may 403 some tiers."
+    },
+    {
+      "name": "openai_api",
+      "display_name": "OpenAI API key",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "OPENAI_API_KEY"
+      },
+      "api_base_url": "https://api.openai.com/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [
+        "gpt-5.5",
+        "gpt-5.4",
+        "gpt-5.4-mini"
+      ],
+      "default_model": "gpt-5.4",
+      "token_count": "usage_calibrated",
+      "context_window": 400000,
+      "timeout_seconds": 900
+    },
+    {
+      "name": "xai_api",
+      "display_name": "xAI API key",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "XAI_API_KEY"
+      },
+      "api_base_url": "https://api.x.ai/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [
+        "grok-4.6",
+        "grok-4.5",
+        "grok-4.3"
+      ],
+      "default_model": "grok-4.6",
+      "token_count": "usage_calibrated",
+      "context_window": 256000,
+      "timeout_seconds": 900
+    },
+    {
+      "name": "zai_coding",
+      "display_name": "Z.AI GLM Coding Plan",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "ZAI_API_KEY"
+      },
+      "api_base_url": "https://api.z.ai/api/coding/paas/v4",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [
+        "glm-5.3",
+        "glm-5.3-flash"
+      ],
+      "default_model": "glm-5.3",
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "Coding-plan key: the /api/coding/paas/v4 endpoint, not the general /api/paas/v4. Explicitly allows third-party agents (Cline, OpenCode, ...)."
+    },
+    {
+      "name": "kimi_coding",
+      "display_name": "Kimi Code plan (Moonshot)",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "KIMI_API_KEY"
+      },
+      "api_base_url": "https://api.kimi.com/coding/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [
+        "kimi-k2.7-code",
+        "kimi-k2.6"
+      ],
+      "default_model": "kimi-k2.7-code",
+      "token_count": "usage_calibrated",
+      "context_window": 256000,
+      "timeout_seconds": 900,
+      "notes": "Kimi Code subscription endpoint as documented for Kimi Code CLI providers. PAYG keys use https://api.moonshot.ai/v1 instead (override api_base_url)."
+    },
+    {
+      "name": "minimax_coding",
+      "display_name": "MiniMax Coding Plan",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "MINIMAX_API_KEY"
+      },
+      "api_base_url": "https://api.minimax.io/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [
+        "MiniMax-M2.7",
+        "MiniMax-M2.7-highspeed"
+      ],
+      "default_model": "MiniMax-M2.7",
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "Flat-rate coding plan; third-party agents supported. Verify the base URL against the plan's docs if a call 404s."
+    },
+    {
+      "name": "deepseek_api",
+      "display_name": "DeepSeek API key",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "DEEPSEEK_API_KEY"
+      },
+      "api_base_url": "https://api.deepseek.com/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [
+        "deepseek-v4-pro",
+        "deepseek-v4-flash"
+      ],
+      "default_model": "deepseek-v4-pro",
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "Pay-as-you-go only; no coding plan."
+    }
+  ]
+}
