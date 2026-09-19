@@ -89,6 +89,9 @@ def logo_mark(project: Path) -> None:
         'Know whether every candidate has a monochrome variant mark-mono.svg using a single fill',                                   # 6
         'Know whether every candidate has a wordmark.svg that sets the name "Mizpah" as paths or text with a named font',            # 7
         'Know whether brand/marks/report.md states, per candidate, the readings above and the rationale, every number a reading on the map',  # 8
+        'Know the number of distinct mark.svg drawings among the candidates: two count as the same when their path data, '
+        'normalised (whitespace and numeric precision), is identical or one is a scaled or recoloured copy of the other',       # 9
+        'Know the number of distinct wordmark.svg letterforms: a plain <text> element in a system font counts as the same as any other',  # 10
     ]
     deliverables = [
         'brand/marks/<candidate>/`mark.svg`, `mark-mono.svg`, `wordmark.svg` and `rationale.md` for exactly three candidates, each a '
@@ -104,12 +107,13 @@ def logo_mark(project: Path) -> None:
                 'places the SVG at a size and read pixels or boxes off it. '+'Read content/voice.md before drawing.',
           non_goals=['No `raster` source: marks are vector, exports are readings not deliverables',
                      'No `choice` between candidates: the report shows, a person chooses',
-                     'No `stock` icon or copied glyph: the marks are drawn here'],
+                     'No `stock` icon or copied glyph: the marks are drawn here',
+                     'No `copy` of one candidate into another: three candidates are three drawings (need 9 counts them)'],
           enablers=[('page_readings', 'Headless page readings', 'cg/frontend_headless_page_cli_python',
                      'A command-line instrument over headless chromium: serve or open a page, read its text, element boxes, '
                      'computed styles and requests, take a screenshot at a viewport width.')])
-    key_path(project).write_text(json.dumps(dict(fixture='logo_mark', key=dict(by_need={1: 3, 2: True, 4: True, 6: True, 7: True, 8: True},
-                                                                              targets={3: '<=20000', 5: '>=4.5'})), indent=1)+'\n')
+    key_path(project).write_text(json.dumps(dict(fixture='logo_mark', key=dict(by_need={1: 3, 2: True, 4: True, 6: True, 7: True, 8: True, 9: 3},
+                                                                              targets={3: '<=20000', 5: '>=4.5', 10: '>=2'})), indent=1)+'\n')
 
 
 def palette(project: Path) -> None:
