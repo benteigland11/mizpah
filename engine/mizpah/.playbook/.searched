@@ -381,3 +381,17 @@ report design md has a row for need 6 stating its reading and whether it meets c
 Verify the landing page has no external requests
 html index makes outside requests site style urls
 site index html with site style css makes no requests to urls outside site  
+Measure the remaining rendered design properties
+1280 rendered paragraph above action background body call characters contrast fold horizontally
+the contrast ratio of body paragraph text against its background as rendered at 1280 px
+whether the page overflows horizontally when rendered at 375 px wide
+whether the primary call to action is visible above the fold at 1280 by 800
+the mean paragraph line length in characters as rendered at 1280 px
+Build the hand-written docs page and stylesheet
+based content docs does exist hand html index page site written
+ site index html  does not yet exist as the hand written docs page based on  content docs md  
+Verify the landing page uses approved words and brand constraints without a framework
+landing page content brand come constraints follows framework hand html index pitch
+site index html with site style css is a hand written landing page with no framework
+the landing page s words come from content pitch md
+the landing page follows the constraints in content brand md

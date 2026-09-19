@@ -347,3 +347,12 @@ def test_proposals_say_whether_they_block_and_keep_the_project_open(project: Pat
     assert loop.blocking_proposal_open(project)
     text = controller.render_observation(controller.observe(CONFIG, project), 'eval')
     assert '[blocking] the mission cannot be met' in text
+
+
+def test_a_number_citing_a_deliverable_is_a_reading_not_an_artifact(project: Path) -> None:
+    observation = controller.observe(CONFIG, project)
+    accepted, refusals = controller.guard(dict(unknowns=[
+        dict(id='report_line_length', cites='deliverable:1', type='number', claim='mean line length of report/survey.md',
+             evidence_needed='count characters per line', source='report/survey.md')],
+        tasks=[dict(id='measure', unknowns=['report_line_length'], bucket='low', title='measure')]), observation, project)
+    assert [u['id'] for u in accepted['unknowns']] == ['report_line_length'], refusals

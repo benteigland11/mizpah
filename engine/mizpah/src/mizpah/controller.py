@@ -444,9 +444,12 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
     # that the file exists: a report with a table of invented stations passed on 2026-09-18.
     anchors = {k['id'] for k in observation['knowns']} | {u['id'] for u in observation['unknowns']} | {u['id'] for u in unknowns}
     for item in list(unknowns):
-        # Citing a deliverable makes it an artifact unknown whether or not `creates` was set; "exits 0"
-        # against `source: environment` is the same existence check by another door.
-        artifact = (item['creates'] or item['cites'].startswith('deliverable:')) and not item.get('enabler')
+        # An artifact unknown is one that creates something, or a boolean citing a deliverable ("exits 0" against
+        # `source: environment` is the existence check by another door). A number or label citing a deliverable
+        # is a reading OF the artifact — contrast, line length — and needs no anchor; refusing those threw away
+        # the design unknowns the controller had pulled from the library (docs_page, 2026-09-19).
+        artifact = (item['creates'] or (item['cites'].startswith('deliverable:') and item.get('type') == 'boolean')) \
+            and not item.get('enabler')
         if artifact and item.get('type') == 'label':
             # An artifact is verified by agreement with the map, never by recording what it prints.
             refusals.append('unknown '+item['id']+': an artifact unknown is an agreement, not a label — make it boolean '
