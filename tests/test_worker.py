@@ -477,3 +477,13 @@ def test_open_checklists_hold_the_gate_until_every_step_is_ticked(tmp_path: Path
                         ' — tick each `[x]` (done) or `[-]` (not needed)']
     files['.playbook/open/mizpah-resolve-unknown--means.md'] = files['.playbook/open/mizpah-resolve-unknown--means.md'].replace(b'- [ ]', b'- [x]')
     assert open_checklists(snapshot_of(files)) == []
+
+
+def test_green_message_hands_back_the_steps_a_walk_skipped(tmp_path: Path):
+    from mizpah.worker import checklist_skips
+    files = {'.playbook/open/csv-counting--rows.md': b'- [x] **1. Scaffold**\n\n- [-] **2. Extract a widget**\n\n- [x] **3. Run**\n\n- [-] **6. Cross-check**\n'}
+    skips = checklist_skips(snapshot_of(files))
+    assert skips == {'csv-counting': ['2. Extract a widget', '6. Cross-check']}
+    text = green_message(dict(ok=True, problems=[], knowns=['a'], runs=['r']), ['a'], ['csv-counting'], None, skips)
+    assert 'marked `[-]` not needed' in text and 'csv-counting: 2. Extract a widget; 6. Cross-check' in text
+    assert 'not needed on this walk' in text and 'not needed in general' in text

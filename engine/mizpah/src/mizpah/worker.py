@@ -521,6 +521,20 @@ def open_checklists(snapshot: bytes) -> list[str]:
     return problems
 
 
+def checklist_skips(snapshot: bytes) -> dict[str, list[str]]:
+    """Steps a worker ticked `[-]` (not needed) per opened procedure: the signal the green phase hands back,
+    so the worker decides whether each was not needed on this walk or not needed in general."""
+    skips: dict[str, list[str]] = {}
+    for name, data in sorted(_members(snapshot).items()):
+        if not name.startswith(PLAYBOOK_PREFIX+'/open/') or not name.endswith('.md'):
+            continue
+        procedure = name.split('/')[-1].split('--')[0].removesuffix('.md')
+        for ln in data.decode('utf-8', errors='replace').splitlines():
+            if ln.strip().startswith('- [-]'):
+                skips.setdefault(procedure, []).append(ln.strip()[6:].strip('* '))
+    return skips
+
+
 def task_gate(config: dict[str, Any], project: Path, task: dict[str, Any], map_id: str,
               root: Path | None = None) -> dict[str, Any]:
     """Mechanical verdict: the route, the project map, Terra's gate, and every widget the task touched."""
@@ -688,10 +702,16 @@ def library_parts(config: dict[str, Any], project: Path, unknowns: list[dict[str
     return ['`'+k+'` — '+v for k, v in seen.items()]
 
 
-def green_message(gate: dict[str, Any], unknown_id: str | list[str], used: list[str] = (), cost: dict[str, Any] | None = None) -> str:
+def green_message(gate: dict[str, Any], unknown_id: str | list[str], used: list[str] = (), cost: dict[str, Any] | None = None,
+                  skips: dict[str, list[str]] | None = None) -> str:
     if isinstance(unknown_id, list):
         unknown_id = ', '.join(unknown_id)
     paid = ''
+    if skips:
+        rows = ['  - '+proc+': '+'; '.join(steps) for proc, steps in skips.items()]
+        paid += (' Steps you marked `[-]` not needed:\n'+'\n'.join(rows)+
+                 '\n For each, decide: not needed on this walk (leave the procedure alone) or not needed in general '
+                 '(`playbook edit-step` to narrow it, or remove it). A step every walk skips is noise for the next worker.')
     if cost:
         rows = ['  - while on '+repr(step)+': '+', '.join(f'{n}× {k}' for k, n in sorted(counts.items(), key=lambda kv: -kv[1]))
                 for step, counts in cost.items()]
@@ -982,7 +1002,8 @@ def run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | N
     budget = cap
     if gate['ok'] and budget-status['completed_worker_turns'] > 0:
         # Only after green: the method goes into the library, and only through the harvest.
-        session.continue_with(green_message(gate, task_unknown_ids(task), procedures_used(root), tool_fight(root)))
+        session.continue_with(green_message(gate, task_unknown_ids(task), procedures_used(root), tool_fight(root),
+                                            checklist_skips(session.workspace())))
         status = session.run(maximum_worker_turns=budget-status['completed_worker_turns'])
         session.prune_workspaces()
         widgets = harvest_widgets(session.workspace(), root, config)
