@@ -381,6 +381,12 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         # Citing a deliverable makes it an artifact unknown whether or not `creates` was set; "exits 0"
         # against `source: environment` is the same existence check by another door.
         artifact = item['creates'] or item['cites'].startswith('deliverable:')
+        if artifact and item.get('type') == 'label':
+            # An artifact is verified by agreement with the map, never by recording what it prints.
+            refusals.append('unknown '+item['id']+': an artifact unknown is an agreement, not a label — make it boolean '
+                            '(the output equals the known it names) or number (the value it prints); a label is for a '
+                            'reading of the data (which store, which file)')
+            unknowns.remove(item); continue
         if artifact and not [w for w in re.findall(r'[a-z][a-z0-9_]*', item['claim']+' '+item['evidence_needed'])
                              if w in anchors and w != item['id']]:
             refusals.append('unknown '+item['id']+': it is about '+(item['creates'] or item['cites'])+' but names no known '
