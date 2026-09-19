@@ -21,6 +21,18 @@ from .suite import brief, key_path, terra
 
 DEFAULT_SOURCE = Path(__file__).resolve().parents[2]/'terra'
 
+CONFTEST = '''"""Pin `terra` and `cg` to this copy: an editable install elsewhere on the interpreter wins over pythonpath."""
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+for path in (str(ROOT/'src'), str(ROOT)):
+    if path not in sys.path:
+        sys.path.insert(0, path)
+for name in [m for m in sys.modules if m.split('.')[0] in ('terra', 'cg')]:
+    del sys.modules[name]
+'''
+
 NOTE = (
     'The package is under src/terra with its tests under tests/; `python3 -m pytest -q tests` runs the suite from the '
     'project root (pytest is installed). A function\'s branch count is the number of if/for/while/try/with/boolean-op '
@@ -32,7 +44,7 @@ NOTE = (
 
 
 def improve(project: Path, source: Path = DEFAULT_SOURCE) -> None:
-    for name in ('src', 'tests', 'pyproject.toml', 'README.md'):
+    for name in ('src', 'tests', 'cg', 'pyproject.toml', 'README.md'):
         path = source/name
         if not path.exists():
             continue
@@ -40,6 +52,9 @@ def improve(project: Path, source: Path = DEFAULT_SOURCE) -> None:
             shutil.copytree(path, project/name, ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '.pytest_cache'))
         else:
             shutil.copy2(path, project/name)
+    # The sandbox's interpreter may carry another terra as an editable install, whose import hook beats
+    # pytest's pythonpath: luna's first improve run tested that one (7 failures that were not the copy's).
+    (project/'conftest.py').write_text(CONFTEST)
     (project/'content').mkdir()
     (project/'content'/'README.md').write_text(textwrap.dedent('''\
         A copy of a real, tested Python package. src/ is the code, tests/ its suite. The brief asks for a survey of
