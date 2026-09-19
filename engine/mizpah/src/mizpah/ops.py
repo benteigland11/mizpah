@@ -31,9 +31,18 @@ def settings(config: dict[str, Any]) -> dict[str, Any]:
 
 # ---------------------------------------------------------------- health
 
-def model_up(base_url: str, timeout: float = 5.0) -> bool:
+def model_label(spec: dict[str, Any]) -> str:
+    """How a report names the model: a local server by its address, a subscription by profile and model."""
+    if spec.get('provider') == 'subscription':
+        return str(spec.get('subscription'))+'/'+str((spec.get('generation') or {}).get('model') or '?')
+    return str((spec.get('endpoint') or {}).get('base_url') or '?')
+
+
+def model_up(base_url: str | None, timeout: float = 5.0) -> bool:
     """llama.cpp answers /health with 200 (ready) or 503 (loading); a hosted API has no /health and
     answers 404 or 401, which still means the host is reachable, and that is the question here."""
+    if not base_url:
+        return True   # a subscription client has no address of its own; its transport reports outages
     try:
         with urllib.request.urlopen(base_url.rstrip('/')+'/health', timeout=timeout) as response:
             return response.status == 200
@@ -56,8 +65,13 @@ class Health:
     def _record(self, **fields: Any) -> None:
         self.log.open('a').write(json.dumps(dict(at=time.time(), **fields))+'\n')
 
-    def wait_for_model(self, base_url: str, *, wait_seconds: float) -> bool:
-        """True when the server answers within wait_seconds; starts its unit once it has been down long enough."""
+    def wait_for_model(self, base_url: str | None, *, wait_seconds: float) -> bool:
+        """True when the server answers within wait_seconds; starts its unit once it has been down long enough.
+
+        A subscription client (no base_url) is waited for with plain backoff: nothing here can restart it."""
+        if not base_url:
+            time.sleep(min(60.0, wait_seconds))
+            return True
         down_since = time.time()
         deadline = down_since+wait_seconds
         while time.time() <= deadline:

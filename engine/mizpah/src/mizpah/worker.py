@@ -1193,7 +1193,7 @@ def build_settings(config: dict[str, Any], assignment: str, reference: str,
 
 def model_up(config: dict[str, Any]) -> bool:
     from mizpah.ops import model_up as reachable
-    return reachable(config['worker']['endpoint']['base_url'])
+    return reachable((config['worker'].get('endpoint') or {}).get('base_url'))
 
 
 def run_through_outages(session: FocusedSession, config: dict[str, Any], root: Path, *, maximum_worker_turns: int,
@@ -1224,7 +1224,7 @@ def run_through_outages(session: FocusedSession, config: dict[str, Any], root: P
                 raise
             from . import ops
             checker = health or ops.Health(config, root)
-            if not checker.wait_for_model(config['worker']['endpoint']['base_url'], wait_seconds=wait_seconds):
+            if not checker.wait_for_model((config['worker'].get('endpoint') or {}).get('base_url'), wait_seconds=wait_seconds):
                 raise
             discarded = session.discard_pending()
             if discarded:
