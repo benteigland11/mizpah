@@ -37,7 +37,10 @@ def cited_need(project: Path, known_id: str) -> int | None:
     path = project/'.terra'/'map'/'unknowns'/(known_id+'.json')
     if not path.exists():
         return None
-    match = re.search(r'need:(\d+)', json.loads(path.read_text()).get('notes') or '')
+    notes = json.loads(path.read_text()).get('notes') or ''
+    if '; enabler ' in notes:
+        return None   # an enabler unknown cites the need that waits on it; it is not that need's reading
+    match = re.search(r'need:(\d+)', notes)
     return int(match.group(1)) if match else None
 
 
