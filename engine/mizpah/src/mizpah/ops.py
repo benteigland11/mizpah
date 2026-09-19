@@ -67,12 +67,17 @@ class Health:
             if (unit and time.time()-down_since >= self.ops['restart_after_seconds']
                     and time.time()-self.last_restart >= self.ops['restart_cooldown_seconds']):
                 self.last_restart = time.time()
-                started = subprocess.run(['systemctl', '--user', 'start', unit], capture_output=True, text=True,
-                                         timeout=60, check=False)
-                self._record(event='model_unit_started', unit=unit, ok=started.returncode == 0,
+                # An active unit that does not answer is wedged (llama-server after two SIGINTs sits in teardown
+                # with its listener closed and never exits, so Restart= never fires): restart, not start.
+                active = subprocess.run(['systemctl', '--user', 'is-active', unit], capture_output=True, text=True,
+                                        timeout=30, check=False).stdout.strip() == 'active'
+                verb = 'restart' if active else 'start'
+                started = subprocess.run(['systemctl', '--user', verb, unit], capture_output=True, text=True,
+                                         timeout=180, check=False)
+                self._record(event='model_unit_'+verb+'ed', unit=unit, ok=started.returncode == 0,
                              error=(started.stderr or '').strip()[:300])
-                notify(self.config, self.root, 'model server restarted',
-                       unit+' was down '+str(int(time.time()-down_since))+' s; started it')
+                notify(self.config, self.root, 'model server '+verb+'ed',
+                       unit+' was down '+str(int(time.time()-down_since))+' s ('+('active but silent' if active else 'inactive')+'); '+verb+'ed it')
             time.sleep(5)
         self._record(event='model_down', base_url=base_url, waited=wait_seconds)
         notify(self.config, self.root, 'model server down', base_url+' did not answer for '+str(int(wait_seconds))+' s')
