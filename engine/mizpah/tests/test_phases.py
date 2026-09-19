@@ -189,3 +189,28 @@ def test_reading_of_a_built_file_waits_for_its_builder_and_unblock_needs_a_done_
     observation = controller.observe(CONFIG, project)
     accepted, refusals = controller.guard(dict(unblock=[dict(task='count', after='write')]), observation, project)
     assert not accepted['unblock'] and any('"after" must name a task that has since completed' in r for r in refusals)
+
+
+def test_a_built_page_is_anchored_on_its_source_and_its_readings_follow_it(tmp_path: Path) -> None:
+    p = tmp_path/'built'
+    p.mkdir()
+    (p/'content').mkdir()
+    (p/'content'/'pitch.md').write_text('# Hero\n# How\n')
+    terra(p, 'init')
+    terra(p, 'brief', 'init', '--title', 'Page', '--mission', 'build and measure')
+    terra(p, 'brief', 'set', '--status', 'active', '--budget-points', '100',
+          '--need', 'Know the number of <section> elements site/index.html has',
+          '--deliverable', 'site/index.html: a page whose sections follow content/pitch.md')
+    terra(p, 'route', 'init')
+    observation = controller.observe(CONFIG, p)
+    decision = dict(unknowns=[
+        dict(id='site_built', cites='deliverable:1', type='boolean', creates='site/index.html',
+             claim='site/index.html exists and its section headings follow content/pitch.md', evidence_needed='compare headings'),
+        dict(id='section_count', cites='need:1', type='number', claim='sections in site/index.html', evidence_needed='parse it',
+             source='site/index.html'),
+    ], tasks=[dict(id='build', unknowns=['site_built'], bucket='medium', title='build'),
+              dict(id='count', unknowns=['section_count'], bucket='low', title='count')])
+    accepted, refusals = controller.guard(decision, observation, p)
+    assert {u['id'] for u in accepted['unknowns']} == {'site_built', 'section_count'}, refusals
+    by_id = {t['id']: t for t in accepted['tasks']}
+    assert by_id['build']['deps'] == [] and by_id['count']['deps'] == ['build'], (accepted['tasks'], refusals)

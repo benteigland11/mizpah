@@ -440,14 +440,27 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         # answer") is anchored on the proposals that record it (CR-001), not on a known.
         proposal_ids = {str(p.get('id')) for p in observation['brief'].get('proposals') or []}
         names_proposal = any(m in proposal_ids for m in re.findall(r'CR-\d+', item['claim']+' '+item['evidence_needed']))
-        if artifact and not names_proposal and not [w for w in re.findall(r'[a-z][a-z0-9_]*', item['claim']+' '+item['evidence_needed'])
-                                                    if w in anchors and w != item['id']]:
+        # A built thing (a page, a script) is anchored on the source it is built from: an existing project file the
+        # deliverable's text names (content/pitch.md). Its measured properties are separate unknowns taken after the
+        # build; anchoring the build on readings of itself deadlocked landing-en (2026-09-19).
+        text = item['claim']+' '+item['evidence_needed']
+        deliverable_text = ''
+        if item['cites'].startswith('deliverable:'):
+            entries = observation['brief'].get('deliverables') or []
+            index = int(item['cites'].split(':')[1])-1
+            deliverable_text = entries[index] if 0 <= index < len(entries) else ''
+        named_files = [f for f in re.findall(r'[\w./-]+\.[A-Za-z0-9]+', deliverable_text+' '+text)
+                       if f.lower() != str(item['creates']).lower() and f in text and project is not None and source_exists(project, f)]
+        if artifact and not names_proposal and not named_files \
+                and not [w for w in re.findall(r'[a-z][a-z0-9_]*', text) if w in anchors and w != item['id']]:
             refusals.append('unknown '+item['id']+': it is about '+(item['creates'] or item['cites'])+' but names no known '
                             'or unknown its content must agree with; an artifact is verified against the map — name '
                             'them in the evidence ("the STN01 row matches stn01_mean_temp_c", "the tests assert '
                             'station_count and mean_temp_c"), minting number unknowns first when the map lacks them; '
                             'a statement that a need cannot be answered is anchored on the open proposal that records '
-                            'it (name its id, e.g. CR-001)')
+                            'it (name its id, e.g. CR-001); a thing that is built (a page, a script) is anchored on the '
+                            'source files it is built from (name them: "sections follow content/pitch.md"), and its '
+                            'measured properties are separate unknowns that depend on the build')
             unknowns.remove(item)
     minted = {u['id'] for u in unknowns}
     for item in decision.get('tasks') or []:
@@ -515,9 +528,14 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
                 if owner_task and owner_task != tid and made and made in mine and owner_task not in deps:
                     deps.append(owner_task)
                     refusals.append('task '+tid+': reads '+made+', which '+owner_task+' builds — added that dependency')
-        reading_tasks = [t['id'] for t in tasks if not any(u in artifact_ids for u in t['unknowns'])]
+        made_here = {u['creates'].lower() for u in unknowns if u['id'] in ids and u.get('creates')}
+        def reads_own(task_unknowns: list[str]) -> bool:
+            texts = ' '.join(str(u.get('source') or '')+' '+str(u.get('claim') or '') for u in unknowns if u['id'] in task_unknowns)
+            texts += ' '.join(str(u.get('claim') or '')+' '+str(u.get('notes') or '') for u in observation['unknowns'] if u['id'] in task_unknowns)
+            return any(m and m in texts.lower() for m in made_here)
+        reading_tasks = [t['id'] for t in tasks if not any(u in artifact_ids for u in t['unknowns']) and not reads_own(t['unknowns'])]
         reading_tasks += [t['id'] for t in observation['tasks'] if t['status'] in OPEN_TASK
-                          and not any(u in artifact_ids for u in (t.get('unknowns') or []))]
+                          and not any(u in artifact_ids for u in (t.get('unknowns') or [])) and not reads_own(t.get('unknowns') or [])]
         if builds and not deps and reading_tasks:
             # An artifact that must agree with the map cannot be built before the readings exist.
             refusals.append('task '+tid+': it builds an artifact that must agree with the map, so it depends on the '
