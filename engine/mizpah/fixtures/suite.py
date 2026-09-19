@@ -131,7 +131,7 @@ def specs(project: Path) -> None:
     brief(project, 'Spec consistency', 'Turn the design documents under docs/ into a checked account of where they '
           'agree, where they contradict each other, and which requirements they actually support.',
           needs, deliverables, budget=250, notes='Readings over the documents first; the reports state only what the map holds.')
-    stamp(project, 'specs', dict(by_need={1: 5, 2: 6, 3: 30, 4: 45, 5: False, 6: 90, 7: 180, 8: False, 9: 3, 10: 1,
+    stamp(project, 'specs', dict(by_need={1: 5, 2: 6, 3: 30, 4: 45, 5: False, 6: 90, 7: 180, 8: False, 9: 2, 10: 1,
                                           11: False},
                                  contradictions=2, unsupported=['R6']))
 
