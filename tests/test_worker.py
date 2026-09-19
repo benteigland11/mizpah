@@ -515,3 +515,22 @@ def test_artifact_knowns_depend_on_the_files_that_make_them(config: dict, projec
     (project/'tool'/'__main__.py').write_text('import tool.cli  # rewritten by a later task\n')
     rows = json.loads(terra(project, 'known', 'list', '--json'))
     assert rows[0]['stale'] is True and any('__main__.py' in r for r in rows[0]['stale_reasons'])
+
+
+def test_outage_wait_starts_at_the_outage_not_at_entry(config: dict, tmp_path: Path, monkeypatch):
+    """One run() spans a burst of turns; a disconnect forty minutes in must still be waited for."""
+    import time as _time
+    from mizpah import worker as w
+    calls = dict(n=0)
+    class Session:
+        def run(self, maximum_worker_turns=None):
+            calls['n'] += 1
+            if calls['n'] == 1:
+                monkeypatch.setattr(_time, 'time', lambda: _time.monotonic()+10**6)   # far past any entry-time deadline
+                raise w.ModelTransportError('Server disconnected')
+            return dict(status='paused', completed_worker_turns=1)
+        def discard_pending(self): return dict(kind='model')
+    monkeypatch.setattr(w, 'model_up', lambda cfg: True)
+    assert w.run_through_outages(Session(), config, tmp_path, maximum_worker_turns=5)['status'] == 'paused'
+    assert json.loads((tmp_path/'outages.jsonl').read_text())['outage'] == 1
+    assert (tmp_path/'discarded.jsonl').exists()

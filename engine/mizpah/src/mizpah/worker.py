@@ -949,16 +949,19 @@ def run_through_outages(session: FocusedSession, config: dict[str, Any], root: P
     outages and pass straight through.
     """
     import time
-    deadline = time.time()+wait_seconds
+    outages = 0
     while True:
         try:
             return session.run(maximum_worker_turns=maximum_worker_turns)
         except RejectedGeneration:
             raise
         except ModelTransportError as error:
-            if time.time() > deadline:
+            # The wait starts at the outage, not at entry: one call to run() spans a whole burst of turns.
+            outages += 1
+            (root/'outages.jsonl').open('a').write(json.dumps(dict(at=time.time(), error=str(error)[:200], outage=outages))+'\n')
+            if outages > 5:
                 raise
-            (root/'outages.jsonl').open('a').write(json.dumps(dict(at=time.time(), error=str(error)[:200]))+'\n')
+            deadline = time.time()+wait_seconds
             while time.time() <= deadline and not model_up(config):
                 time.sleep(5)
             if not model_up(config):

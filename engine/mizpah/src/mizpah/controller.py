@@ -507,15 +507,17 @@ def decide_through_outages(client: Any, config: dict[str, Any], system: str, use
     import time
     import urllib.request
     from cg.backend_persistent_model_session_python.src.persistent_model_session import ModelTransportError, RejectedGeneration
-    deadline = time.time()+wait_seconds
+    outages = 0
     while True:
         try:
             return decide(client, config, system, user)
         except RejectedGeneration:
             raise
         except ModelTransportError:
-            if time.time() > deadline:
+            outages += 1
+            if outages > 5:
                 raise
+            deadline = time.time()+wait_seconds
             while time.time() <= deadline:
                 try:
                     with urllib.request.urlopen(config['controller']['endpoint']['base_url'].rstrip('/')+'/health', timeout=5) as r:
