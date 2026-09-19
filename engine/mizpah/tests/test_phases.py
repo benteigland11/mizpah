@@ -224,8 +224,8 @@ def test_registry_records_a_graduation_and_shows_it_to_the_next_brief(instrument
                                   dict(widgets=dict(checked_in=['frontend-headless-page-cli-python'])), tmp_path/'errors.jsonl')
     assert outcome['status'] == 'graduated'
     rows = capabilities.registered(config)
-    assert [(r['id'], r['kind'], r['graduates_to'], r['project'], r['uses']) for r in rows] == \
-        [('page_readings', 'tooling', 'frontend-headless-page-cli-python', 'instrumented', 1)]
+    assert [(r['id'], r['graduates_to'], r['project'], r['uses']) for r in rows] == \
+        [('page_readings', 'frontend-headless-page-cli-python', 'instrumented', 1)]
     # A new brief declaring the same enabler is shown the registry entry.
     p = tmp_path/'next'
     p.mkdir()
@@ -235,4 +235,4 @@ def test_registry_records_a_graduation_and_shows_it_to_the_next_brief(instrument
           '--enabler', 'page_readings:Headless page readings:cg/frontend-headless-page-cli-python')
     terra(p, 'route', 'init')
     text = controller.render_observation(controller.observe(config, p), 'route')
-    assert 'registry: page_readings (tooling) Headless page readings — widget frontend-headless-page-cli-python, graduated by instrumented, used 1×' in text
+    assert 'registry: page_readings Headless page readings — widget frontend-headless-page-cli-python, graduated by instrumented, used 1×' in text

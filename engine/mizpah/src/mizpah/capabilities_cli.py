@@ -21,7 +21,7 @@ def main() -> None:
     if not rows:
         print('(no enablers registered yet)')
     for cap in rows:
-        print(cap['id']+' ['+str(cap.get('kind'))+', '+str(cap.get('status'))+'] '+str(cap.get('title'))
+        print(cap['id']+' ['+str(cap.get('status'))+'] '+str(cap.get('title'))
               +(' → '+str(cap['graduates_to']) if cap.get('graduates_to') else ' at '+str(cap.get('path')))
               +' — by '+str(cap.get('project'))+', used '+str(cap.get('uses'))+'×')
         if cap.get('notes'):

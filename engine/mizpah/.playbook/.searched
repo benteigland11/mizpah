@@ -1,0 +1,331 @@
+container prose gutter
+Bound every section's prose to one shared container class with a 70-character measure
+the left gutter on site index html as rendered at 375 px
+the widest paragraph width in characters
+Implement sales/cli.py with stores revenue weeks refunds commands
+python3  m sales revenue prints total revenue agreeing with the map
+Bound every section prose to one shared container class with a 70-character measure
+Implement sales cli.py with stores revenue weeks refunds commands
+the left gutter on site index.html as rendered at 375 px
+sales cli revenue
+Bound every section's prose to one shared container class with a 70-character measure
+the left gutter on site index html as rendered at 375 px
+the widest paragraph width in characters
+Implement sales/cli.py with stores revenue weeks refunds commands
+python3  m sales revenue prints total revenue agreeing with the map
+Probe the current page: widest paragraph px and chars at 1280 px, container membership, gutters
+the left gutter as rendered at 1280 px
+Measure the rendered page before any change: needs 1 to 6
+the number of  p  elements outside the hero whose rendered text align is not left  or start   as currently rendered in site index css
+whether the hero h1 is centred as rendered
+the h1 font size in pixels as currently rendered
+the ratio of the h1 font size to the body paragraph font size as currently rendered
+the ratio of the h2 font size to the h3 font size as currently rendered
+the mean paragraph line length in characters as rendered at a 1280 px viewport width
+Measure the rendered page before any change: needs 1 to 6
+the number of  p  elements outside the hero whose rendered text align is not left  as currently rendered
+the h1 font size in pixels as rendered
+the mean paragraph line length in characters as rendered at a 1280 px viewport width
+the contrast ratio of body paragraph text against its background as rendered at 1280 px
+Render the page and read layout: text-align, font sizes, line length
+the number of  p  elements outside the hero whose rendered text align is not left  as currently rendered
+the h1 font size in pixels as rendered
+the mean paragraph line length in characters as rendered at a 1280 px viewport width
+the contrast ratio of body paragraph text against its background as rendered at 1280 px
+Measure the rendered page before any change: needs 1 to 6
+the number of  p  elements outside the hero whose rendered text align is not left  as currently rendered
+the h1 font size in pixels as rendered
+the mean paragraph line length in characters as rendered at a 1280 px viewport width
+the contrast ratio of body paragraph text against its background as rendered at 1280 px
+Implement sales/cli.py with stores revenue weeks refunds commands
+python3  m sales revenue prints total revenue agreeing with the map
+the h1 font size in pixels as rendered
+render page layout readings
+Measure the rendered page before any change: needs 1 to 6
+1280 hero paragraph text align background body centred characters contrast font left
+the number of  p  elements outside the hero whose rendered text align is not left  as currently rendered
+the h1 font size in pixels as rendered
+the mean paragraph line length in characters as rendered at a 1280 px viewport width
+the contrast ratio of body paragraph text against its background as rendered at 1280 px
+whether the hero h1 is centred as rendered
+Measure the rendered page before any change: needs 1 to 6
+rendered 1280 hero paragraph text align background body centred characters contrast elements
+the number of  p  elements outside the hero whose rendered text align is not left  as currently rendered
+the h1 font size in pixels as rendered
+the mean paragraph line length in characters as rendered at a 1280 px viewport width
+the contrast ratio of body paragraph text against its background as rendered at 1280 px
+whether the hero h1 is centred as rendered
+Implement sales/cli.py with stores revenue weeks refunds commands
+sales revenue store stores total
+python3  m sales revenue prints total revenue agreeing with the map
+python3  m sales stores prints the store count agreeing with the map
+Change site/style.css so prose is left-aligned outside the hero, the hero stays centred, and headings form a scale with the measure kept
+after the change  site style css prose is left aligned outside the hero  before non left p count reads 0
+after the change  headings form a scale   h1 clearly larger than h2  h2 than h3  body the base   matching before h1 font size px  before h1 body ratio  2  before h2 h3 ratio  1 2
+Measure the rendered page after the CSS change for the typographic scale, alignment and measure
+after the change  the h1 to body font size ratio as rendered matches before h1 font size px and the after scale  before h1 body ratio  2  before h2 h3 ratio  1 2 
+after the change  the hero heading is centred as rendered  matching before heading centred
+after the change  the mean paragraph line length in characters as rendered at 1280 px is kept  matching before mean line length chars
+Write report/type.md with one row per need and before/after readings
+report type md has one row per need  1 to 6  with the reading before and after the change and the target from content targets json
+Measure the before state: distinct vertical gaps, share that are multiples of 8 px, largest gap, distinct margin/padding values, and whether all are tokens or zero
+1280 between blocks consecutive rendered text vertical distinct gaps many margin padding
+it is not known how many distinct vertical gaps in pixels exist between consecutive text blocks  headings and paragraphs  as rendered at 1280 px 
+it is not known the share of vertical gaps between consecutive text blocks that are whole multiples of the 8 px base unit as rendered at 1280 px 
+it is not known the largest vertical gap in pixels between consecutive text blocks as rendered at 1280 px 
+it is not known how many distinct margin and padding values site style css declares 
+it is not known whether every margin and padding value in site style css is a var   sp    token or zero 
+Measure order prices and quantities
+orders greater mean price rows
+the mean price in orders csv is not known 
+the number of rows in orders csv with qty greater than 10 is not known 
+Measure order prices and high-quantity rows
+orders greater mean price rows
+the mean price in orders csv is not known 
+the number of rows in orders csv with qty greater than 10 is not known 
+Measure the before state: distinct vertical gaps, share that are multiples of 8 px, largest gap, distinct margin/padding values, and whether all are tokens or zero
+1280 between blocks consecutive rendered text vertical distinct gaps many margin padding
+it is not known how many distinct vertical gaps in pixels exist between consecutive text blocks  headings and paragraphs  as rendered at 1280 px 
+it is not known the share of vertical gaps between consecutive text blocks that are whole multiples of the 8 px base unit as rendered at 1280 px 
+it is not known the largest vertical gap in pixels between consecutive text blocks as rendered at 1280 px 
+it is not known how many distinct margin and padding values site style css declares 
+it is not known whether every margin and padding value in site style css is a var   sp    token or zero 
+Extract document counts, values, endpoints, and requirement evidence
+docs service billing event retention stated timeout upstream usage agree data documenting
+the number of markdown documents under docs  is not known 
+the number of requirements listed in docs requirements md is not known 
+the upstream timeout stated by docs api gateway md is not known 
+the upstream timeout expected by docs billing service md is not known 
+whether docs api gateway md and docs billing service md agree on the upstream timeout is not known 
+the usage event retention stated by docs billing service md is not known 
+Build and check the consistency report
+consistency contradiction contradictions equal final line report states
+the final line of  report consistency md  states the number of contradictions equal to known contradiction count 
+Build and check the requirements support report
+coverage docs document documents healthz names report requirement requirements service states support
+ report requirements md  states whether documents under docs  support requirement r6 and names the supporting document or  unsupported   agreeing with every service document s get  healthz coverage 
+Change site/style.css so every vertical gap comes from the spacing scale (var(--sp-*) on 8 px) and section gaps are visibly larger than paragraph gaps
+vertical 1280 between blocks consecutive distinct gaps margin padding pixels rendered site
+after the change every margin and padding value in site style css is a var   sp    token or zero
+after the change the number of distinct margin and padding values site style css declares
+after the change the number of distinct vertical gaps in pixels between consecutive text blocks  headings and paragraphs  as rendered at 1280 px
+after the change the share of vertical gaps that are whole multiples of the base unit 8 px
+after the change the largest vertical gap in pixels between consecutive text blocks as rendered at 1280 px
+Complete and validate all named report coverage
+contradiction consistency report retention timeout upstream usage agrees billing contains docs event
+ report consistency md  contains the upstream timeout contradiction row with  docs api gateway md  at 30 seconds and  docs billing service md  at 45 seconds  matching api gateway timeout seconds  billing upstream timeout seconds  and upstream timeout agrees false 
+ report consistency md  contains the usage event retention contradiction row with  docs billing service md  at 90 days and  docs data retention md  at 180 days  matching billing retention days  data retention days  and usage event retention agrees false 
+ report consistency md  lists exactly the contradiction rows represented by upstream timeout contradiction row and usage retention contradiction row  with no omitted or extra contradictions 
+the contradiction count is 2  one for the upstream timeout disagreement and one for the usage event retention disagreement 
+Validate every named contradiction row and requirement entry
+billing consistency contains contradiction docs identifying naming quantity report service showing data
+report consistency md contains an upstream timeout contradiction row naming docs api gateway md and docs billing service md  showing 30 and 45 seconds and identifying the upstream timeout quantity 
+report consistency md contains a usage event retention contradiction row naming docs billing service md and docs data retention md  showing 90 and 180 days and identifying the usage event retention quantity 
+Validate named support coverage for requirements R1 through R5
+docs document documents names report requirement requirements states support supporting under unsupported
+ report requirements md  states whether documents under docs  support requirement r1 and names the supporting document or  unsupported  
+ report requirements md  states whether documents under docs  support requirement r2 and names the supporting document or  unsupported  
+ report requirements md  states whether documents under docs  support requirement r3 and names the supporting document or  unsupported  
+ report requirements md  states whether documents under docs  support requirement r4 and names the supporting document or  unsupported  
+ report requirements md  states whether documents under docs  support requirement r5 and names the supporting document or  unsupported  
+Calculate battery pack sizing readings
+pack parallel mass minimum hover flight time capability continuous discharge including required
+the pack nominal voltage for the series count in drone json is not known 
+the all up mass with one parallel pack is not known 
+the hover power at the one parallel all up mass  including avionics  is not known 
+the required flight time including reserve is not known 
+the minimum parallel cell count that meets the required flight time while accounting for added pack mass is not known 
+the pack mass at the minimum parallel count is not known 
+Write traceable pack sizing report
+equal pack report states flight hover mass time chosen energy minimum parallel
+ report pack md  states the chosen parallel count equal to minimum parallel count 
+ report pack md  states pack mass equal to pack mass 
+ report pack md  states all up mass equal to all up mass 
+ report pack md  states usable pack energy equal to usable pack energy 
+ report pack md  states hover power equal to hover power 
+ report pack md  states flight time with reserve equal to required flight time with reserve 
+Write report/rhythm.md with one row per need (1 to 5) encoding the before and after readings and the content/targets.json targets
+content have json need report rhythm target targets written
+report rhythm md is not yet written  it must have one row per need  1 to 5  with the reading before and after the change and the target from content targets json 
+Implement runnable pack sizing script
+drone equal json pack sizing flight hover mass time chosen energy minimum
+ sizing pack py  run as  python3 sizing pack py drone json  prints the chosen parallel count equal to minimum parallel count 
+ sizing pack py  run as  python3 sizing pack py drone json  prints pack mass equal to pack mass 
+ sizing pack py  run as  python3 sizing pack py drone json  prints all up mass equal to all up mass 
+ sizing pack py  run as  python3 sizing pack py drone json  prints usable pack energy equal to usable pack energy 
+ sizing pack py  run as  python3 sizing pack py drone json  prints hover power equal to hover power 
+ sizing pack py  run as  python3 sizing pack py drone json  prints flight time with reserve equal to required flight time with reserve 
+Complete report series count and sensitivity explanation
+chosen equal pack report series states
+report pack md states the chosen series count equal to pack series  6  
+Add series count to pack script output
+chosen drone equal json matching pack report series sizing
+sizing pack py run as  python3 sizing pack py drone json  prints the chosen series count equal to pack series and matching report series count 
+Determine and document the sizing sensitivity assumption
+assumption most pack report sensitive states
+report pack md states that the most sensitive assumption is most sensitive assumption 
+Make pack script hover power agree with the report and sizing map
+drone equal hover json pack power report sizing
+sizing pack py run as  python3 sizing pack py drone json  prints hover power equal to hover power and the report value 
+Measure shop coverage, documentation, imports, and test execution
+shop under functions public directly modules tests between called import another chain
+the number of python modules under shop  excluding   init   py is not known 
+the total number of public functions defined under shop  is not known 
+the number of public shop  functions directly called by tests under tests  is not known 
+the number of public shop  functions not directly called by tests under tests  is not known 
+the number of import edges between modules under shop  is not known 
+the length of the longest import chain between shop  modules is not known 
+Probe the rendered page for the before readings of the CTA and steps list
+rendered action call background list pixels primary steps visible browser changes contrast
+the rendered height in pixels of the primary call to action    cta   as currently rendered is unknown 
+the rendered horizontal padding in pixels of the primary call to action    cta   as currently rendered is unknown 
+it is not known whether the call to action changes its background or outline on  hover or  focus visible per site style css 
+the contrast ratio of the call to action text against its background as currently rendered is unknown 
+the number of visible list markers  browser markers plus number spans  per   li   in the steps list as currently rendered is unknown 
+it is not known whether every   li   in the steps list renders exactly one number as currently rendered 
+Build and verify report/audit.md
+agreement audit checked does final function have line public report untested
+the final line of report audit md does not yet have a checked agreement with the untested public function count 
+Build and verify report/refactor.md
+agreement checked function functions have lines refactor report untested dependency does exactly
+the function lines in report refactor md do not yet have a checked agreement with exactly the untested public functions named by the map 
+the order of function lines in report refactor md does not yet have a checked agreement with the dependency order of the untested functions 
+Verify every audit row and correct the undocumented summary
+audit report docstring matching shop source states tested tests cart money total
+the report audit md row for shop tax tax for states tested no and docstring no  matching the source and tests 
+the report audit md row for shop tax gross states tested no and docstring no  matching the source and tests 
+the report audit md row for shop report render states tested no and docstring no  matching the source and tests 
+the report audit md row for shop money to cents states tested yes and docstring yes  matching the source and tests 
+the report audit md row for shop money add states tested yes and docstring no  matching the source and tests 
+the report audit md row for shop money apply discount states tested no and docstring yes  matching the source and tests 
+Verify refactor lines against the untested functions and dependency order
+exactly function included line names once plan public refactor report untested apply
+the report refactor md line for apply discount names an untested public function and is included exactly once in the refactor plan 
+the report refactor md line for is empty names an untested public function and is included exactly once in the refactor plan 
+the report refactor md line for gross names an untested public function and is included exactly once in the refactor plan 
+the report refactor md line for tax for names an untested public function and is included exactly once in the refactor plan 
+the report refactor md line for render names an untested public function and is included exactly once in the refactor plan 
+Measure the source inventory and untested public-function set
+under functions public appear file level lines names python tests whose
+the number of lines of python under src  is not known 
+the number of public top level functions under src  is not known 
+the number of public functions under src  whose names appear in no file under tests  is not known 
+Change the CTA into a button and the steps list into a numbered list in site/style.css
+1185 background content contrast json keep keeps least need ratio requires target
+it is not known that after the change the cta text keeps a contrast ratio of at least 4 5 against its background  need 4 s target in content targets json     4 5   requires and the before cta contrast ratio known  7 1185  must keep 
+Select and measure the most complex untested public function
+branch function highest public direct test untested
+the public function with no direct test that has the highest branch count is not known 
+the branch count before any change of the highest branch count untested public function is not known 
+Run the baseline test suite and record collection and pass status
+tests collected exits pytest suite
+it is not known whether  python3  m pytest  q tests  exits 0 before any change 
+the number of tests collected by the suite before any change is not known 
+Render the current page and read every before tonality reading
+rendered background text action call contrast distinct page ratio backgrounds below colours
+the minimum contrast ratio over every rendered text element against its effective background on the page as currently rendered is unknown 
+the number of text background pairs below 4 5 1 as rendered is unknown 
+the number of distinct hues  rounded to 15 degrees  used for text and backgrounds other than greys as currently rendered is unknown 
+the contrast ratio of the call to action text against its background as currently rendered is unknown 
+the number of distinct background colours the rendered page uses is unknown 
+whether inline links use the same hue as the call to action is unknown 
+Add branch-distinct tests and refactor collect_map_status without changing its public signature
+baseline branch chosen collect function least lower measured quarter status
+the chosen function collect map status has a measured branch count after the change that is at least one quarter lower than its baseline count of 2 
+Validate the named test file and complete post-change suite readings
+tests passes status suite test collect collected exists exit file full measured
+a test file named tests test collect map status py exists and every test in it passes 
+the full test suite passes after the change when run as python3  m pytest  q tests with exit status 0 
+the number of tests collected by the suite after the change is measured 
+Verify the chosen function tests, refactor, signature, and improvement report
+collect function status branch chosen least matching complex consistent contains corresponding description
+tests test collect map status py contains at least three tests of collect map status  each exercising a different branch of the chosen function  consistent with most complex untested function and chosen function branch count before
+collect map status is refactored in its existing source file and its branch count is at least one quarter lower than chosen function branch count before  matching after chosen function branch count
+the public signature of collect map status is unchanged by the refactor
+report improvement md records the survey readings  selected function and rationale  change description  and after readings  with every number matching the corresponding map known or resolved after reading unknown
+Repair the named test file and failing after-change suite, then update the improvement report
+improvement report states test false function pass baseline branch chosen collected public
+report improvement md states the python line count under src  as 21521
+report improvement md states the public function count under src  as 461
+report improvement md states the count of untested public functions as 273
+report improvement md states the chosen function s before branch count as 2
+report improvement md states the baseline test suite pass result as false
+report improvement md states the baseline collected test count as 410
+Change site/style.css into a tonal system: every pair meets 4.5:1, one accent hue for links/CTA/emphasis, surfaces form at most three layers.
+system tonal background text rendered action call contrast distinct ratio backgrounds below
+the minimum contrast ratio over every rendered text element against its effective background after the tonal system change 
+the number of text background pairs below 4 5 1 as rendered after the tonal system change 
+the number of distinct hues  rounded to 15   used for text and backgrounds other than greys after the tonal system change 
+the contrast ratio of the call to action text against its background after the tonal system change 
+the number of distinct background colors the rendered page uses after the tonal system change 
+whether inline links use the same hue as the call to action after the tonal system change 
+Compute pack sizing readings from drone.json
+pack parallel mass selected hover including draw flight time voltage avionics capability
+the pack nominal voltage for the series count in drone json is not known 
+the all up mass for a one parallel pack  including the airframe  payload  and six cells  is not known 
+the hover power draw at the one parallel all up mass  including avionics  is not known 
+the required flight time including the reserve fraction is not known 
+the minimum parallel cell count that meets the reserve flight time requirement while accounting for added pack mass is not known 
+the pack mass at the minimum passing parallel count is not known 
+Write and verify report/pack.md
+does pack report state equal hover mass cell chosen energy flight parallel
+ report pack md  does not yet state the chosen parallel cell count equal to min parallel count 
+ report pack md  does not yet state pack mass equal to pack mass p kg 
+ report pack md  does not yet state all up mass equal to all up mass p kg 
+ report pack md  does not yet state usable energy equal to usable pack energy p wh 
+ report pack md  does not yet state hover power equal to hover power sized w 
+ report pack md  does not yet state flight time with reserve agreeing with hover flight time p min and reserve flight time min 
+Add and verify the chosen series count in report/pack.md
+cell chosen pack report series states
+report pack md states the chosen series cell count 
+Add and verify the thrust-to-weight ratio in report/pack.md
+four maximum motor pack ratio report states thrust weight
+report pack md states the four motor maximum thrust to weight ratio 
+Create sizing/pack.py and verify its output against the sizing map
+drone energy flight hover json mass nominal pack parallel power runnable sized
+sizing pack py is runnable as  python3 sizing pack py drone json  and prints sizing values agreeing with pack nominal v  min parallel count  pack mass p kg  all up mass p kg  usable pack energy p wh  hover power sized w  hover flight time p min  and thrust to weight ok 
+Write report/tonality.md with one row per need (1-6), before and after readings plus targets
+background below colors content contrast distinct hues json knowns links match need
+report tonality md has one row per need  1 to 6  with the reading before and after the change and the target from content targets json  the before after readings match the knowns before min contrast ratio and after min contrast ratio  need 1   before pairs below 45 and after pairs below 45  need 2   before distinct hues and after distinct hues  need 3   before cta contrast ratio and after cta contrast ratio  need 4   before distinct background colors and after distinct background colors  need 5   before links same hue as cta and after links same hue as cta  need 6  respectively 
+Install and validate the page readings instrument
+does exist instrument page path readings required validate
+the page readings instrument does not yet exist and validate at its required path 
+Update pack report and script to state and print all mapped sizing values consistently
+equal pack report states hover mass cell chosen energy flight identifies parallel
+report pack md states the chosen parallel cell count equal to min parallel count 
+report pack md states pack mass equal to pack mass p kg 
+report pack md states all up mass equal to all up mass p kg 
+report pack md states usable pack energy equal to usable pack energy p wh 
+report pack md states hover power equal to hover power sized w 
+report pack md states flight time with reserve equal to hover flight time p min and identifies the reserve requirement 
+Audit source files, assets, spacing, images, colors, and evidence numbers
+site html index section declared distinct elements style appears colors content elsewhere
+the number of  section  elements in site index html is not known 
+it is not known whether every section opens with an h1 in the hero or an h2 elsewhere 
+the total page weight of site index html and every file it references is not known 
+the number of distinct margin and padding values declared in site style css is not known 
+the number of  img  elements without alt text in site index html is not known 
+the number of distinct colors declared in site style css is not known 
+Build the hand-written Mizpah landing page
+site agree color contains declarations distinct evidence grounded headings html index landing
+ site index html  contains the ordered landing page sections and evidence numbers that agree with section count  sections open with headings  and evidence numbers are grounded 
+ site style css  uses the measured spacing and color declarations reported by css spacing value count and css distinct color count 
+Print and verify every report sizing number from the pack script
+equal pack report sizing chosen mass energy flight four hover maximum motor
+sizing pack py prints the chosen series count equal to report pack md and report series count 
+sizing pack py prints the chosen parallel count equal to report pack md and report parallel count 
+sizing pack py prints pack mass equal to report pack md and report pack mass kg 
+sizing pack py prints all up mass equal to report pack md and report all up mass kg 
+sizing pack py prints usable pack energy equal to report pack md and report usable energy wh 
+sizing pack py prints hover power equal to report pack md and report hover power w 
+Build the hand-written Mizpah landing page and its stylesheet
+content hand html index landing page required section site structure written
+ site index html  is not known to be the hand written landing page with the required content and section structure 
+Compute motor and ESC selection and re-check sizing
+sized mass stated catalog four hover motor escs flight lightest meets motors
+the hover current per motor at the sized mass is not stated on the map 
+the lightest catalog motor whose four motor maximum thrust meets 1 5 times the sized all up mass is not known 
+the lightest catalog esc whose continuous current is at least twice the hover current per motor is not known 
+the all up mass after adding four selected motors and four selected escs to the sized configuration is not stated on the map 
+the hover flight time at the selection all up mass with the sized pack is not stated on the map 
+it is not known whether the selection flight time still meets the required flight time with reserve 
