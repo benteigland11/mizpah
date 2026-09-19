@@ -26,7 +26,19 @@ def pickable(config: dict[str, Any], project: Path, root: Path | None = None) ->
     tasks = terra(config, project, 'route', 'next')['tasks']
     resumable = [t for t in tasks if root is not None and t.get('status') == 'in_progress'
                  and t.get('owner_agent') == config['mizpah']['agent'] and (root/'tasks'/t['id']/'state.sqlite3').exists()]
-    return resumable+[t for t in tasks if t.get('pickable') and t.get('map_id')]
+    ready = [t for t in tasks if t.get('pickable') and t.get('map_id')]
+    # Builders before readers among the ready: a reading of a file whose builder is also ready would only block
+    # (logo_mark3 measured contrast of marks nine build tasks had not drawn yet).
+    def builds(task: dict[str, Any]) -> bool:
+        for uid in [task.get('map_id')]+[a.removeprefix('unknown:') for a in task.get('acceptance') or [] if str(a).startswith('unknown:')]:
+            path = project/'.terra'/'map'/'unknowns'/(str(uid)+'.json')
+            try:
+                if 'creates ' in str(json.loads(path.read_text()).get('notes') or ''):
+                    return True
+            except (OSError, ValueError):
+                continue
+        return False
+    return resumable+sorted(ready, key=lambda t: not builds(t))
 
 
 def blocked(config: dict[str, Any], project: Path) -> list[dict[str, Any]]:
