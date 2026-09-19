@@ -312,9 +312,12 @@ def test_non_goals_reach_the_worker_and_refuse_artifacts_that_build_them(tmp_pat
         dict(id='external_request_count', cites='need:1', type='number', claim='requests to any framework CDN', evidence_needed='count'),
         dict(id='framework_bundle', cites='deliverable:1', type='boolean', creates='site/framework.js',
              claim='site/framework.js bundles a framework for the page', evidence_needed='exists'),
+        dict(id='report_says_no_framework', cites='deliverable:1', type='boolean', creates='site/report.md',
+             claim='site/report.md states that no framework is used, agreeing with external_request_count', evidence_needed='read it'),
     ], tasks=[dict(id='count', unknowns=['external_request_count'], bucket='low', title='count'),
-              dict(id='bundle', unknowns=['framework_bundle'], bucket='low', title='bundle')]), observation, p)
-    assert [u['id'] for u in accepted['unknowns']] == ['external_request_count']
+              dict(id='bundle', unknowns=['framework_bundle'], bucket='low', title='bundle'),
+              dict(id='report', unknowns=['report_says_no_framework'], bucket='low', title='report')]), observation, p)
+    assert sorted(u['id'] for u in accepted['unknowns']) == ['external_request_count', 'report_says_no_framework']
     assert any('framework_bundle' in r and 'non-goal' in r for r in refusals)
     text = worker.render_reference(p, dict(id='count', bucket='low', title='count', map_id='external_request_count'),
                                    [dict(id='external_request_count', claim='c', type='number', evidence_needed='e',

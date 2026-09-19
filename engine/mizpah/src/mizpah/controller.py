@@ -454,8 +454,10 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         # A non-goal names things not to be made (`a framework`, `bundler`, external fonts): an artifact unknown
         # that creates or claims one is refused. Readings are left alone — measuring that a non-goal is
         # respected (external_request_count = 0) is how the map proves it.
+        # Matched against what the unknown builds and how it is named, not its claim: a claim that says the report
+        # "makes no choice" names the non-goal to say it is respected (logo_mark2, 2026-09-19).
         offending = [term for non_goal in brief.get('non_goals') or [] for term in re.findall(r'`([^`]+)`', str(non_goal))
-                     if term and (creates or cites.startswith('deliverable:')) and term.lower() in (creates+' '+claim).lower()]
+                     if term and creates and (term.lower() in creates.lower() or term.lower().replace(' ', '_') in uid)]
         if offending:
             refusals.append('unknown '+uid+': it builds '+', '.join('`'+t+'`' for t in dict.fromkeys(offending))+', which the brief '
                             'names as a non-goal; a non-goal is respected, not delivered'); continue
@@ -595,8 +597,11 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             if project is not None and not deps:
                 named = {p.rstrip('/').lower() for text in (observation['brief'].get('deliverables') or [])
                          for p in re.findall(r'[\w./-]+/[\w./-]*|[\w./-]+\.[A-Za-z0-9]+', str(text))}
-                missing = sorted({p for p in named if p and p in mine and not (project/p).exists()
-                                  and not any(p in c for c in creators)})
+                named = {p.split('<')[0].rstrip('/') for p in named if p.split('<')[0].rstrip('/')}
+                def exists_somewhere(p: str) -> bool:
+                    return (project/p).exists() or ('/' not in p and any(project.rglob(p)))
+                missing = sorted({p for p in named if p and (p in mine or ('/' not in p and re.search(r'\b'+re.escape(p)+r'\b', mine)))
+                                  and not exists_somewhere(p) and not any(p in c for c in creators)})
                 if missing:
                     refusals.append('task '+tid+': reads '+', '.join(missing[:3])+', which does not exist and no task builds — '
                                     'mint the artifact unknown that creates it (with `creates`) and its task first, and make '

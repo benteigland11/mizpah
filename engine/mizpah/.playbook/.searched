@@ -547,3 +547,17 @@ the wcag contrast ratio instrument  contrast ratio  is not known to exist and va
 Write pick.json from the resolved catalog selection
 47uf cheapest cost json mass matching part pick records
 pick json records part cap 47uf 25v  cost 0 28  and mass g 1 1  agreeing with cheapest matching part id  cheapest matching part cost  and cheapest matching part mass g
+Create brand/tokens.css from the colour-system constraints
+brand colour exists source system token tokens
+brand tokens css exists and is the source of the colour token system 
+Render every candidate mark at 16 pixels and measure ink coverage
+inked least mark percent pixels renders
+it is not known whether every mark renders at 16 by 16 pixels with at least 20 percent of pixels inked 
+Implement and verify the role-based light and dark colour tokens
+brand tokens custom declares measured properties root accent additional based border color
+brand tokens css declares the required role based custom properties on  root  including   bg    fg    accent    muted    surface    border  and any additional roles needed by the system 
+brand tokens css declares the measured number of colour custom properties on  root 
+brand tokens css has the measured number of token values overridden under prefers color scheme  dark 
+Write report/layout.md with one row per need (1 to 6) recording before and after readings and the target from content/targets.json
+content have json layout need report target targets
+report layout md must have one row per need  1 to 6  with the reading before and after the change and the target from content targets json 
