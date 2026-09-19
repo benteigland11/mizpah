@@ -785,13 +785,21 @@ def library_parts(config: dict[str, Any], project: Path, unknowns: list[dict[str
     import subprocess as sp
     env = dict(os.environ, WIDGET_LIBRARY_PATH=config['mizpah']['widget_library'])
     seen: dict[str, str] = {}
-    for unknown in unknowns:
-        query = re.sub(r'[^a-z0-9 ]', ' ', (unknown.get('claim') or '').lower()).replace(' is unknown', '')
+    # One query made of the distinctive words across all claims finds the instrument for the task's kind of
+    # source (a rendered page, a CSV); each claim's own query finds the atom for that reading.
+    combined = ' '.join(distinctive_words([str(u.get('claim') or '') for u in unknowns]))
+    for query in [combined]+[re.sub(r'[^a-z0-9 ]', ' ', (u.get('claim') or '').lower()).replace(' is unknown', '') for u in unknowns]:
+        if not query.strip():
+            continue
+        words = {w for w in re.findall(r'[a-z0-9]{4,}', query) if w not in STOP}
         try:
             out = sp.run([config['mizpah']['cartograph'], 'search', query, '--language', 'python', '--top-k', '3',
                           '--local-only'], cwd=project, capture_output=True, text=True, timeout=60, env=env).stdout
             for hit in (json.loads(out).get('local') or {}).get('widgets') or []:
-                if hit.get('relevance_score', 0) >= 0.5:
+                # A relevance score alone let "render" pull in FreeCAD meshes and CFD contours for a web page;
+                # a hit counts when it shares two real words with the claim, the same bar as procedure hits.
+                text = (hit['id']+' '+str(hit.get('name') or '')+' '+str(hit.get('description') or '')).lower().replace('-', ' ')
+                if hit.get('relevance_score', 0) >= 0.5 and shared_stems(words, text) >= 2:
                     seen.setdefault(hit['id'], (hit.get('description') or '').split('. ')[0][:120])
         except (ValueError, OSError, sp.SubprocessError):
             continue
@@ -802,7 +810,7 @@ def procedure_parts(config: dict[str, Any], task: dict[str, Any], unknowns: list
     """Procedures already in the playbook near this task, found by the host so the worker opens one instead of
     working the method out: the sales2 run never searched once and minted a twin per task."""
     import subprocess as sp
-    queries = [str(task.get('title') or '')]
+    queries = [str(task.get('title') or ''), ' '.join(distinctive_words([str(u.get('claim') or '') for u in unknowns]))]
     queries += [re.sub(r'[^a-z0-9 ]', ' ', (u.get('claim') or '').lower()) for u in unknowns[:6]]
     seen: dict[str, tuple[float, str]] = {}
     for query in queries:
@@ -818,8 +826,7 @@ def procedure_parts(config: dict[str, Any], task: dict[str, Any], unknowns: list
                 # Scores are not comparable across queries; a hit counts when it shares two real words with
                 # the query ("character" alone matched a rigged-game procedure for a 70-character measure).
                 text = ' '.join(str(hit.get(k) or '') for k in ('id', 'title', 'description', 'snippet')).lower().replace('-', ' ')
-                shared = {w for w in words if w in text}
-                if len(shared) < 2:
+                if shared_stems(words, text) < 2:
                     continue
                 score = float(hit.get('score') or 0)
                 if score > seen.get(hit['id'], (0, ''))[0]:
@@ -830,8 +837,28 @@ def procedure_parts(config: dict[str, Any], task: dict[str, Any], unknowns: list
     return ['`'+k+'` — '+v[1] for k, v in best]
 
 
+def distinctive_words(texts: list[str], limit: int = 12) -> list[str]:
+    """The words that recur across a task's claims, most frequent first: what the task is about, minus filler."""
+    counts: dict[str, int] = {}
+    for text in texts:
+        for w in set(re.findall(r'[a-z0-9]{4,}', text.lower())):
+            if w not in STOP:
+                counts[w] = counts.get(w, 0)+1
+    return [w for w, _ in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]]
+
+
+def shared_stems(words: set[str], text: str) -> int:
+    """How many of the query's real words the text carries, matching on a 5-letter stem (font/fonts, size/sizes)."""
+    stems = {w[:5] for w in words}
+    found = {t[:5] for t in re.findall(r'[a-z0-9]{4,}', text)}
+    return len(stems & found)
+
+
+# Filler only: the words that describe every Mizpah unknown. Domain words (page, rendered, viewport, csv)
+# stay — they are what a search is for.
 STOP = {'with', 'from', 'that', 'this', 'into', 'every', 'each', 'must', 'their', 'when', 'than', 'then', 'against',
-        'rendered', 'known', 'unknown', 'reading', 'value', 'number', 'whether', 'count', 'site', 'index', 'html'}
+        'known', 'unknown', 'reading', 'value', 'number', 'whether', 'count', 'current', 'currently', 'probe',
+        'change', 'after', 'before', 'agreeing', 'prints', 'python3'}
 
 
 def green_message(gate: dict[str, Any], unknown_id: str | list[str], used: list[str] = (), cost: dict[str, Any] | None = None,
