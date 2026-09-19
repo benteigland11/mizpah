@@ -24,7 +24,9 @@ DEFAULT_SOURCE = Path(__file__).resolve().parents[2]/'terra'
 NOTE = (
     'The package is under src/terra with its tests under tests/; `python3 -m pytest -q tests` runs the suite from the '
     'project root (pytest is installed). A function\'s branch count is the number of if/for/while/try/with/boolean-op '
-    'nodes in its body (ast.walk); a function has a direct test when its name appears in a test file. Survey before '
+    'nodes in its body (ast.walk); a function has a direct test when its name appears in a test file. A reading about '
+    '"that function" takes which function from the map (the probe declares the label known as an input), never decides '
+    'it again. Survey before '
     'you change: the readings choose the function. Behaviour must not change: the suite is the reference.'
 )
 
@@ -51,7 +53,8 @@ def improve(project: Path, source: Path = DEFAULT_SOURCE) -> None:
         'Know the branch count of that function before any change',                                            # 5
         'Know whether the test suite passes (python3 -m pytest -q tests exits 0) before any change',            # 6
         'Know the number of tests the suite collects before any change',                                       # 7
-        'Know the branch count of that function after the change',                                             # 8
+        'Know the branch count of that function after the change, counted together with every function under src/ '
+        'that it calls and that did not exist before the change (moving the body elsewhere is not a reduction)',    # 8
         'Know whether a test file named for that function exists and every test in it passes',                # 9
         'Know whether the test suite passes after the change',                                                 # 10
         'Know the number of tests the suite collects after the change',                                        # 11

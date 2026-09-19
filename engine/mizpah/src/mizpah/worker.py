@@ -620,6 +620,7 @@ def task_gate(config: dict[str, Any], project: Path, task: dict[str, Any], map_i
         if project_unknown.get('status') != 'resolved':
             problems.append('project unknown '+unknown_id+' is '+str(project_unknown.get('status')))
     problems += artifact_agreement_problems(project, unknown_ids)
+    problems += unread_input_problems(project, unknown_ids)
     gate = terra(config, project, 'gate')
     own_ids = set(knowns) | set(runs) | set(unknown_ids)
     for violation in gate.get('violations') or []:
@@ -749,6 +750,63 @@ def artifact_agreement_problems(project: Path, unknown_ids: list[str]) -> list[s
                             'artifact measures a different quantity than the known (the same name at another mass, '
                             'another point, another unit), do not bend it to the map: block the task naming both '
                             'quantities, so the brief can be made to name them apart')
+    return problems
+
+
+def run_meta(project: Path, run_id: str) -> dict[str, Any]:
+    for base in (project/'.terra'/'map'/'runs', *(project/'.terra'/'map'/'sessions').glob('*/runs')):
+        path = base/run_id/'meta.json'
+        if path.exists():
+            try:
+                return json.loads(path.read_text())
+            except ValueError:
+                return {}
+    return {}
+
+
+def unread_input_problems(project: Path, unknown_ids: list[str]) -> list[str]:
+    """A reading "of that function" must read which function from the map, not decide it again.
+
+    An unknown whose claim names a label known (which function, which file, which store) is a reading
+    conditioned on that choice. Terra records what a run consumed (declared inputs, instrumented `known get`);
+    when the label appears in none of the unknown's runs, the probe re-derived the choice — luna's survey
+    took the branch count of the last function it walked while the map said `collect_map_status` (119
+    branches, recorded as 2). Red, with the fix spelled out."""
+    problems: list[str] = []
+    labels = {}
+    for path in (project/'.terra'/'map'/'knowns').glob('*.json'):
+        try:
+            known = json.loads(path.read_text())
+        except ValueError:
+            continue
+        if known.get('type') == 'label' or (known.get('stats') or {}).get('kind') == 'label':
+            labels[path.stem] = known
+    if not labels:
+        return problems
+    for uid in unknown_ids:
+        try:
+            unknown = read_unknown(project, uid)
+        except (OSError, ValueError):
+            continue
+        text = str(unknown.get('claim') or '')+' '+str(unknown.get('evidence_needed') or '')
+        named = [w for w in dict.fromkeys(re.findall(r'[a-z][a-z0-9_]*', text)) if w in labels and w != uid]
+        if not named:
+            continue
+        known = read_known(project, uid)
+        if not known:
+            continue
+        consumed: set[str] = set()
+        for run_id in known.get('run_ids') or []:
+            meta = run_meta(project, run_id)
+            consumed |= {str(v).removeprefix('known:') for v in (meta.get('input_bindings') or {}).values()}
+            consumed |= set(meta.get('inputs') or {})
+            consumed |= {str(r.get('known_id') or r.get('id') or '') for r in meta.get('known_reads') or [] if isinstance(r, dict)}
+        missing = [n for n in named if n not in consumed]
+        if missing:
+            problems.append(uid+' names '+', '.join(missing)+' (= '+', '.join(repr(extract_known_value(labels[m])) for m in missing)
+                            +') but none of its runs read it: the probe decided the choice again instead of taking it from '
+                            'the map. Declare it as an input of the probe (probe.json "inputs": {"'+missing[0]+'": "known:'+missing[0]
+                            +'"}) and use ctx["inputs"]["'+missing[0]+'"] in measure(); then re-run and re-graduate')
     return problems
 
 
