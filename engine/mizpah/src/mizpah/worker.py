@@ -798,7 +798,14 @@ def unread_input_problems(project: Path, unknown_ids: list[str]) -> list[str]:
         except (OSError, ValueError):
             continue
         text = str(unknown.get('claim') or '')+' '+str(unknown.get('evidence_needed') or '')
+        words = set(re.findall(r'[a-z][a-z0-9_]*', text.lower()))
         named = [w for w in dict.fromkeys(re.findall(r'[a-z][a-z0-9_]*', text)) if w in labels and w != uid]
+        # "the selected motor" names selected_motor_id as surely as the id does: a label known whose id's words
+        # (less a trailing `id`) all appear in the text is named (selection_cost hardcoded the wrong parts' prices).
+        for label_id in labels:
+            parts = [p for p in label_id.split('_') if p not in ('id', 'name', 'label')]
+            if label_id != uid and label_id not in named and parts and all(p in words for p in parts):
+                named.append(label_id)
         if not named:
             continue
         known = read_known(project, uid)
