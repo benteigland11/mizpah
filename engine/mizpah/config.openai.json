@@ -36,7 +36,7 @@
   "credentials_file": "~/.local/share/mizpah/credentials.json",
   "providers": {
     "openai_chatgpt": {
-      "default_model": "gpt-5.5"
+      "default_model": "gpt-6-astra"
     }
   }
 }

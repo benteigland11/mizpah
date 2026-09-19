@@ -2,7 +2,7 @@
   "id": "bp-subscription-provider-session-python",
   "name": "subscription-provider-session",
   "language": "python",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Sign a user into an LLM provider with their subscription (browser PKCE or device code) or an API key, keep the credential fresh and quarantined on terminal failure, and expose a ModelClient-compatible transport that speaks the provider's wire dialect (Chat Completions, or Responses over SSE) behind the Chat Completions shape the caller already uses.",
   "tags": [
     "oauth",
@@ -65,7 +65,7 @@
   ],
   "validation": {
     "engine_version": 1,
-    "validated_at": "2026-09-19T17:05:29.074228+00:00",
+    "validated_at": "2026-09-19T17:11:48.227055+00:00",
     "runtime": "python 3.12.13"
   }
 }

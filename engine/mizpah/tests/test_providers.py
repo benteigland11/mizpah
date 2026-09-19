@@ -70,7 +70,7 @@ def test_client_for_subscription(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     providers.session_for('openai_api', {}).login(api_key='sk-1')
     client = client_for(spec, None, {})
     assert client.config.base_url == 'https://api.openai.com/v1' and client.config.timeout_seconds == 30
-    assert client.capabilities()['context'] == 400000
+    assert client.capabilities()['context'] == 272000
     assert client.count({'messages': [{'role': 'user', 'content': 'x' * 400}]}, 'worker')['tokens'] > 0
 
     def fake_http(method, url, headers, body, timeout) -> HttpResponse:
@@ -108,23 +108,23 @@ def test_cli_models_and_use(tmp_path: Path, capsys: pytest.CaptureFixture) -> No
     assert worker['generation'] == {'model': 'grok-4.5', 'temperature': 0.5}
     assert written['controller'] == {'generation': {'model': '/x.gguf'}}
     assert provider_cli.main(['use', 'openai_chatgpt', '--harness', str(harness)]) == 0
-    assert json.loads(harness.read_text())['controller']['generation']['model'] == 'gpt-5.5'
+    assert json.loads(harness.read_text())['controller']['generation']['model'] == 'gpt-6-astra'
 
 
 def test_models_merge_live_list_when_signed_in(tmp_path: Path, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path))
     session = providers.session_for('mistral_api', {})
     static, live = providers.available_models(session)
-    assert live is False and static[0] == 'mistral-large-latest'
+    assert live is False and static[0] == 'mistral-medium-latest'
     session.login(api_key='sk-1')
 
     def fake_http(method, url, headers, body, timeout) -> HttpResponse:
         assert method == 'GET' and url == 'https://api.mistral.ai/v1/models'
-        return HttpResponse(200, {}, json.dumps({'data': [{'id': 'mistral-large-latest'}, {'id': 'brand-new'}]}).encode())
+        return HttpResponse(200, {}, json.dumps({'data': [{'id': 'brand-new'}, {'id': 'mistral-large-latest'}]}).encode())
 
     session.http = fake_http
     merged, live = providers.available_models(session)
-    assert live and merged == ['mistral-large-latest', 'devstral-latest', 'codestral-latest', 'brand-new']
+    assert live and merged == ['brand-new', 'mistral-large-latest']  # live list replaces the hints; default first if present
 
     def broken(*args) -> HttpResponse:
         raise OSError('down')

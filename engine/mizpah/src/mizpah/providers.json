@@ -1,5 +1,5 @@
 {
-  "_comment": "Provider profiles the engine ships. Every value here is public client configuration; credentials never live in this file. openai_chatgpt constants come from the Apache-2.0 openai/codex source (codex-rs/login). xai_grok endpoints come from the Apache-2.0 xai-org/grok-build source (crates/codegen/xai-grok-login); its public OIDC client id and subscription base URL were read from an installed Grok Build; GROK_OAUTH2_CLIENT_ID still overrides.",
+  "_comment": "Provider profiles the engine ships. Every value here is public client configuration; credentials never live in this file. openai_chatgpt constants come from the Apache-2.0 openai/codex source (codex-rs/login). xai_grok endpoints come from the Apache-2.0 xai-org/grok-build source (crates/codegen/xai-grok-login); its public OIDC client id and subscription base URL were read from an installed Grok Build; GROK_OAUTH2_CLIENT_ID still overrides. Static model lists are hints dated 2026-09-19; wherever a profile has models_path the live list replaces them once signed in.",
   "profiles": [
     {
       "name": "openai_chatgpt",
@@ -38,16 +38,18 @@
         "chatgpt-account-id": "{account_id}"
       },
       "models": [
-        "gpt-5.5",
-        "gpt-5.5-codex",
-        "gpt-5.4",
-        "gpt-5.4-mini"
+        "gpt-6-astra",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.5"
       ],
-      "default_model": "gpt-5.5",
+      "default_model": "gpt-6-astra",
       "token_count": "usage_calibrated",
-      "context_window": 400000,
+      "context_window": 272000,
       "timeout_seconds": 900,
-      "notes": "OpenAI lets ChatGPT plans back third-party OSS harnesses (Codex for Open Source). The model list is a starting point; the engine config may override it."
+      "notes": "OpenAI lets ChatGPT plans back third-party OSS harnesses (Codex for Open Source). Static list is the Codex CLI's bundled catalogue (visible entries, Sept 2026); the live list is authoritative once signed in. Reasoning effort low..ultra per model.",
+      "models_path": "/models?client_version=1.0.0"
     },
     {
       "name": "xai_grok",
@@ -80,7 +82,8 @@
       "token_count": "usage_calibrated",
       "context_window": 500000,
       "timeout_seconds": 900,
-      "notes": "Device-code flow against auth.x.ai as Grok Build does; the public OIDC client id and the cli-chat-proxy.grok.com base URL are what an installed Grok Build (~/.grok/auth.json, models_cache.json) uses with a subscription session; api.x.ai/v1 is the API-key host. Both models take reasoning effort xhigh/high/medium/low. xAI may 403 some tiers."
+      "notes": "Device-code flow against auth.x.ai as Grok Build does; the public OIDC client id and the cli-chat-proxy.grok.com base URL are what an installed Grok Build (~/.grok/auth.json, models_cache.json) uses with a subscription session; api.x.ai/v1 is the API-key host. Both models take reasoning effort xhigh/high/medium/low. xAI may 403 some tiers.",
+      "models_path": "/models"
     },
     {
       "name": "github_copilot",
@@ -107,13 +110,13 @@
         "Authorization": "Bearer {token}"
       },
       "models": [
+        "gpt-6-astra",
         "gpt-5.5",
-        "gpt-5.4",
+        "claude-fable-5.1",
         "claude-sonnet-5",
-        "claude-opus-5",
-        "gemini-3-pro"
+        "gemini-3.8-flash"
       ],
-      "default_model": "gpt-5.5",
+      "default_model": "gpt-6-astra",
       "models_path": "/models",
       "token_count": "usage_calibrated",
       "context_window": 128000,
@@ -134,13 +137,13 @@
         "Authorization": "Bearer {token}"
       },
       "models": [
-        "gpt-5.5",
-        "gpt-5.4",
-        "gpt-5.4-mini"
+        "gpt-6-astra",
+        "gpt-5.6-sol",
+        "gpt-5.5"
       ],
-      "default_model": "gpt-5.4",
+      "default_model": "gpt-6-astra",
       "token_count": "usage_calibrated",
-      "context_window": 400000,
+      "context_window": 272000,
       "timeout_seconds": 900,
       "models_path": "/models"
     },
@@ -182,10 +185,10 @@
         "Authorization": "Bearer {token}"
       },
       "models": [
-        "glm-5.3",
-        "glm-5.3-flash"
+        "glm-5.2",
+        "glm-5.2-flash"
       ],
-      "default_model": "glm-5.3",
+      "default_model": "glm-5.2",
       "token_count": "usage_calibrated",
       "context_window": 128000,
       "timeout_seconds": 900,
@@ -206,10 +209,10 @@
         "Authorization": "Bearer {token}"
       },
       "models": [
-        "kimi-k2.7-code",
-        "kimi-k2.6"
+        "kimi-k3",
+        "kimi-k2.7-code"
       ],
-      "default_model": "kimi-k2.7-code",
+      "default_model": "kimi-k3",
       "token_count": "usage_calibrated",
       "context_window": 256000,
       "timeout_seconds": 900,
@@ -230,10 +233,10 @@
         "Authorization": "Bearer {token}"
       },
       "models": [
-        "MiniMax-M2.7",
-        "MiniMax-M2.7-highspeed"
+        "MiniMax-M3",
+        "MiniMax-M2.7"
       ],
-      "default_model": "MiniMax-M2.7",
+      "default_model": "MiniMax-M3",
       "token_count": "usage_calibrated",
       "context_window": 128000,
       "timeout_seconds": 900,
@@ -254,14 +257,14 @@
         "Authorization": "Bearer {token}"
       },
       "models": [
-        "deepseek-v4-pro",
-        "deepseek-v4-flash"
+        "deepseek-chat",
+        "deepseek-reasoner"
       ],
-      "default_model": "deepseek-v4-pro",
+      "default_model": "deepseek-chat",
       "token_count": "usage_calibrated",
       "context_window": 128000,
       "timeout_seconds": 900,
-      "notes": "Pay-as-you-go only; no coding plan.",
+      "notes": "Pay-as-you-go only; no coding plan. deepseek-chat / deepseek-reasoner are aliases for the current release (V4.1 as of Sept 2026).",
       "models_path": "/models"
     },
     {
@@ -279,10 +282,10 @@
         "Authorization": "Bearer {token}"
       },
       "models": [
-        "gemini-3-pro",
-        "gemini-3-flash"
+        "gemini-3.8-flash",
+        "gemini-3.5-pro"
       ],
-      "default_model": "gemini-3-pro",
+      "default_model": "gemini-3.8-flash",
       "models_path": "/models",
       "token_count": "usage_calibrated",
       "context_window": 1000000,
@@ -307,11 +310,12 @@
         "x-api-key": "{token}"
       },
       "models": [
+        "claude-fable-5-1",
         "claude-opus-5",
         "claude-sonnet-5",
         "claude-haiku-4-5-20251001"
       ],
-      "default_model": "claude-opus-5",
+      "default_model": "claude-fable-5-1",
       "models_path": "/models",
       "token_count": "usage_calibrated",
       "context_window": 200000,
@@ -333,11 +337,12 @@
         "Authorization": "Bearer {token}"
       },
       "models": [
+        "mistral-medium-latest",
         "mistral-large-latest",
         "devstral-latest",
         "codestral-latest"
       ],
-      "default_model": "mistral-large-latest",
+      "default_model": "mistral-medium-latest",
       "models_path": "/models",
       "token_count": "usage_calibrated",
       "context_window": 128000,
@@ -362,11 +367,11 @@
         "Authorization": "Bearer {token}"
       },
       "models": [
-        "openai/gpt-5.5",
-        "anthropic/claude-sonnet-5",
-        "google/gemini-3-pro"
+        "openai/gpt-6-astra",
+        "anthropic/claude-fable-5.1",
+        "google/gemini-3.8-flash"
       ],
-      "default_model": "openai/gpt-5.5",
+      "default_model": "openai/gpt-6-astra",
       "models_path": "/models",
       "token_count": "usage_calibrated",
       "context_window": 200000,

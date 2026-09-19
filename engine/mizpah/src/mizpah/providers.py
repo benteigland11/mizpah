@@ -70,7 +70,8 @@ def session_for(name: str, config: dict[str, Any] | None = None, *, open_browser
 
 
 def available_models(session: ProviderSession) -> tuple[list[str], bool]:
-    """The profile's catalogue, extended by the live list when signed in; the flag says whether it was."""
+    """The live list when signed in and the provider has one (authoritative; the profile's default
+    first if it is there), else the profile's static catalogue. The flag says which."""
     static = list(session.profile.models)
     if not session.status()['signed_in'] or session.profile.models_url is None:
         return static, False
@@ -78,7 +79,11 @@ def available_models(session: ProviderSession) -> tuple[list[str], bool]:
         live = session.list_models()
     except Exception:
         return static, False
-    return static + [m for m in live if m not in static], True
+    if not live:
+        return static, False
+    default = session.profile.default_model
+    ordered = ([default] if default in live else []) + [m for m in live if m != default]
+    return ordered, True
 
 
 def missing_client_id(profile: ProviderProfile) -> str | None:

@@ -292,6 +292,11 @@ def test_list_models(store: CredentialStore) -> None:
     assert session.list_models() == ["m-1", "m-2"]
     call = http.calls[-1]
     assert call["method"] == "GET" and call["url"] == "https://api.example.org/v1/models" and call["headers"]["Authorization"] == "Bearer sk-1"
+    http.model_answers.append(HttpResponse(200, {}, json.dumps({"models": [{"slug": "big", "visibility": "list"},
+                                                                          {"slug": "secret", "visibility": "hide"}]}).encode()))
+    assert session.list_models() == ["big"]
+    http.model_answers.append(HttpResponse(200, {}, json.dumps({"models": {"a": {"info": {}}, "b": {"hidden": True}}}).encode()))
+    assert session.list_models() == ["a"]
     http.model_answers.append(HttpResponse(403, {}, b"no"))
     with pytest.raises(LookupError, match="403"):
         session.list_models()

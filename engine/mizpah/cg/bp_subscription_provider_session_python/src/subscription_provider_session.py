@@ -218,7 +218,10 @@ class ProviderSession:
         return self.estimator.estimate(payload).as_dict()
 
     def list_models(self) -> list[str]:
-        """Model ids the provider reports for this credential, in the OpenAI ``/models`` shape.
+        """Model ids the provider reports for this credential.
+
+        Accepts the OpenAI ``{"data": [{"id"}]}`` shape, a ``{"models": [{"slug"|"id", "visibility"?}]}``
+        catalogue (hidden entries dropped), or a ``{"models": {id: ...}}`` map.
 
         Empty when the profile has no list endpoint; raises ``NotSignedIn`` / ``QuarantinedCredential``
         when there is no usable credential, and ``LookupError`` when the endpoint answers badly.
@@ -236,11 +239,7 @@ class ProviderSession:
             payload = json.loads(response.body.decode("utf-8"))
         except ValueError as error:
             raise LookupError("model list is not JSON") from error
-        rows = payload.get("data") if isinstance(payload, dict) else payload
-        if not isinstance(rows, list):
-            raise LookupError("model list has no data array")
-        ids = [str(row.get("id")) for row in rows if isinstance(row, dict) and row.get("id")]
-        return [identifier.split("/", 1)[1] if identifier.startswith("models/") else identifier for identifier in ids]
+        return _model_ids(payload)
 
     def endpoint(self) -> dict[str, Any]:
         """Fields for an ``EndpointConfig``: where the transport already sends things."""
@@ -451,6 +450,30 @@ class ProviderTransport:
             return WireResponse(response.status, json.dumps(chat), elapsed, str(chat["error"].get("message") or chat["error"]),
                                 failure_kind="provider_error")
         return WireResponse(response.status, json.dumps(chat), elapsed)
+
+
+def _model_ids(payload: Any) -> list[str]:
+    rows: Any = payload
+    if isinstance(payload, dict):
+        rows = payload.get("data")
+        if rows is None:
+            rows = payload.get("models")
+        if isinstance(rows, dict):
+            rows = [dict(value, id=key) if isinstance(value, dict) else {"id": key} for key, value in rows.items()]
+    if not isinstance(rows, list):
+        raise LookupError("model list has no data or models array")
+    ids: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if row.get("visibility") in ("hide", "none") or row.get("hidden") is True:
+            continue
+        identifier = row.get("id") or row.get("slug")
+        if not identifier:
+            continue
+        identifier = str(identifier)
+        ids.append(identifier.split("/", 1)[1] if identifier.startswith("models/") else identifier)
+    return ids
 
 
 def _json_object(text: str) -> dict[str, Any] | None:
