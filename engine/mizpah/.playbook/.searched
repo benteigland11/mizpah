@@ -561,3 +561,13 @@ brand tokens css has the measured number of token values overridden under prefer
 Write report/layout.md with one row per need (1 to 6) recording before and after readings and the target from content/targets.json
 content have json layout need report target targets
 report layout md must have one row per need  1 to 6  with the reading before and after the change and the target from content targets json 
+Measure rendered docs design properties at 1280 px and overflow at 375 px
+docs page rendered 1280 measured text body contrast horizontal length line mean
+whether the rendered docs page has horizontal overflow at a 375 px viewport is known 
+the rendered docs page text contrast at 1280 px is measured 
+the rendered docs page mean prose line length at 1280 px is measured 
+the rendered docs page body text size at 1280 px is measured 
+the rendered docs page typographic scale is measured at 1280 px 
+Validate the graduated headless page readings instrument
+enabler exists frontend headless page python readings validates
+the page readings enabler exists at cg frontend headless page cli python and validates for use 

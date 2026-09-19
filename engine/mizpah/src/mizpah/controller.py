@@ -457,7 +457,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         # Matched against what the unknown builds and how it is named, not its claim: a claim that says the report
         # "makes no choice" names the non-goal to say it is respected (logo_mark2, 2026-09-19).
         offending = [term for non_goal in brief.get('non_goals') or [] for term in re.findall(r'`([^`]+)`', str(non_goal))
-                     if term and creates and (term.lower() in creates.lower() or term.lower().replace(' ', '_') in uid)]
+                     if term and creates and term.lower().replace(' ', '') in creates.lower().replace('_', '').replace('-', '')]
         if offending:
             refusals.append('unknown '+uid+': it builds '+', '.join('`'+t+'`' for t in dict.fromkeys(offending))+', which the brief '
                             'names as a non-goal; a non-goal is respected, not delivered'); continue
