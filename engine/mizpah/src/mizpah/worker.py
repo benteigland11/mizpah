@@ -28,6 +28,7 @@ from cg.bp_focused_agent_session_python.src import (
     ControllerSettings, EndpointConfig, FocusedSession, ModelClient, ReviewPolicy, SandboxedShell, SessionPolicy,
     SessionSettings, ShellConfig, ShellLimits, llama_model_client,
 )
+from cg.backend_persistent_model_session_python.src.persistent_model_session import ModelTransportError, RejectedGeneration
 
 # Workspace paths that never go back into the project: the harness's own, and the
 # playbook copy, which is harvested separately and only after green.
@@ -902,6 +903,43 @@ def build_settings(config: dict[str, Any], assignment: str, reference: str,
                                         'maximum_edit_characters', 'maximum_read_lines') if key in config})
 
 
+def model_up(config: dict[str, Any]) -> bool:
+    import urllib.request
+    try:
+        with urllib.request.urlopen(config['worker']['endpoint']['base_url'].rstrip('/')+'/health', timeout=5) as r:
+            return r.status == 200
+    except OSError:
+        return False
+
+
+def run_through_outages(session: FocusedSession, config: dict[str, Any], root: Path, *, maximum_worker_turns: int,
+                        wait_seconds: int = 300) -> dict[str, Any]:
+    """`session.run`, but a model server that goes away mid-call is waited for, not counted as a failure.
+
+    A supervised server restarts in seconds; the session discards the torn call and continues. Only a server
+    that stays down past `wait_seconds` surfaces as the transport error it is. Rejected generations are not
+    outages and pass straight through.
+    """
+    import time
+    deadline = time.time()+wait_seconds
+    while True:
+        try:
+            return session.run(maximum_worker_turns=maximum_worker_turns)
+        except RejectedGeneration:
+            raise
+        except ModelTransportError as error:
+            if time.time() > deadline:
+                raise
+            (root/'outages.jsonl').open('a').write(json.dumps(dict(at=time.time(), error=str(error)[:200]))+'\n')
+            while time.time() <= deadline and not model_up(config):
+                time.sleep(5)
+            if not model_up(config):
+                raise
+            discarded = session.discard_pending()
+            if discarded:
+                (root/'discarded.jsonl').open('a').write(json.dumps(discarded)+'\n')
+
+
 def run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | None = None) -> dict[str, Any]:
     """Pick (or resume), open the task map, run until green or the backstop, harvest the playbook, report.
 
@@ -965,7 +1003,7 @@ def run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | N
             break
         # Run to the next estimate boundary; the worker judges its own effort there.
         boundary = min(remaining, max(1, estimate*(overruns+1)-status['completed_worker_turns']))
-        status = session.run(maximum_worker_turns=boundary)
+        status = run_through_outages(session, config, root, maximum_worker_turns=boundary)
         written = writeback(session.workspace(), project, task, map_id, probes_before)
         refused = [w for w in written if w.startswith('refused:')]
         if refused:
@@ -1004,7 +1042,7 @@ def run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | N
         # Only after green: the method goes into the library, and only through the harvest.
         session.continue_with(green_message(gate, task_unknown_ids(task), procedures_used(root), tool_fight(root),
                                             checklist_skips(session.workspace())))
-        status = session.run(maximum_worker_turns=budget-status['completed_worker_turns'])
+        status = run_through_outages(session, config, root, maximum_worker_turns=budget-status['completed_worker_turns'])
         session.prune_workspaces()
         widgets = harvest_widgets(session.workspace(), root, config)
         playbook = harvest_playbook(session.workspace(), store, config,

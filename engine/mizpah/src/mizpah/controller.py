@@ -493,6 +493,30 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
     return done
 
 
+def decide_through_outages(client: Any, config: dict[str, Any], system: str, user: str, wait_seconds: int = 300):
+    """A model server that is restarting is waited for (its supervisor brings it back in seconds), not a failed step."""
+    import time
+    import urllib.request
+    from cg.backend_persistent_model_session_python.src.persistent_model_session import ModelTransportError, RejectedGeneration
+    deadline = time.time()+wait_seconds
+    while True:
+        try:
+            return decide(client, config, system, user)
+        except RejectedGeneration:
+            raise
+        except ModelTransportError:
+            if time.time() > deadline:
+                raise
+            while time.time() <= deadline:
+                try:
+                    with urllib.request.urlopen(config['controller']['endpoint']['base_url'].rstrip('/')+'/health', timeout=5) as r:
+                        if r.status == 200:
+                            break
+                except OSError:
+                    pass
+                time.sleep(5)
+
+
 def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dict[str, Any]:
     """One controller step: observe, decide, guard (one resubmission), apply, journal."""
     project = project.resolve()
@@ -507,7 +531,7 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
     while attempt < 2:
         user = render_observation(observation, mode, refusals)
         try:
-            decision, raw = decide(client, config, system, user)
+            decision, raw = decide_through_outages(client, config, system, user)
         except ValueError as error:
             record['attempts'].append(dict(error=str(error)))
             refusals = ['reply was not one JSON object: '+str(error)[:200]]
