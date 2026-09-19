@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 import io
 import json
 from pathlib import Path, PurePosixPath
+import re
 import selectors
 import subprocess
 import tarfile
@@ -38,6 +39,26 @@ class ShellLimits:
 
 
 @dataclass(frozen=True)
+class ServiceLimits:
+    """Bounds on processes a command starts that outlive it (a dev server, a browser, a watcher).
+
+    A service runs in its own sandbox with the same isolation as a command, the host network namespace
+    (commands reach it on localhost), a mirror of the workspace as of the last command at /work, and a
+    directory of its own at /svc/<name> for its log. It dies with the shell that started it, or at
+    lifetime_seconds. wait_seconds bounds one `svc wait`: the host blocks, the model spends one turn."""
+
+    memory_bytes: int
+    processes: int
+    lifetime_seconds: float
+    maximum_services: int = 4
+    wait_seconds: float = 1800
+
+    def __post_init__(self) -> None:
+        if any(value <= 0 for value in self.__dict__.values()):
+            raise ValueError('All service limits must be positive')
+
+
+@dataclass(frozen=True)
 class ShellConfig:
     """Host paths are explicit; virtual paths belong to the sandbox protocol."""
 
@@ -63,15 +84,20 @@ class ShellConfig:
     snapshot_ignore: tuple[str, ...] = ('.venv', '__pycache__', '.pytest_cache', 'node_modules', '.mypy_cache')
     network_files: tuple[str, ...] = ('/etc/resolv.conf', '/etc/hosts', '/etc/nsswitch.conf', '/etc/ssl', '/etc/pki',
                                       '/etc/ca-certificates', '/etc/crypto-policies')
+    # None: nothing outlives a command. Set: the `svc` command is on PATH in every command and services
+    # share the host network namespace with commands, so share_network is required.
+    services: ServiceLimits | None = None
 
     def __post_init__(self) -> None:
         if any(not Path(value).is_absolute() for value in
                (self.bwrap, self.systemd_run, self.systemctl, self.runtime_root, self.scratch_root)):
             raise ValueError('Host paths must be absolute')
+        if self.services is not None and not self.share_network:
+            raise ValueError('Services need share_network: a command reaches a service on localhost')
         if any('/' in value or not value for value in (self.shell_name, self.python_name)):
             raise ValueError('Runtime binary names must be basenames')
         object.__setattr__(self, 'read_only_binds', tuple(self.read_only_binds))
-        reserved = {'/', '/usr', '/bin', '/lib', '/lib64', '/work', '/tmp', '/proc', '/dev', '/input', '/runner'}
+        reserved = {'/', '/usr', '/bin', '/lib', '/lib64', '/work', '/tmp', '/proc', '/dev', '/input', '/runner', '/svc'}
         for bind in self.read_only_binds:
             if not Path(bind).is_absolute() or Path(bind).as_posix() in reserved:
                 raise ValueError('Read-only binds must be absolute host paths outside the sandbox layout')
@@ -101,6 +127,8 @@ class ShellResult:
 
 
 WORKSPACE_MOUNT = '/work'
+SERVICES_MOUNT = '/svc'
+REQUESTS_DIR = '.svc/requests'   # inside the workspace: what `svc start/stop/wait` leaves for the host
 
 
 def _name(value: str, *, user: bool = False) -> str:
@@ -324,19 +352,18 @@ class SandboxedShell:
 
     def __init__(self, config: ShellConfig) -> None:
         self.config = config
+        # name -> dict(unit, command, started_at); the host side of what `svc` shows the worker
+        self._services: dict[str, dict[str, Any]] = {}
 
-    def command_argv(self, input_dir: str, unit: str) -> list[str]:
-        """Build the complete resource-control and isolation command for auditing."""
+    @property
+    def services_root(self) -> Path:
+        return Path(self.config.scratch_root)/'services'
+
+    def _isolation_argv(self) -> list[str]:
+        """The bwrap namespace, mounts and environment a command and a service share."""
         config, limits = self.config, self.config.limits
-        if not Path(input_dir).is_absolute() or not unit.replace('-', '').isalnum():
-            raise ValueError('Invalid input directory or unit name')
         helper = str(Path(__file__).resolve().parent)
         return [
-            config.systemd_run, '--user', '--quiet', '--wait', '--pipe', '--collect', '--unit='+unit,
-            '--property=MemoryMax='+str(limits.memory_bytes), '--property=MemorySwapMax=0',
-            '--property=TasksMax='+str(limits.processes), '--property=CPUQuota='+str(limits.cpu_percent)+'%',
-            '--property=RuntimeMaxSec='+str(limits.command_seconds+limits.shutdown_seconds),
-            '--property=TimeoutStopSec='+str(limits.shutdown_seconds), '--property=KillMode=control-group',
             config.bwrap,
             *(('--unshare-user', '--unshare-ipc', '--unshare-pid', '--unshare-uts', '--unshare-cgroup')
               if config.share_network else ('--unshare-all', '--unshare-user')),
@@ -344,22 +371,68 @@ class SandboxedShell:
             '--as-pid-1', '--cap-drop', 'ALL', '--clearenv',
             '--ro-bind', config.runtime_root, '/usr',
             '--symlink', 'usr/bin', '/bin', '--symlink', 'usr/lib', '/lib', '--symlink', 'usr/lib64', '/lib64',
-            '--ro-bind', helper, '/runner', '--ro-bind', input_dir, '/input',
+            '--ro-bind', helper, '/runner',
             *[part for bind in config.read_only_binds for part in ('--ro-bind', bind, bind)],
             *[part for entry in (config.network_files if config.share_network else ())
               if Path(entry).exists() for part in ('--ro-bind', str(Path(entry).resolve()), entry)],
             '--proc', '/proc', '--remount-ro', '/proc', '--dev', '/dev', '--remount-ro', '/dev',
-            '--size', str(limits.workspace_bytes), '--tmpfs', '/work',
-            '--size', str(limits.temporary_bytes), '--tmpfs', '/tmp', '--remount-ro', '/',
-            '--setenv', 'PATH', ':'.join(filter(None, (config.environment.get('PATH'), '/usr/bin'))),
+            '--size', str(limits.temporary_bytes), '--tmpfs', '/tmp',
+            '--setenv', 'PATH', ':'.join(filter(None, (config.environment.get('PATH'), '/usr/bin',
+                                                        '/runner' if config.services else None))),
             '--setenv', 'HOME', '/work', '--setenv', 'TMPDIR', '/tmp',
             '--setenv', 'LANG', 'C.UTF-8', '--setenv', 'OPENBLAS_NUM_THREADS', '1',
             '--setenv', 'OMP_NUM_THREADS', '1',
+            *(('--setenv', 'SVC_ROOT', SERVICES_MOUNT) if config.services else ()),
             *[part for name, value in sorted(config.environment.items()) if name != 'PATH'
               for part in ('--setenv', name, value)],
+        ]
+
+    def command_argv(self, input_dir: str, unit: str) -> list[str]:
+        """Build the complete resource-control and isolation command for auditing."""
+        config, limits = self.config, self.config.limits
+        if not Path(input_dir).is_absolute() or not unit.replace('-', '').isalnum():
+            raise ValueError('Invalid input directory or unit name')
+        services = self.services_root
+        if config.services:
+            services.mkdir(parents=True, exist_ok=True)
+        return [
+            config.systemd_run, '--user', '--quiet', '--wait', '--pipe', '--collect', '--unit='+unit,
+            '--property=MemoryMax='+str(limits.memory_bytes), '--property=MemorySwapMax=0',
+            '--property=TasksMax='+str(limits.processes), '--property=CPUQuota='+str(limits.cpu_percent)+'%',
+            '--property=RuntimeMaxSec='+str(limits.command_seconds+limits.shutdown_seconds),
+            '--property=TimeoutStopSec='+str(limits.shutdown_seconds), '--property=KillMode=control-group',
+            *self._isolation_argv(),
+            '--ro-bind', input_dir, '/input',
+            # A command reads every service's log and status; only the host writes there.
+            *(('--ro-bind', str(services), SERVICES_MOUNT) if config.services else ()),
+            '--size', str(limits.workspace_bytes), '--tmpfs', '/work', '--remount-ro', '/',
             '--chdir', '/work',
             '/usr/bin/'+config.python_name, '-B', '-c',
             'import sys; sys.path.insert(0,"/runner"); from sandbox_worker import execute; execute("/input/request.json")',
+        ]
+
+    def service_argv(self, name: str, unit: str) -> list[str]:
+        """A service: the command's isolation, no wall-clock cap beyond its lifetime, its own log directory."""
+        config, limits = self.config, self.config.services
+        if limits is None:
+            raise ValueError('This shell runs no services')
+        home = self.services_root/name
+        return [
+            config.systemd_run, '--user', '--quiet', '--collect', '--unit='+unit,
+            '--property=MemoryMax='+str(limits.memory_bytes), '--property=MemorySwapMax=0',
+            '--property=TasksMax='+str(limits.processes), '--property=CPUQuota='+str(config.limits.cpu_percent)+'%',
+            '--property=RuntimeMaxSec='+str(limits.lifetime_seconds),
+            '--property=TimeoutStopSec='+str(config.limits.shutdown_seconds), '--property=KillMode=control-group',
+            *self._isolation_argv(),
+            '--ro-bind', str(self.services_root), SERVICES_MOUNT,
+            '--bind', str(home), SERVICES_MOUNT+'/'+name,
+            # The workspace as of the last command, refreshed before every command; the service's own
+            # writes to it are not kept (its state belongs in /svc/<name>).
+            '--bind', str(home/'work'), '/work', '--remount-ro', '/',
+            '--setenv', 'SVC_NAME', name, '--setenv', 'PYTHONUNBUFFERED', '1', '--chdir', '/work',
+            '/usr/bin/'+config.shell_name, '--noprofile', '--norc', '-c',
+            'exec >>"/svc/$SVC_NAME/log" 2>&1; exec "$0" --noprofile --norc -c "$(cat "/svc/$SVC_NAME/command")"',
+            '/usr/bin/'+config.shell_name,
         ]
 
     def run(self, command: str, workspace: bytes = b'', *, timeout_seconds: float | None = None) -> ShellResult:
@@ -373,6 +446,8 @@ class SandboxedShell:
         _members(workspace, limits.workspace_bytes, limits.max_files)
         start = time.monotonic()
         unit = 'isolated-shell-'+uuid4().hex
+        if self._services:
+            self._mirror_workspace(workspace)
         with tempfile.TemporaryDirectory(dir=config.scratch_root, prefix='shell-input-') as directory:
             input_dir = Path(directory)
             (input_dir/'workspace.tar').write_bytes(workspace)
@@ -408,12 +483,158 @@ class SandboxedShell:
                                    time.monotonic()-start,
                                    f'{error}. All workspace changes from this command were discarded; '
                                    'the previous workspace is retained.')
-            return ShellResult(response['status'], response['exit_code'], response['stdout'], response['stderr'],
-                               response['timed_out'], response['output_truncated'], snapshot,
-                               tuple(response['output_files']), time.monotonic()-start, response.get('detail', ''))
+            result = ShellResult(response['status'], response['exit_code'], response['stdout'], response['stderr'],
+                                 response['timed_out'], response['output_truncated'], snapshot,
+                                 tuple(response['output_files']), time.monotonic()-start, response.get('detail', ''))
         except (ValueError, KeyError, TypeError, tarfile.TarError) as error:
             return ShellResult('interrupted', None, '', stderr.decode(errors='replace')[:limits.visible_output_bytes],
                                False, False, workspace, (), time.monotonic()-start, str(error))
+        return self._service_requests(result) if config.services else result
+
+    # ------------------------------------------------------------------ services
+
+    def _service_requests(self, result: ShellResult) -> ShellResult:
+        """Carry out what `svc` asked for during the command and report it in the command's own output.
+
+        The request files are removed from the snapshot: they were messages to the host, not files."""
+        limits = self.config.limits
+        requests: list[tuple[str, bytes]] = []
+        with tarfile.open(fileobj=io.BytesIO(result.workspace), mode='r:') as archive:
+            for member in archive:
+                if member.isfile() and member.name.startswith(REQUESTS_DIR+'/'):
+                    requests.append((member.name, archive.extractfile(member).read()))
+        if not requests:
+            return result
+        lines = []
+        for name, data in sorted(requests):
+            try:
+                request = json.loads(data)
+                lines.append(self._service_request(request))
+            except (ValueError, TypeError, KeyError) as error:
+                lines.append('svc: bad request '+name+': '+str(error))
+        sink = io.BytesIO()
+        with tarfile.open(fileobj=io.BytesIO(result.workspace), mode='r:') as source, \
+                tarfile.open(fileobj=sink, mode='w:') as target:
+            for member in source:
+                if member.name == REQUESTS_DIR or member.name.startswith(REQUESTS_DIR+'/'):
+                    continue
+                target.addfile(member, source.extractfile(member) if member.isfile() else None)
+        stdout = (result.stdout+('\n' if result.stdout and not result.stdout.endswith('\n') else '')
+                  +'\n'.join(lines)+'\n')[:limits.visible_output_bytes]
+        return ShellResult(result.status, result.exit_code, stdout, result.stderr, result.timed_out,
+                           result.output_truncated, sink.getvalue(), result.output_files, result.elapsed_seconds,
+                           result.detail)
+
+    def _service_request(self, request: dict[str, Any]) -> str:
+        op, name = request['op'], str(request.get('name') or '')
+        if not re.fullmatch(r'[a-z][a-z0-9_-]{0,31}', name):
+            raise ValueError('a service name is a short lowercase identifier')
+        if op == 'start':
+            return self.start_service(name, str(request['command']), workspace=None)
+        if op == 'stop':
+            return self.stop_service(name)
+        if op == 'wait':
+            return self.wait_service(name, pattern=request.get('pattern'), seconds=float(request.get('seconds') or 60))
+        raise ValueError('unknown op '+op)
+
+    def start_service(self, name: str, command: str, *, workspace: bytes | None) -> str:
+        """Start `command` as a service named `name`; its log is at /svc/<name>/log for every later command."""
+        limits = self.config.services
+        if limits is None:
+            raise ValueError('This shell runs no services')
+        if not command.strip():
+            return 'svc: start '+name+': a command is required'
+        if name in self._services and self.service_state(name) == 'active':
+            return 'svc: '+name+' is already running (stop it first)'
+        if len([n for n in self._services if self.service_state(n) == 'active']) >= limits.maximum_services:
+            return 'svc: at most '+str(limits.maximum_services)+' services may run; stop one first'
+        home = self.services_root/name
+        (home/'work').mkdir(parents=True, exist_ok=True)
+        (home/'command').write_text(command)
+        (home/'log').write_bytes(b'')
+        if workspace is not None:
+            self._mirror_workspace(workspace, only=name)
+        unit = 'isolated-service-'+uuid4().hex
+        process = subprocess.run(self.service_argv(name, unit), capture_output=True, text=True,
+                                 timeout=self.config.limits.shutdown_seconds+10, check=False)
+        if process.returncode != 0:
+            return 'svc: start '+name+' failed: '+(process.stderr or process.stdout).strip()[:400]
+        self._services[name] = dict(unit=unit, command=command, started_at=time.time())
+        self._write_status(name)
+        return ('svc: started '+name+' as `'+command+'`; log at '+SERVICES_MOUNT+'/'+name+'/log, '
+                'status with `svc status`; it stops with `svc stop '+name+'` or when this session ends')
+
+    def stop_service(self, name: str) -> str:
+        entry = self._services.get(name)
+        if entry is None:
+            return 'svc: no service named '+name
+        subprocess.run([self.config.systemctl, '--user', 'stop', entry['unit']], capture_output=True,
+                       timeout=self.config.limits.shutdown_seconds+10, check=False)
+        entry['stopped_at'] = time.time()
+        self._write_status(name)
+        return 'svc: stopped '+name
+
+    def stop_all(self) -> list[str]:
+        """Every service this shell started; the owner calls it when the session ends."""
+        return [self.stop_service(name) for name in list(self._services)
+                if self._services[name].get('stopped_at') is None]
+
+    def service_state(self, name: str) -> str:
+        entry = self._services.get(name)
+        if entry is None:
+            return 'unknown'
+        probe = subprocess.run([self.config.systemctl, '--user', 'is-active', entry['unit']],
+                               capture_output=True, text=True, timeout=10, check=False)
+        return probe.stdout.strip() or 'inactive'
+
+    def wait_service(self, name: str, *, pattern: str | None, seconds: float) -> str:
+        """Block the host (not the model) until the log matches `pattern` or the service exits."""
+        limits = self.config.services
+        if name not in self._services:
+            return 'svc: no service named '+name
+        seconds = min(max(seconds, 1.0), limits.wait_seconds)
+        log = self.services_root/name/'log'
+        deadline = time.monotonic()+seconds
+        while True:
+            text = log.read_text(errors='replace') if log.exists() else ''
+            if pattern and pattern in text:
+                return 'svc: '+name+' matched '+repr(pattern)+' after '+str(round(seconds-(deadline-time.monotonic()), 1))+' s'
+            state = self.service_state(name)
+            if state != 'active':
+                return 'svc: '+name+' is '+state+(' (no match for '+repr(pattern)+')' if pattern else '')+'; log tail:\n'+text[-800:]
+            if time.monotonic() >= deadline:
+                return 'svc: '+name+' still running after '+str(round(seconds))+' s'+(' without '+repr(pattern) if pattern else '')+'; log tail:\n'+text[-800:]
+            time.sleep(min(1.0, max(0.05, deadline-time.monotonic())))
+
+    def _write_status(self, name: str) -> None:
+        entry = self._services[name]
+        (self.services_root/name/'status.json').write_text(json.dumps(dict(
+            name=name, command=entry['command'], unit=entry['unit'], started_at=entry['started_at'],
+            stopped_at=entry.get('stopped_at'), state=self.service_state(name)), indent=1)+'\n')
+
+    def _mirror_workspace(self, workspace: bytes, *, only: str | None = None) -> None:
+        """Give each running service the workspace as of now at its /work (wipe and re-extract: small, exact)."""
+        limits = self.config.limits
+        for name, entry in self._services.items():
+            if entry.get('stopped_at') is not None or (only is not None and name != only):
+                continue
+            target = self.services_root/name/'work'
+            for child in sorted(target.rglob('*'), key=lambda p: len(p.parts), reverse=True):
+                if child.is_symlink() or child.is_file():
+                    child.unlink()
+                elif child.is_dir():
+                    child.rmdir()
+            target.mkdir(parents=True, exist_ok=True)
+            for info, data in _members(workspace, limits.workspace_bytes, limits.max_files):
+                if info.name.startswith('.svc/') or info.name.startswith('.tool-output/'):
+                    continue
+                path = target/info.name
+                if info.isdir():
+                    path.mkdir(parents=True, exist_ok=True)
+                elif info.isfile():
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(data)
+                    path.chmod(info.mode & 0o777 | 0o600)
 
     @staticmethod
     def _collect(process: subprocess.Popen[bytes], cap: int, timeout: float) -> tuple[bytes, bytes]:

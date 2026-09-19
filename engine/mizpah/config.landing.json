@@ -1,5 +1,5 @@
 {
-  "harness_config": "../harness/tools/config.ornith.json",
+  "harness_config": "../harness/tools/config.landing.json",
   "worker_policy_file": "src/mizpah/worker_policy.md",
   "terra": "/home/Vinscen/mizpah/.venv/bin/terra",
   "playbook": "/home/Vinscen/mizpah/.venv/bin/playbook",
@@ -8,11 +8,13 @@
     "read_only_binds": [
       "/home/Vinscen/mizpah",
       "/home/Vinscen/.local/share/uv/python",
-      "/home/Vinscen/.local/share/cartograph/Widget_Library"
+      "/home/Vinscen/.local/share/cartograph/Widget_Library",
+      "/sys"
     ],
     "environment": {
-      "PATH": "/home/Vinscen/mizpah/.venv/bin",
-      "WIDGET_LIBRARY_PATH": "/home/Vinscen/.local/share/cartograph/Widget_Library"
+      "PATH": "/home/Vinscen/mizpah/.venv/bin:/usr/bin",
+      "WIDGET_LIBRARY_PATH": "/home/Vinscen/.local/share/cartograph/Widget_Library",
+      "HOME": "/work"
     },
     "share_network": true,
     "services": {

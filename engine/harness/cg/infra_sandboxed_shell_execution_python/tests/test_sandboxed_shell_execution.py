@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.sandboxed_shell_execution import (
-    ShellConfig, ShellLimits, SandboxedShell, WorkspaceEditError, edit_workspace_file, read_workspace_file, read_workspace_lines,
+    ServiceLimits, ShellConfig, ShellLimits, SandboxedShell, WorkspaceEditError, edit_workspace_file, read_workspace_file, read_workspace_lines,
     workspace_files, write_workspace_file,
 )
 from src.sandbox_worker import execute
@@ -365,3 +365,80 @@ def test_workspace_paths_accept_the_mount_and_refuse_the_dot_work_lookalike():
     with pytest.raises(ValueError, match='not the workspace'):
         _name('.work/.terra/map/probes/p/measure.py', user=True)
     assert _name('.work/old.txt') == '.work/old.txt'   # an existing snapshot member still reads back
+
+
+def services():
+    return ServiceLimits(512*1024**2, 64, 600, 2, 120)
+
+
+def test_services_need_the_shared_network_and_change_the_command_contract(tmp_path):
+    with pytest.raises(ValueError):
+        ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits(), services=services())
+    plain = SandboxedShell(ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits(),
+                                       share_network=True))
+    argv = plain.command_argv(str(tmp_path), 'unit-a')
+    assert '/svc' not in argv and '/runner' not in argv[argv.index('PATH')+1]
+    shell = SandboxedShell(ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits(),
+                                       share_network=True, services=services()))
+    argv = shell.command_argv(str(tmp_path), 'unit-b')
+    # Commands see every service's records read-only, find `svc` on PATH, and still get no writable host mount.
+    triples = [tuple(argv[i:i+3]) for i in range(len(argv)-2)]
+    assert ('--ro-bind', str(tmp_path/'services'), '/svc') in triples and ('--setenv', 'SVC_ROOT', '/svc') in triples
+    assert argv[argv.index('PATH')+1].endswith('/runner') and '--bind' not in argv
+    with pytest.raises(ValueError):
+        plain.service_argv('web', 'unit-c')
+    service = shell.service_argv('web', 'unit-c')
+    # A service: no --wait/--pipe, its own lifetime and memory, the workspace mirror and its own directory writable.
+    assert '--wait' not in service and '--pipe' not in service
+    assert '--property=RuntimeMaxSec=600' in service and '--property=MemoryMax='+str(512*1024**2) in service
+    triples = [tuple(service[i:i+3]) for i in range(len(service)-2)]
+    assert ('--bind', str(tmp_path/'services'/'web'/'work'), '/work') in triples
+    assert ('--bind', str(tmp_path/'services'/'web'), '/svc/web') in triples
+    assert 'PYTHONUNBUFFERED' in service
+
+
+def test_service_requests_are_carried_out_after_the_command_and_removed_from_the_snapshot(tmp_path, monkeypatch):
+    shell = SandboxedShell(ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits(),
+                                       share_network=True, services=services()))
+    seen = []
+    monkeypatch.setattr(shell, 'start_service', lambda name, command, workspace: seen.append(('start', name, command)) or 'svc: started '+name)
+    monkeypatch.setattr(shell, 'stop_service', lambda name: seen.append(('stop', name)) or 'svc: stopped '+name)
+    ws = write_workspace_file(b'', 'index.html', b'hi', byte_limit=10**6, file_limit=100)
+    ws = write_workspace_file(ws, '.svc/requests/1.json', b'{"op": "start", "name": "web", "command": "python3 -m http.server"}',
+                              byte_limit=10**6, file_limit=100)
+    ws = write_workspace_file(ws, '.svc/requests/2.json', b'{"op": "stop", "name": "web"}', byte_limit=10**6, file_limit=100)
+    ws = write_workspace_file(ws, '.svc/requests/3.json', b'{"op": "start", "name": "../x", "command": "true"}', byte_limit=10**6, file_limit=100)
+    from src.sandboxed_shell_execution import ShellResult
+    result = shell._service_requests(ShellResult('ok', 0, 'command output', '', False, False, ws, (), 0.1))
+    assert seen == [('start', 'web', 'python3 -m http.server'), ('stop', 'web')]
+    assert result.stdout.splitlines() == ['command output', 'svc: started web', 'svc: stopped web',
+                                          'svc: bad request .svc/requests/3.json: a service name is a short lowercase identifier']
+    assert workspace_files(result.workspace, byte_limit=10**6, file_limit=100) == ('index.html',)
+
+
+@pytest.mark.skipif(not (Path('/usr/bin/bwrap').exists() and Path('/usr/bin/systemd-run').exists()),
+                    reason='needs bwrap and a user systemd')
+def test_a_service_outlives_commands_and_sees_the_workspace_as_of_each_command(tmp_path):
+    shell = SandboxedShell(ShellConfig('/usr/bin/bwrap', '/usr/bin/systemd-run', '/usr/bin/systemctl', '/usr', str(tmp_path),
+                                       ShellLimits(1024**3, 128*1024**2, 64*1024**2, 1024**2, 262144, 64, 200, 60, 5, 10000),
+                                       share_network=True, services=services()))
+    port = 8700+(hash(str(tmp_path)) % 200)
+    ws = b''
+    def run(command):
+        nonlocal ws
+        result = shell.run(command, ws)
+        ws = result.workspace
+        return result.stdout
+    try:
+        out = run('echo hello > index.html; svc start web -- python3 -m http.server %d --bind 127.0.0.1' % port)
+        assert 'svc: started web' in out
+        assert 'matched' in run("svc wait web --for 'Serving HTTP' --max 30")
+        assert run('curl -s http://127.0.0.1:%d/index.html' % port).strip() == 'hello'
+        run('echo changed > index.html')
+        assert run('curl -s http://127.0.0.1:%d/index.html' % port).strip() == 'changed'
+        assert 'GET /index.html' in run('svc logs web -n 5')
+        assert 'already running' in run('svc start web -- true')
+        assert 'svc: stopped web' in run('svc stop web')
+        assert '.svc' not in ' '.join(workspace_files(ws, byte_limit=10**8, file_limit=10000))
+    finally:
+        shell.stop_all()

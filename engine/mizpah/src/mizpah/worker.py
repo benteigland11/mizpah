@@ -26,7 +26,7 @@ from typing import Any
 
 from cg.bp_focused_agent_session_python.src import (
     ControllerSettings, EndpointConfig, FocusedSession, ModelClient, ReviewPolicy, SandboxedShell, SessionPolicy,
-    SessionSettings, ShellConfig, ShellLimits, llama_model_client,
+    ServiceLimits, SessionSettings, ShellConfig, ShellLimits, llama_model_client,
 )
 from cg.backend_persistent_model_session_python.src.persistent_model_session import ModelTransportError, RejectedGeneration
 
@@ -774,9 +774,10 @@ def bindings(config: dict[str, Any], root: Path, map_id: str, checkins: bool | N
     scratch.mkdir(parents=True, exist_ok=True)
     sandbox = config['mizpah']['sandbox']
     environment = dict(sandbox['environment'], TERRA_MAP=map_id, XDG_DATA_HOME='/work/'+PLAYBOOK_PREFIX)
+    services = ServiceLimits(**sandbox['services']) if sandbox.get('services') else None
     shell = ShellConfig(**(config['shell'] | dict(scratch_root=str(scratch), limits=ShellLimits(**config['shell']['limits']),
                                                  read_only_binds=tuple(sandbox['read_only_binds']), environment=environment,
-                                                 share_network=bool(sandbox.get('share_network', False)))))
+                                                 share_network=bool(sandbox.get('share_network', False)), services=services)))
     return worker, checkin, SandboxedShell(shell)
 
 
@@ -984,6 +985,19 @@ def run_through_outages(session: FocusedSession, config: dict[str, Any], root: P
 
 
 def run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | None = None) -> dict[str, Any]:
+    """One task, one session; whatever the worker left running (a server, a browser) stops with it."""
+    holder: dict[str, Any] = {}
+    try:
+        return _run_task(config, project, root, task_id, holder)
+    finally:
+        shell = holder.get('shell')
+        if shell is not None:
+            stopped = shell.stop_all()
+            if stopped:
+                (root/'services.jsonl').open('a').write(json.dumps(dict(at=time.time(), stopped=stopped))+'\n')
+
+
+def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | None, holder: dict[str, Any]) -> dict[str, Any]:
     """Pick (or resume), open the task map, run until green or the backstop, harvest the playbook, report.
 
     A root that already holds a session is resumed: the task was re-bucketed after its worker
@@ -1000,6 +1014,7 @@ def run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | N
         task = pick_task(config, project, task['id']) | dict(bucket=next(
             t['bucket'] for t in terra(config, project, 'route', 'status')['tasks'] if t['id'] == task['id']))
         worker_client, checkin, shell = bindings(config, root, map_id)
+        holder['shell'] = shell
         try:
             session = FocusedSession.open(root, worker=worker_client, shell=shell, controller=checkin)
         except ValueError:
@@ -1027,6 +1042,7 @@ def run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | N
             assignment += ('The library already has parts near this work; install and extend one where it nearly fits '
                            'rather than creating a near-duplicate:\n'+'\n'.join('  - '+p for p in parts)+'\n')
         worker_client, checkin, shell = bindings(config, root, map_id)
+        holder['shell'] = shell
         reference = render_reference(project, task, unknowns)
         session = FocusedSession.create(root, build_settings(config, assignment, reference, unknowns), worker=worker_client,
                                         shell=shell, controller=checkin, initial_workspace=pack_workspace(project, store))

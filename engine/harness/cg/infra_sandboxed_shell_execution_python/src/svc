@@ -1,0 +1,94 @@
+#!/usr/bin/python3 -B
+"""svc — processes that outlive a command: start, stop, status, logs, wait.
+
+start/stop/wait are requests to the host; their result is printed at the end of THIS command's output
+(the host carries them out when the command finishes). status and logs read the host's records directly.
+
+  svc start <name> -- <command...>   run <command> as a service, network shared with your commands; it sees
+                                     the workspace as it was when the current command began (edit, then
+                                     use the service in the NEXT command); its own writes to /work are not kept
+  svc stop <name>
+  svc status                         every service: state, command, log size
+  svc logs <name> [-n LINES]         tail of the service's log (default 40)
+  svc wait <name> [--for TEXT] [--max SECONDS]
+                                     block until the log contains TEXT or the service exits (default 60 s)
+"""
+import json
+import os
+import sys
+import time
+import uuid
+
+ROOT = os.environ.get('SVC_ROOT', '/svc')
+REQUESTS = os.path.join(os.getcwd(), '.svc', 'requests')
+
+
+def request(**fields):
+    os.makedirs(REQUESTS, exist_ok=True)
+    path = os.path.join(REQUESTS, '%d-%s.json' % (int(time.time()*1000), uuid.uuid4().hex[:6]))
+    with open(path, 'w') as handle:
+        json.dump(fields, handle)
+    print('svc: %s %s requested; the result is printed when this command ends' % (fields['op'], fields.get('name', '')))
+
+
+def status():
+    rows = []
+    for name in sorted(os.listdir(ROOT)) if os.path.isdir(ROOT) else []:
+        meta = os.path.join(ROOT, name, 'status.json')
+        if not os.path.isfile(meta):
+            continue
+        with open(meta) as handle:
+            info = json.load(handle)
+        log = os.path.join(ROOT, name, 'log')
+        size = os.path.getsize(log) if os.path.exists(log) else 0
+        rows.append('%-16s %-9s %6d B log  %s' % (name, info.get('state') or '?', size, info.get('command', '')[:70]))
+    print('\n'.join(rows) if rows else 'svc: no services')
+
+
+def logs(name, lines):
+    path = os.path.join(ROOT, name, 'log')
+    if not os.path.isfile(path):
+        print('svc: no log for %s' % name); return 1
+    with open(path, 'rb') as handle:
+        tail = handle.read().decode('utf-8', 'replace').splitlines()[-lines:]
+    print('\n'.join(tail))
+    return 0
+
+
+def main(argv):
+    if not argv or argv[0] in ('-h', '--help'):
+        print(__doc__.strip()); return 0
+    op, rest = argv[0], argv[1:]
+    if op == 'start':
+        if len(rest) < 3 or rest[1] != '--':
+            print('usage: svc start <name> -- <command...>'); return 2
+        request(op='start', name=rest[0], command=' '.join(rest[2:])); return 0
+    if op == 'stop':
+        if len(rest) != 1:
+            print('usage: svc stop <name>'); return 2
+        request(op='stop', name=rest[0]); return 0
+    if op == 'wait':
+        if not rest:
+            print('usage: svc wait <name> [--for TEXT] [--max SECONDS]'); return 2
+        name, pattern, seconds = rest[0], None, 60
+        it = iter(rest[1:])
+        for flag in it:
+            if flag == '--for':
+                pattern = next(it, None)
+            elif flag == '--max':
+                seconds = float(next(it, '60'))
+            else:
+                print('svc wait: unknown option %s' % flag); return 2
+        request(op='wait', name=name, pattern=pattern, seconds=seconds); return 0
+    if op == 'status':
+        status(); return 0
+    if op == 'logs':
+        if not rest:
+            print('usage: svc logs <name> [-n LINES]'); return 2
+        lines = int(rest[rest.index('-n')+1]) if '-n' in rest else 40
+        return logs(rest[0], lines)
+    print('svc: unknown command %s' % op); return 2
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))
