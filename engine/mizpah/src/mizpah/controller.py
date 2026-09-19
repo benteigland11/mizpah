@@ -571,9 +571,12 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         # A reading of a file some task builds waits for that task: the static audit of site/index.html was
         # routed beside the page build and blocked on an absent file (landing-en, 2026-09-19).
         creators: dict[str, str] = {}
+        decided_tasks = [ti for ti in (decision.get('tasks') or []) if isinstance(ti, dict)]
         for u in unknowns:
             if u.get('creates') and not u.get('enabler'):
-                creators[u['creates'].lower()] = next((t['id'] for t in tasks if u['id'] in t['unknowns']), '')
+                # The builder may come later in the same reply; apply() adds tasks in dependency order.
+                creators[u['creates'].lower()] = next((str(ti.get('id')) for ti in decided_tasks
+                                                       if u['id'] in (ti.get('unknowns') or ([ti['unknown']] if ti.get('unknown') else []))), '')
         for u in observation['unknowns']:
             notes = str(u.get('notes') or '')
             if 'creates ' in notes and '; enabler ' not in notes:
@@ -587,6 +590,17 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
                 if owner_task and owner_task != tid and made and made in mine and owner_task not in deps:
                     deps.append(owner_task)
                     refusals.append('task '+tid+': reads '+made+', which '+owner_task+' builds — added that dependency')
+            # A reading of a path a deliverable names that does not exist yet, with nothing routed to build it, is
+            # a task that can only block ("count the candidates under brand/marks/" before any were drawn).
+            if project is not None and not deps:
+                named = {p.rstrip('/').lower() for text in (observation['brief'].get('deliverables') or [])
+                         for p in re.findall(r'[\w./-]+/[\w./-]*|[\w./-]+\.[A-Za-z0-9]+', str(text))}
+                missing = sorted({p for p in named if p and p in mine and not (project/p).exists()
+                                  and not any(p in c for c in creators)})
+                if missing:
+                    refusals.append('task '+tid+': reads '+', '.join(missing[:3])+', which does not exist and no task builds — '
+                                    'mint the artifact unknown that creates it (with `creates`) and its task first, and make '
+                                    'this task depend on it'); continue
         made_here = {u['creates'].lower() for u in unknowns if u['id'] in ids and u.get('creates')}
         def reads_own(task_unknowns: list[str]) -> bool:
             texts = ' '.join(str(u.get('source') or '')+' '+str(u.get('claim') or '') for u in unknowns if u['id'] in task_unknowns)
@@ -692,7 +706,13 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
     sectors = set()
     if now and (project/'.terra'/'route.json').exists():
         sectors = {s.get('id') for s in json.loads((project/'.terra'/'route.json').read_text()).get('sectors') or []}
-    for t in accepted['tasks']:
+    ordered: list[dict[str, Any]] = []
+    pending = list(accepted['tasks'])
+    while pending:   # dependency order: a task follows the tasks it depends on within this reply
+        ready = [t for t in pending if all(d not in {p['id'] for p in pending} for d in t.get('deps') or [])]
+        ordered += ready or pending[:1]
+        pending = [t for t in pending if t not in ordered]
+    for t in ordered:
         ids = t.get('unknowns') or [t['unknown']]
         args = ['route', 'add', t['id'], '--title', t['title'], '--map', ids[0], '--bucket', t['bucket'],
                 '--skill', 'tooling' if t.get('enabler') else 'terra-probe']

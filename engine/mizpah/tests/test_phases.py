@@ -353,9 +353,13 @@ def test_a_number_citing_a_deliverable_is_a_reading_not_an_artifact(project: Pat
     observation = controller.observe(CONFIG, project)
     accepted, refusals = controller.guard(dict(unknowns=[
         dict(id='report_line_length', cites='deliverable:1', type='number', claim='mean line length of report/survey.md',
-             evidence_needed='count characters per line', source='report/survey.md')],
-        tasks=[dict(id='measure', unknowns=['report_line_length'], bucket='low', title='measure')]), observation, project)
-    assert [u['id'] for u in accepted['unknowns']] == ['report_line_length'], refusals
+             evidence_needed='count characters per line', source='report/survey.md'),
+        dict(id='survey_written', cites='deliverable:1', type='boolean', creates='report/survey.md',
+             claim='report/survey.md exists and its measure is report_line_length', evidence_needed='read it')],
+        tasks=[dict(id='measure', unknowns=['report_line_length'], bucket='low', title='measure'),
+               dict(id='write', unknowns=['survey_written'], bucket='low', title='write')]), observation, project)
+    assert sorted(u['id'] for u in accepted['unknowns']) == ['report_line_length', 'survey_written'], refusals
+    assert next(t for t in accepted['tasks'] if t['id'] == 'measure')['deps'] == ['write']
 
 
 def test_a_third_attempt_at_the_same_reading_is_refused(project: Path) -> None:
@@ -397,3 +401,18 @@ def test_a_second_unknown_for_the_same_claim_is_refused_and_a_stale_known_is_rou
                                           observation, project)
     assert [t['id'] for t in accepted['tasks']] == ['retake'], refusals
     assert 'owed again under the SAME id' in controller.render_observation(observation, 'eval')
+
+
+def test_a_reading_of_an_unbuilt_deliverable_path_waits_for_a_builder(project: Path) -> None:
+    observation = controller.observe(CONFIG, project)
+    decision = dict(unknowns=[dict(id='report_sections', cites='need:1', type='number', claim='sections under report/survey.md',
+                                   evidence_needed='count headings', source='report/survey.md')],
+                    tasks=[dict(id='count', unknowns=['report_sections'], bucket='low', title='count')])
+    accepted, refusals = controller.guard(decision, observation, project)
+    assert not accepted['tasks'] and any('does not exist and no task builds' in r for r in refusals), refusals
+    decision['unknowns'].append(dict(id='survey_written', cites='deliverable:1', type='boolean', creates='report/survey.md',
+                                     claim='report/survey.md exists with report_sections sections', evidence_needed='read it'))
+    decision['tasks'].append(dict(id='write', unknowns=['survey_written'], bucket='low', title='write'))
+    accepted, refusals = controller.guard(decision, observation, project)
+    by_id = {t['id']: t for t in accepted['tasks']}
+    assert by_id['count']['deps'] == ['write'], (accepted['tasks'], refusals)
