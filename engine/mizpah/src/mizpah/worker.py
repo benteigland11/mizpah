@@ -699,6 +699,7 @@ def task_gate(config: dict[str, Any], project: Path, task: dict[str, Any], map_i
         if project_unknown.get('status') != 'resolved':
             problems.append('project unknown '+unknown_id+' is '+str(project_unknown.get('status')))
     problems += vacuous_truth_problems(project, unknown_ids)
+    problems += duplicate_reading_problems(project, unknown_ids)
     resynced = readopt_retaken(config, project, map_id, unknown_ids)
     if resynced:
         (root/'resynced.jsonl').open('a').write(json.dumps(dict(at=time.time(), readopted=resynced))+'\n') if root else None
@@ -836,6 +837,29 @@ def artifact_agreement_problems(project: Path, unknown_ids: list[str]) -> list[s
                             'artifact measures a different quantity than the known (the same name at another mass, '
                             'another point, another unit), do not bend it to the map: block the task naming both '
                             'quantities, so the brief can be made to name them apart')
+    return problems
+
+
+def duplicate_reading_problems(project: Path, unknown_ids: list[str]) -> list[str]:
+    """Two quantities that are different things cannot agree to twelve digits by chance: the light and dark body
+    contrasts, and the accent's, all read 16.075361130695477 (palette2) — one computation read three times. A
+    re-measurement reruns the same probe and reproduces it, so the gate has to notice the coincidence itself.
+    Integers and round values are exempt (counts and booleans coincide honestly)."""
+    values: dict[str, list[str]] = {}
+    for uid in unknown_ids:
+        known = read_known(project, uid)
+        if not known or (known.get('stats') or {}).get('kind') != 'number':
+            continue
+        value = extract_known_value(known)
+        if not isinstance(value, float) or value == int(value) or round(value, 2) == value:
+            continue
+        values.setdefault(repr(value), []).append(uid)
+    problems = []
+    for value, ids in values.items():
+        if len(ids) > 1:
+            problems.append(', '.join(ids)+' all read exactly '+value+': different quantities do not agree to every digit — '
+                            'each probe is reading the same computation (the same pair, the same scheme, the same file). '
+                            'Give each its own inputs and re-take them; void the runs that repeat')
     return problems
 
 
