@@ -619,6 +619,7 @@ def task_gate(config: dict[str, Any], project: Path, task: dict[str, Any], map_i
         project_unknown = read_unknown(project, unknown_id)
         if project_unknown.get('status') != 'resolved':
             problems.append('project unknown '+unknown_id+' is '+str(project_unknown.get('status')))
+    problems += artifact_agreement_problems(project, unknown_ids)
     gate = terra(config, project, 'gate')
     own_ids = set(knowns) | set(runs) | set(unknown_ids)
     for violation in gate.get('violations') or []:
@@ -711,6 +712,41 @@ def values_agree(kind: str | None, expected: Any, reading: Any) -> bool:
     except (TypeError, ValueError):
         return False
     return abs(a-b) <= max(1e-6, 0.02*abs(a))   # 2%: a re-run of a reading, not a different reading
+
+
+def artifact_agreement_problems(project: Path, unknown_ids: list[str]) -> list[str]:
+    """An artifact unknown records what the artifact printed; the map already holds what it should have printed.
+
+    A number-typed artifact unknown names the known it must agree with (the anchor guard made sure of that);
+    recording the printed value is not agreement, comparing it is. luna's sizing script printed hover_power
+    340.6 W against the map's 281.8 W and the task completed: the probe declared the known as an input and
+    discarded it. So the gate compares: the adopted value against every number known the unknown names, and
+    disagreement with all of them is red, with both numbers in the message."""
+    problems: list[str] = []
+    known_ids = {p.stem for p in (project/'.terra'/'map'/'knowns').glob('*.json')}
+    for uid in unknown_ids:
+        try:
+            unknown = read_unknown(project, uid)
+        except (OSError, ValueError):
+            continue
+        notes = str(unknown.get('notes') or '')
+        if not ('creates ' in notes or 'cites deliverable:' in notes) or unknown.get('type') != 'number':
+            continue
+        adopted = read_known(project, uid)
+        if adopted is None:
+            continue
+        value = extract_known_value(adopted)
+        text = str(unknown.get('claim') or '')+' '+str(unknown.get('evidence_needed') or '')
+        anchors = [w for w in dict.fromkeys(re.findall(r'[a-z][a-z0-9_]*', text)) if w in known_ids and w != uid]
+        numeric = [(a, extract_known_value(read_known(project, a) or {})) for a in anchors]
+        numeric = [(a, v) for a, v in numeric if isinstance(v, (int, float)) and not isinstance(v, bool)]
+        if not numeric or value is None:
+            continue
+        if not any(values_agree('number', v, value) for _, v in numeric):
+            problems.append('artifact known '+uid+' = '+str(value)+' but the known'+('s' if len(numeric) > 1 else '')+' it must agree with '
+                            +', '.join(a+' = '+str(round(v, 6)) for a, v in numeric)+' — the artifact prints a different number; '
+                            'fix the artifact (or the probe reads the wrong line), never the map')
+    return problems
 
 
 def red_message(gate: dict[str, Any], project: Path, map_id: str, unknown_ids: list[str]) -> str:
