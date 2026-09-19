@@ -32,6 +32,45 @@ def blocked(config: dict[str, Any], project: Path) -> list[dict[str, Any]]:
     return [t for t in terra(config, project, 'route', 'status')['tasks'] if t['status'] == 'blocked']
 
 
+def settle_partial_block(config: dict[str, Any], project: Path, task_id: str, reason: str) -> dict[str, Any] | None:
+    """A worker that resolved some of a task's unknowns and blocked on the rest has finished the part it could.
+
+    Terra strands every dependent of a blocked task until a lead re-points it; here the lead is the eval, which
+    only speaks in unknowns, tasks and proposals. So the driver settles the block the way a lead would: the
+    task completes citing the knowns it did produce, and each unresolved unknown is marked blocked with the
+    worker's reason in its notes — open state the eval sees and re-routes or proposes on. A task that resolved
+    nothing stays blocked (the run stops on it, as before).
+    """
+    task = next((t for t in terra(config, project, 'route', 'status')['tasks'] if t['id'] == task_id), None)
+    if task is None or task.get('status') != 'blocked':
+        return None
+    ids = [task.get('map_id')]+[a.removeprefix('unknown:') for a in task.get('acceptance') or [] if a.startswith('unknown:')]
+    records = {u['id']: u.get('record') or {} for u in terra_list(config, project, 'unknown', 'list', '--json')}
+    resolved = [u for u in ids if records.get(u, {}).get('status') == 'resolved']
+    unresolved = [u for u in ids if u in records and records[u].get('status') != 'resolved']
+    if not resolved or not unresolved:
+        return None
+    for uid in unresolved:
+        notes = str(records[uid].get('notes') or '')
+        terra(config, project, 'unknown', 'status', uid, 'blocked', '--notes', notes+'; blocked: '+reason[:600])
+    evidence = ('partial: resolved '+', '.join(resolved)+'; blocked on '+', '.join(unresolved)+' — '+reason[:400])
+    knowns = [k for u in resolved for k in ('--known', str(records[u].get('resolved_by') or u).removeprefix('known:'))]
+    try:
+        terra(config, project, 'route', 'complete', task_id, '--evidence', evidence, *knowns)
+    except RuntimeError:
+        terra(config, project, 'route', 'complete', task_id, '--evidence', evidence, '--freehand', evidence[:200])
+    return dict(task=task_id, resolved=resolved, unresolved=unresolved)
+
+
+def terra_list(config: dict[str, Any], project: Path, *args: str) -> list[dict[str, Any]]:
+    """A terra verb that prints a JSON array (unknown list --json)."""
+    import subprocess
+    process = subprocess.run([config['mizpah']['terra'], *args], cwd=project, capture_output=True, text=True)
+    text = process.stdout.strip()
+    start = text.find('[')
+    return json.loads(text[start:]) if start >= 0 else []
+
+
 def failing_step(config: dict[str, Any], project: Path, journal: Path, mode: str, log: Path) -> dict[str, Any]:
     """A controller step that records its own failure instead of ending the run."""
     try:
@@ -108,7 +147,17 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                     except RuntimeError as error:
                         with log.open('a') as handle:
                             handle.write(json.dumps(dict(at=time.time(), where='block:'+task['id'], error=str(error)[:500]))+'\n')
-            # A task the worker blocked itself stays blocked with the worker's reason; the eval sees it.
+            elif result['verdict'] == 'blocked_by_worker':
+                # A worker block that resolved some unknowns is settled (task done citing them, the rest marked
+                # blocked with the reason) so dependents can run; a block that resolved nothing stays blocked.
+                try:
+                    settled = settle_partial_block(config, project, task['id'], str(result['blocked_reason'] or ''))
+                except RuntimeError as error:
+                    settled = None
+                    with log.open('a') as handle:
+                        handle.write(json.dumps(dict(at=time.time(), where='settle:'+task['id'], error=str(error)[:500]))+'\n')
+                if settled:
+                    record.setdefault('settled', []).append(settled)
             # The controller works between tasks: it sees the new known as state and may
             # mint the next unknowns while the route still has work. Its writes are safe
             # against the worker's entitlement writeback.

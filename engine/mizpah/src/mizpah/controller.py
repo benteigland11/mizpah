@@ -201,7 +201,15 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
     resolved = len(observation['unknowns'])-len(open_unknowns)
     lines.append('Open unknowns:'+('' if open_unknowns else ' (none)')+(' — '+str(resolved)+' resolved' if resolved else ''))
     for u in open_unknowns:
-        lines.append('  '+u['id']+' ['+str(u['status'])+'] '+str(u['claim']))
+        notes = str(u.get('notes') or '')
+        reason = notes.split('blocked: ', 1)[1] if 'blocked: ' in notes else ''
+        # The worker's reason usually opens with what it did resolve and ends with why the rest could not be.
+        why = ' (blocked: '+(reason if len(reason) <= 400 else reason[:120]+' … '+reason[-260:])+')' if reason else ''
+        lines.append('  '+u['id']+' ['+str(u['status'])+'] '+str(u['claim'])+why)
+    if any('blocked: ' in str(u.get('notes') or '') for u in open_unknowns):
+        lines.append('A blocked unknown has no task: its worker could not record the reading as the unknown is typed '
+                     'or asked. Route it again only with a different question or type; otherwise propose the change '
+                     'and leave it — the artifacts that depend on the map may still be built.')
     lines.append('Route tasks:'+('' if observation['tasks'] else ' (none)'))
     for t in observation['tasks']:
         lines.append('  '+t['id']+' ['+t['status']+', '+str(t['bucket'])+'] → '+', '.join(t.get('unknowns') or [str(t['unknown'])])+': '+t['title']+
@@ -403,7 +411,12 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             ids = kept
         taken = [u for u in ids if u in routed or any(u in t['unknowns'] for t in tasks)]
         if taken:
-            refusals.append('task '+tid+': unknown '+', '.join(taken)+' already has an open task'); continue
+            kept = [u for u in ids if u not in taken]
+            if not kept:
+                refusals.append('task '+tid+': unknown '+', '.join(taken)+' already has an open task'); continue
+            # One unknown already routed does not sink the others the task carries.
+            refusals.append('task '+tid+': dropped unknown '+', '.join(taken)+' (already has an open task); kept '+', '.join(kept))
+            ids = kept
         if item.get('bucket') not in BUCKETS:
             refusals.append('task '+tid+': bucket must be one of '+', '.join(BUCKETS)); continue
         deps = [str(d) for d in item.get('deps') or []]
