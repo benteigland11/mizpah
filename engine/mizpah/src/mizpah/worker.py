@@ -908,7 +908,9 @@ def green_message(gate: dict[str, Any], unknown_id: str | list[str], used: list[
                 for step, counts in cost.items()]
         paid = (' Calls that were refused or failed, by the step you were on:\n'+'\n'.join(rows)+
                 '\n Where a step led you into those, the step is what needs rewriting.')
-    linking = ('Procedures compose by linking, and a link is the first-class way to reuse one: a step that says "now walk '
+    linking = ('The procedure lives in the store and changes only through `playbook edit-step` / `add-step` / `remove-step`; the '
+               'checklist under `.playbook/open/` is a rendered copy — editing it changes nothing and is refused. '
+               'Procedures compose by linking, and a link is the first-class way to reuse one: a step that says "now walk '
                'procedure X" is written `playbook add-step <id> --title ... --do "<why here>" --procedure <X>`, and open '
                'renders it as the command to open X. Never copy another procedure\'s steps into yours — link the step to '
                'it. Search before you write (`playbook search`, a create is refused without one): where a procedure '
@@ -1122,7 +1124,8 @@ COMMAND_TOOLS: tuple[dict[str, Any], ...] = (
 # Records only a tool may write. The writeback would drop hand edits anyway; refusing them at the tool saves the
 # turns spent making them and the turns spent wondering why they did not take.
 PROTECTED_PATHS = ('.terra/brief.json', '.terra/route.json', '.terra/map/knowns/*', '.terra/map/runs/*',
-                   '.terra/map/sessions/*/knowns/*', '.terra/map/sessions/*/runs/*', '.terra/map/unknowns/*')
+                   '.terra/map/sessions/*/knowns/*', '.terra/map/sessions/*/runs/*', '.terra/map/unknowns/*',
+                   '.playbook/open/*', '.playbook/playbook/procedures/*')
 REFUSED_PATTERNS = (
     (r'--skip-gate\b', 'the gate is not yours to skip: a red gate says what is missing, and a block says why you cannot'),
     (r'--freehand\b', 'a claim-shaped task completes on map evidence (--run/--known), never on prose'),
@@ -1130,6 +1133,7 @@ REFUSED_PATTERNS = (
     (r'\bplaybook\s+(remove-step|edit)\s+mizpah-', 'the bootstrap procedure is not yours to rewrite'),
     (r'(>>?|\btee\b|-i)\s*[^|;&]*\.terra/(brief|route)\.json', 'the brief moves by proposal and the route by terra route; neither is a file to write'),
     (r'(>>?|\btee\b|-i)\s*[^|;&]*\.terra/map/(knowns|runs|unknowns)/', 'knowns, runs and unknowns are born by terra commands, never by writing their files'),
+    (r'(>>?|\btee\b|-i|\bmv\b|\bcp\b)\s*[^|;&]*\.playbook/(open|playbook/procedures)/', 'an opened checklist is a copy and the store is not a file: ticking boxes is done in your head, improving a procedure is `playbook edit-step` / `add-step`'),
     (r'\bsystemctl\b|\bsystemd-run\b|\bloginctl\b', 'the host\'s service manager is outside the sandbox; services start with `svc start`'),
     (r'\bcurl\b[^|;&]*(/stop\b|/shutdown\b|/slots\b)', 'the model server is not yours to signal'),
 )
