@@ -211,7 +211,15 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
         lines.append('  '+str(k['id'])+' = '+str(value)+' ('+str(k['confidence'])+', n='+str(k['n'])+')'+stale)
     if any(k.get('stale') for k in observation['knowns']):
         lines.append('A STALE known is no longer believed: a file it depends on changed after its readings. It is owed '
-                     'again — mint an unknown that re-takes the reading (its artifact may have regressed) and a task for it.')
+                     'again under the SAME id — route a task that lists the stale known\'s id among its unknowns; the '
+                     'worker re-takes that reading with its probe. Never mint a new unknown for a claim the map already '
+                     'holds: a second probe for the same question is shopping for an answer.')
+    false_artifacts = [k for k in observation['knowns'] if k['type'] == 'boolean' and k.get('rate') is not None
+                       and float(k['rate']) < 0.5 and not k.get('stale')]
+    if false_artifacts:
+        lines.append('A boolean that reads false about an artifact ('+', '.join(k['id'] for k in false_artifacts[:4])+') is '
+                     'answered by changing the artifact, after which the known goes STALE and its id is routed again — not '
+                     'by a new unknown with a new probe.')
     open_unknowns = [u for u in observation['unknowns'] if u['status'] in OPEN_UNKNOWN]
     resolved = len(observation['unknowns'])-len(open_unknowns)
     lines.append('Open unknowns:'+('' if open_unknowns else ' (none)')+(' — '+str(resolved)+' resolved' if resolved else ''))
@@ -350,6 +358,14 @@ def uncovered_deliverable_terms(observation: dict[str, Any], extra_unknowns: lis
 RETRY_SUFFIX = re.compile(r'(_v\d+|_current|_again|_fix(ed)?|_retry|_redo|_\d+)+$')
 
 
+def _same_reading(a: str, b: str) -> bool:
+    """Two claims are one reading when their content words (stemmed) overlap almost entirely."""
+    wa, wb = briefs._stems(briefs._words(a)), briefs._stems(briefs._words(b))
+    if len(wa) < 3 or len(wb) < 3:
+        return False
+    return len(wa & wb)/min(len(wa), len(wb)) >= 0.85
+
+
 def stem(unknown_id: str) -> str:
     """`repair_docs_handwritten_v2`, `..._current` and `..._again` are one reading asked three times."""
     return RETRY_SUFFIX.sub('', unknown_id)
@@ -382,6 +398,12 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         # The same reading minted a third time under a new suffix is a loop, not a plan: two attempts that came
         # back false or blocked mean the source or the brief is wrong, and that is a proposal (docs_page minted
         # repair_docs_handwritten_compliance, _v2 and _current in a row, 2026-09-19).
+        same_claim = [u for u in existing_unknowns.values() if u['id'] != uid and u.get('type') == item.get('type')
+                      and _same_reading(str(u.get('claim') or ''), str(item.get('claim') or ''))]
+        if same_claim:
+            refusals.append('unknown '+uid+': the map already holds this reading as '+same_claim[0]['id']+' ['+str(same_claim[0]['status'])
+                            +']; if its artifact changed it goes stale and its own id is routed again, if it read false the '
+                            'artifact is what changes — a second unknown for one claim is refused'); continue
         twins = [u for u in existing_unknowns.values() if stem(u['id']) == stem(uid) and u['id'] != uid]
         if len(twins) >= 2:
             refusals.append('unknown '+uid+': the third attempt at '+stem(uid)+' ('+', '.join(t['id'] for t in twins)+' already exist); '
@@ -513,7 +535,8 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             refusals.append('task '+tid+': already exists'); continue
         if not ids or len(set(ids)) != len(ids):
             refusals.append('task '+tid+': list the unknowns it resolves (one or more, no repeats)'); continue
-        bad = [u for u in ids if u not in minted and u not in open_unknowns]
+        stale_ids = {k['id'] for k in observation['knowns'] if k.get('stale')}
+        bad = [u for u in ids if u not in minted and u not in open_unknowns and u not in stale_ids]
         if bad:
             kept = [u for u in ids if u not in bad]
             if not kept:

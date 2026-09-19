@@ -372,3 +372,28 @@ def test_a_third_attempt_at_the_same_reading_is_refused(project: Path) -> None:
     accepted, refusals = controller.guard(dict(unknowns=[dict(id='report_ok_current', cites='need:1', type='boolean', claim='ok', evidence_needed='read')],
                                                tasks=[dict(id='t3', unknowns=['report_ok_current'], bucket='low', title='c')]), observation, project)
     assert not accepted['unknowns'] and any('third attempt at report_ok' in r for r in refusals)
+
+
+def test_a_second_unknown_for_the_same_claim_is_refused_and_a_stale_known_is_routed_by_id(project: Path) -> None:
+    observation = controller.observe(CONFIG, project)
+    accepted, _ = controller.guard(dict(unknowns=[dict(id='page_matches_docs', cites='need:1', type='boolean',
+                                                        claim='site/index.html is a hand-written docs page whose content follows content/docs.md',
+                                                        evidence_needed='compare headings and prose')],
+                                        tasks=[dict(id='t1', unknowns=['page_matches_docs'], bucket='low', title='a')]), observation, project)
+    controller.apply(CONFIG, project, accepted)
+    observation = controller.observe(CONFIG, project)
+    accepted, refusals = controller.guard(dict(unknowns=[dict(id='docs_page_handwritten_compliance', cites='need:1', type='boolean',
+                                                               claim='site/index.html is a hand-written docs page whose content is based on content/docs.md',
+                                                               evidence_needed='compare')],
+                                               tasks=[dict(id='t2', unknowns=['docs_page_handwritten_compliance'], bucket='low', title='b')]),
+                                          observation, project)
+    assert not accepted['unknowns'] and any('already holds this reading as page_matches_docs' in r for r in refusals)
+    # A stale known is routed under its own id (once its first task is closed).
+    terra(project, 'route', 'cancel', 't1', '--reason', 'test')
+    observation = controller.observe(CONFIG, project)
+    observation['knowns'].append(dict(id='page_matches_docs', type='boolean', status='resolved', confidence='med', n=3, mean=None,
+                                      rate=0.0, mode=None, claim='x', stale=True, stale_reasons=['site/index.html changed']))
+    accepted, refusals = controller.guard(dict(tasks=[dict(id='retake', unknowns=['page_matches_docs'], bucket='low', title='re-take')]),
+                                          observation, project)
+    assert [t['id'] for t in accepted['tasks']] == ['retake'], refusals
+    assert 'owed again under the SAME id' in controller.render_observation(observation, 'eval')
