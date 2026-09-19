@@ -196,11 +196,17 @@ def write_report(config: dict[str, Any], project: Path, root: Path, cycles: list
     health = _read_jsonl(root/'health.jsonl')
     notes = _read_jsonl(root/'errors.jsonl')
     services = [r for t in (root/'tasks').glob('*') for r in _read_jsonl(t/'services.jsonl')] if (root/'tasks').exists() else []
+    egress = [r for t in (root/'tasks').glob('*') for r in _read_jsonl(t/'scratch'/'egress.jsonl')] if (root/'tasks').exists() else []
     lines += ['', '## Infrastructure',
               '- outages: '+str(len(outages))+(' (last: '+str(outages[-1].get('error'))[:100]+')' if outages else ''),
               '- health events: '+', '.join(str(h.get('event')) for h in health) if health else '- health events: none',
               '- driver errors: '+str(len(notes))+(' (last: '+str(notes[-1].get('where'))+' — '+str(notes[-1].get('error'))[:100]+')' if notes else ''),
               '- services stopped at task end: '+str(sum(len(s.get('stopped') or []) for s in services))]
+    if egress:
+        allowed = _count(e['host'] for e in egress if e.get('allowed'))
+        refused = _count(e['host'] for e in egress if not e.get('allowed'))
+        lines.append('- egress: '+str(sum(allowed.values()))+' allowed ('+', '.join(h+' ×'+str(n) for h, n in sorted(allowed.items(), key=lambda kv: -kv[1])[:6])
+                     +'); '+str(sum(refused.values()))+' refused ('+', '.join(h+' ×'+str(n) for h, n in sorted(refused.items(), key=lambda kv: -kv[1])[:6])+')')
     score = _score(project)
     if score:
         lines += ['', '## Score', score]

@@ -22,7 +22,7 @@ from cg.logic_llamaclient_python.src.native import KnownIssues, SyncNativeTransp
 from cg.data_session_event_log_python.src.session_event_log import SessionEventLog
 from cg.infra_revision_store_python.src.revision_store import RevisionStore
 from cg.infra_sandboxed_shell_execution_python.src.sandboxed_shell_execution import (
-    SandboxedShell, ServiceLimits, ShellConfig, ShellLimits, ShellResult, WorkspaceEditError, edit_workspace_file,
+    NetworkPolicy, SandboxedShell, ServiceLimits, ShellConfig, ShellLimits, ShellResult, WorkspaceEditError, edit_workspace_file,
     read_workspace_file, read_workspace_lines, workspace_files, write_workspace_file,
 )
 from cg.universal_controller_progress_python.src.controller_progress import ControllerProgress, ReviewPolicy

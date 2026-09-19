@@ -27,7 +27,17 @@
     "refused_paths": [
       "/home/Vinscen/mizpah/engine",
       "/home/Vinscen/mizpah/.venv/lib"
-    ]
+    ],
+    "network_staged": {
+      "allowed_domains": [
+        "pypi.org",
+        "files.pythonhosted.org"
+      ],
+      "proxy_port": 3128,
+      "unshare": "/home/linuxbrew/.linuxbrew/bin/unshare",
+      "nsenter": "/home/linuxbrew/.linuxbrew/bin/nsenter",
+      "socat": "/usr/bin/socat"
+    }
   },
   "turn_budget": {
     "low": 60,

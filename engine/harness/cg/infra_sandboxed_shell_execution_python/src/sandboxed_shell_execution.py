@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath
 import re
 import selectors
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
@@ -79,6 +80,31 @@ HARDENING_PROPERTIES = (
 
 
 @dataclass(frozen=True)
+class NetworkPolicy:
+    """A private network namespace per shell, with one door out: an allowlisting HTTP proxy.
+
+    Commands and services share the namespace (they reach each other on loopback) and nothing else: the
+    host's services, the LAN and the internet are unroutable. Outbound HTTP(S) goes through a proxy the host
+    runs on a unix socket, bridged to 127.0.0.1:<proxy_port> inside; the proxy admits `allowed_domains` (and
+    their subdomains), refuses local and private addresses always, and logs every decision to egress.jsonl
+    in the scratch root. Programs that ignore the proxy variables simply have no network — fail-safe."""
+
+    allowed_domains: tuple[str, ...] = ()
+    proxy_port: int = 3128
+    unshare: str = '/usr/bin/unshare'
+    nsenter: str = '/usr/bin/nsenter'
+    socat: str = '/usr/bin/socat'
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, 'allowed_domains', tuple(str(d).strip().lower() for d in self.allowed_domains if str(d).strip()))
+        if not 1024 <= self.proxy_port <= 65535:
+            raise ValueError('proxy_port must be an unprivileged port')
+        for tool in (self.unshare, self.nsenter, self.socat):
+            if not Path(tool).is_absolute():
+                raise ValueError('network tools must be absolute host paths')
+
+
+@dataclass(frozen=True)
 class ShellConfig:
     """Host paths are explicit; virtual paths belong to the sandbox protocol."""
 
@@ -105,8 +131,12 @@ class ShellConfig:
     network_files: tuple[str, ...] = ('/etc/resolv.conf', '/etc/hosts', '/etc/nsswitch.conf', '/etc/ssl', '/etc/pki',
                                       '/etc/ca-certificates', '/etc/crypto-policies')
     # None: nothing outlives a command. Set: the `svc` command is on PATH in every command and services
-    # share the host network namespace with commands, so share_network is required.
+    # share a network namespace with commands, so share_network or network is required.
     services: ServiceLimits | None = None
+    # Set: commands and services run in a private network namespace with the allowlisting proxy as the only
+    # way out (see NetworkPolicy). This is the mode for an unattended worker; share_network alone is the
+    # legacy mode that exposes the host's loopback services.
+    network: NetworkPolicy | None = None
     # Host paths a command may not name: a toolchain that must be bound to run (an editable install's
     # source) but is not the worker's to read. A command whose text contains one is refused unexecuted
     # with the reason; the tools still run because the bind stays. Prefixes, matched as substrings.
@@ -120,8 +150,8 @@ class ShellConfig:
         if any(not Path(value).is_absolute() for value in
                (self.bwrap, self.systemd_run, self.systemctl, self.runtime_root, self.scratch_root)):
             raise ValueError('Host paths must be absolute')
-        if self.services is not None and not self.share_network:
-            raise ValueError('Services need share_network: a command reaches a service on localhost')
+        if self.services is not None and not (self.share_network or self.network is not None):
+            raise ValueError('Services need a shared or private network: a command reaches a service on localhost')
         if any('/' in value or not value for value in (self.shell_name, self.python_name)):
             raise ValueError('Runtime binary names must be basenames')
         object.__setattr__(self, 'read_only_binds', tuple(self.read_only_binds))
@@ -394,6 +424,94 @@ class SandboxedShell:
         self.config = config
         # name -> dict(unit, command, started_at); the host side of what `svc` shows the worker
         self._services: dict[str, dict[str, Any]] = {}
+        # The private network namespace: a holder process that owns it, the host proxy, and the bridge inside.
+        self._netns: dict[str, Any] | None = None
+
+    # ------------------------------------------------------------------ private network
+
+    @property
+    def egress_log(self) -> Path:
+        return Path(self.config.scratch_root)/'egress.jsonl'
+
+    def _ensure_network(self) -> dict[str, Any]:
+        """Start (once) the namespace holder, the egress proxy and the loopback bridge; return their handles."""
+        policy = self.config.network
+        if policy is None:
+            raise ValueError('This shell has no private network')
+        if self._netns is not None and all(p.poll() is None for p in self._netns['processes']):
+            return self._netns
+        self.close_network()
+        import os
+        import ctypes
+
+        def die_with_parent() -> None:
+            # PR_SET_PDEATHSIG: the helpers never outlive the harness process that started them.
+            ctypes.CDLL(None).prctl(1, 9)
+
+        scratch = Path(self.config.scratch_root)
+        scratch.mkdir(parents=True, exist_ok=True)
+        holder = subprocess.Popen([policy.unshare, '--user', '--map-current-user', '--keep-caps', '--net',
+                                   '/usr/bin/sh', '-c', 'ip link set lo up && exec sleep infinity'],
+                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                                  preexec_fn=die_with_parent)
+        deadline = time.monotonic()+10
+        while time.monotonic() < deadline:
+            probe = subprocess.run(self._nsenter(holder.pid)+['/usr/bin/sh', '-c', 'ip -o link show lo'],
+                                   capture_output=True, text=True, timeout=5)
+            if probe.returncode == 0 and 'UP' in probe.stdout:
+                break
+            if holder.poll() is not None:
+                raise RuntimeError('network namespace holder exited: '+(holder.stderr.read().decode(errors='replace') if holder.stderr else ''))
+            time.sleep(0.1)
+        else:
+            raise RuntimeError('network namespace did not come up')
+        sock = scratch/'egress.sock'
+        proxy = subprocess.Popen([sys.executable, '-B', str(Path(__file__).resolve().parent/'egress_proxy.py'),
+                                  str(sock), str(self.egress_log), *policy.allowed_domains],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 preexec_fn=die_with_parent)
+        deadline = time.monotonic()+10
+        while not sock.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        bridge = subprocess.Popen(self._nsenter(holder.pid)+[policy.socat,
+                                  'TCP-LISTEN:'+str(policy.proxy_port)+',fork,bind=127.0.0.1,reuseaddr',
+                                  'UNIX-CONNECT:'+str(sock)],
+                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                  preexec_fn=die_with_parent)
+        deadline = time.monotonic()+10
+        while time.monotonic() < deadline:
+            probe = subprocess.run(self._nsenter(holder.pid)+['/usr/bin/sh', '-c',
+                                   'exec 3<>/dev/tcp/127.0.0.1/'+str(policy.proxy_port)], capture_output=True, timeout=5)
+            if probe.returncode == 0:
+                break
+            time.sleep(0.1)
+        self._netns = dict(holder=holder, proxy=proxy, bridge=bridge, processes=[holder, proxy, bridge], socket=sock)
+        return self._netns
+
+    def _nsenter(self, pid: int) -> list[str]:
+        policy = self.config.network
+        assert policy is not None
+        return [policy.nsenter, '--user=/proc/'+str(pid)+'/ns/user', '--net=/proc/'+str(pid)+'/ns/net',
+                '--preserve-credentials', '--']
+
+    def close_network(self) -> None:
+        """Stop the bridge, the proxy and the namespace holder (services in it die with the namespace)."""
+        if self._netns is None:
+            return
+        for process in reversed(self._netns['processes']):
+            if process.poll() is None:
+                process.terminate()
+        for process in self._netns['processes']:
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+        self._netns = None
+
+    def close(self) -> None:
+        """Everything this shell started: services, then the private network."""
+        self.stop_all()
+        self.close_network()
 
     @property
     def services_root(self) -> Path:
@@ -403,20 +521,33 @@ class SandboxedShell:
         """The bwrap namespace, mounts and environment a command and a service share."""
         config, limits = self.config, self.config.limits
         helper = str(Path(__file__).resolve().parent)
+        private = config.network is not None
+        if private:
+            netns = self._ensure_network()
+            prefix = self._nsenter(netns['holder'].pid)
+            proxy_url = 'http://127.0.0.1:'+str(config.network.proxy_port)
+            proxy_env = [part for name in ('HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy')
+                         for part in ('--setenv', name, proxy_url)] + ['--setenv', 'NO_PROXY', '127.0.0.1,localhost',
+                                                                         '--setenv', 'no_proxy', '127.0.0.1,localhost']
+        else:
+            prefix, proxy_env = [], []
+        networked = config.share_network or private
         return [
+            *prefix,
             config.bwrap,
             *(('--unshare-user', '--unshare-ipc', '--unshare-pid', '--unshare-uts', '--unshare-cgroup')
-              if config.share_network else ('--unshare-all', '--unshare-user')),
+              if networked else ('--unshare-all', '--unshare-user')),
             '--disable-userns', '--die-with-parent', '--new-session',
             '--as-pid-1', '--cap-drop', 'ALL', '--clearenv',
             '--ro-bind', config.runtime_root, '/usr',
             '--symlink', 'usr/bin', '/bin', '--symlink', 'usr/lib', '/lib', '--symlink', 'usr/lib64', '/lib64',
             '--ro-bind', helper, '/runner',
             *[part for bind in config.read_only_binds for part in ('--ro-bind', bind, bind)],
-            *[part for entry in (config.network_files if config.share_network else ())
+            *[part for entry in (config.network_files if networked else ())
               if Path(entry).exists() for part in ('--ro-bind', str(Path(entry).resolve()), entry)],
             '--proc', '/proc', '--remount-ro', '/proc', '--dev', '/dev', '--remount-ro', '/dev',
             '--size', str(limits.temporary_bytes), '--tmpfs', '/tmp',
+            *proxy_env,
             '--setenv', 'PATH', ':'.join(filter(None, (config.environment.get('PATH'), '/usr/bin',
                                                         '/runner' if config.services else None))),
             '--setenv', 'HOME', '/work', '--setenv', 'TMPDIR', '/tmp',

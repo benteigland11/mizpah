@@ -26,7 +26,7 @@ from typing import Any
 
 from cg.bp_focused_agent_session_python.src import (
     ControllerSettings, EndpointConfig, FocusedSession, ModelClient, ReviewPolicy, SandboxedShell, SessionPolicy,
-    ServiceLimits, SessionSettings, ShellConfig, ShellLimits, llama_model_client,
+    NetworkPolicy, ServiceLimits, SessionSettings, ShellConfig, ShellLimits, llama_model_client,
 )
 from cg.backend_persistent_model_session_python.src.persistent_model_session import ModelTransportError, RejectedGeneration
 
@@ -818,11 +818,12 @@ def bindings(config: dict[str, Any], root: Path, map_id: str, checkins: bool | N
     sandbox = config['mizpah']['sandbox']
     environment = dict(sandbox['environment'], TERRA_MAP=map_id, XDG_DATA_HOME='/work/'+PLAYBOOK_PREFIX)
     services = ServiceLimits(**sandbox['services']) if sandbox.get('services') else None
+    network = NetworkPolicy(**sandbox['network']) if sandbox.get('network') else None
     shell = ShellConfig(**(config['shell'] | dict(scratch_root=str(scratch), limits=ShellLimits(**config['shell']['limits']),
                                                  read_only_binds=tuple(sandbox['read_only_binds']), environment=environment,
                                                  share_network=bool(sandbox.get('share_network', False)), services=services,
                                                  refused_paths=tuple(sandbox.get('refused_paths') or ()),
-                                                 refused_patterns=REFUSED_PATTERNS)))
+                                                 refused_patterns=REFUSED_PATTERNS, network=network)))
     return worker, checkin, SandboxedShell(shell)
 
 
@@ -1066,6 +1067,7 @@ def run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | N
             stopped = shell.stop_all()
             if stopped:
                 (root/'services.jsonl').open('a').write(json.dumps(dict(at=time.time(), stopped=stopped))+'\n')
+            shell.close_network()
 
 
 def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | None, holder: dict[str, Any]) -> dict[str, Any]:

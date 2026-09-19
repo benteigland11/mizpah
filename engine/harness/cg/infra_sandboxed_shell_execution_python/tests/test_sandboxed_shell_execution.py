@@ -1,4 +1,6 @@
 import io
+import json
+import os
 from pathlib import Path
 import sys
 import tarfile
@@ -7,7 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.sandboxed_shell_execution import (
-    ServiceLimits, ShellConfig, ShellLimits, SandboxedShell, WorkspaceEditError, edit_workspace_file, read_workspace_file, read_workspace_lines,
+    NetworkPolicy, ServiceLimits, ShellConfig, ShellLimits, SandboxedShell, WorkspaceEditError, edit_workspace_file, read_workspace_file, read_workspace_lines,
     workspace_files, write_workspace_file,
 )
 from src.sandbox_worker import execute
@@ -483,3 +485,59 @@ def test_a_service_log_past_its_cap_keeps_only_its_tail(tmp_path):
     shell._cap_logs()
     data = (home/'log').read_bytes()
     assert data.startswith(b'[log head dropped') and data.endswith(b'END') and len(data) < 1100
+
+
+def test_egress_proxy_policy_admits_allowed_domains_and_never_private_addresses():
+    from src.egress_proxy import host_allowed
+    allowed = ('pypi.org', 'files.pythonhosted.org')
+    assert host_allowed('pypi.org', allowed) == (True, 'allowed')
+    assert host_allowed('Files.PythonHosted.org.', allowed)[0] is True
+    assert host_allowed('evilpypi.org', allowed) == (False, 'not in allowlist')
+    assert host_allowed('example.com', allowed)[0] is False
+    for local in ('localhost', '127.0.0.1', '10.1.2.3', '192.168.0.9', '172.20.1.1', '::1', 'printer.local', 'x.localhost'):
+        assert host_allowed(local, allowed+(local,))[0] is False, local
+    assert host_allowed('93.184.216.34', allowed+('93.184.216.34',)) == (True, 'ip literal')
+
+
+def test_private_network_contract_enters_the_namespace_and_sets_the_proxy(tmp_path, monkeypatch):
+    shell = SandboxedShell(ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits(),
+                                       services=services(), network=NetworkPolicy(allowed_domains=('pypi.org',))))
+    class Holder:
+        pid = 4242
+    monkeypatch.setattr(shell, '_ensure_network', lambda: dict(holder=Holder()))
+    argv = shell.command_argv(str(tmp_path), 'unit-n')
+    assert argv[argv.index('/bin/bwrap')-1] == '--' and '--net=/proc/4242/ns/net' in argv and '--preserve-credentials' in argv
+    assert '--unshare-all' not in argv and '--unshare-net' not in argv
+    triples = [tuple(argv[i:i+3]) for i in range(len(argv)-2)]
+    assert ('--setenv', 'HTTPS_PROXY', 'http://127.0.0.1:3128') in triples and ('--setenv', 'NO_PROXY', '127.0.0.1,localhost') in triples
+    service = shell.service_argv('web', 'unit-s')
+    assert '--net=/proc/4242/ns/net' in service and ('--setenv', 'https_proxy', 'http://127.0.0.1:3128') in [tuple(service[i:i+3]) for i in range(len(service)-2)]
+    with pytest.raises(ValueError):
+        ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits(), services=services())
+
+
+@pytest.mark.skipif(not all(Path(p).exists() for p in ('/usr/bin/bwrap', '/usr/bin/systemd-run', '/usr/bin/socat')),
+                    reason='needs bwrap, a user systemd and socat')
+def test_private_network_isolates_the_host_and_admits_only_the_allowlist(tmp_path):
+    import shutil
+    tools = dict(unshare=shutil.which('unshare'), nsenter=shutil.which('nsenter'))
+    if not all(tools.values()):
+        pytest.skip('needs unshare and nsenter')
+    shell = SandboxedShell(ShellConfig('/usr/bin/bwrap', '/usr/bin/systemd-run', '/usr/bin/systemctl', '/usr', str(tmp_path),
+                                       ShellLimits(1024**3, 128*1024**2, 64*1024**2, 1024**2, 262144, 64, 200, 60, 5, 10000),
+                                       services=services(), network=NetworkPolicy(allowed_domains=('example.com',), **tools)))
+    port = 8900+(os.getpid() % 200)
+    try:
+        out = shell.run("ip -o link | awk '{print $2}' | tr -d ':' | tr '\\n' ' '; echo; curl -s -m 8 -o /dev/null -w '%{http_code}' https://example.com/; echo; "
+                        "curl -s -m 5 -o /dev/null -w '%{http_code}' https://pypi.org/; echo; curl -s -m 3 --noproxy '*' -o /dev/null -w '%{http_code}' https://example.com/; echo", b'')
+        lines = out.stdout.strip().splitlines()
+        assert lines[0].strip() == 'lo', lines            # the only interface
+        assert lines[1] == '200' and lines[2] == '000' and lines[3] == '000', lines   # allowed / refused / no route
+        log = [json.loads(l) for l in shell.egress_log.read_text().splitlines()]
+        assert [(e['host'], e['allowed']) for e in log][:2] == [('example.com', True), ('pypi.org', False)]
+        ws = shell.run('echo hi > i.html; svc start web -- python3 -m http.server %d' % port, b'').workspace
+        ws = shell.run("svc wait web --for 'Serving HTTP' --max 20", ws).workspace
+        assert shell.run('curl -s http://127.0.0.1:%d/i.html' % port, ws).stdout.strip() == 'hi'
+    finally:
+        shell.close()
+    assert shell._netns is None

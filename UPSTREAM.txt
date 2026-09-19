@@ -132,3 +132,13 @@ diverged:
   systemctl/model-server signals and shell writes to brief/route/knowns/runs refused; write/edit refuse Terra's
   records; a STOP file in the run root (or two levels up) pauses at the next boundary; SIGTERM runs the finally
   blocks; the loop sweeps orphaned isolated-service scopes at start.
+- harness: infra-sandboxed-shell-execution 1.10.1 → 1.11.0 gains ShellConfig.network (NetworkPolicy): a private
+  network namespace per shell (unprivileged `unshare --user --map-current-user --keep-caps --net`, lo up), which
+  commands and services enter with nsenter so they share loopback; the only way out is an HTTP/CONNECT proxy
+  the host runs on a unix socket (src/egress_proxy.py, stdlib), bridged to 127.0.0.1:<port> inside by socat;
+  `allowed_domains` (and subdomains) admitted, local/private addresses always refused, every decision logged to
+  scratch/egress.jsonl; HTTP(S)_PROXY set for commands (pip, curl, urllib and chromium all honour it; anything
+  that does not has no network). close_network()/close(). Modelled on Anthropic's sandbox-runtime. Verified:
+  host model server unreachable, pypi via proxy 200, chromium's phone-home refused and logged, services on
+  loopback, screenshot. bp-focused-agent-session 0.28.0 → 0.29.0 (re-export). Mizpah stages the policy under
+  sandbox.network_staged; enabled after the design briefs so landing2 is not confounded.

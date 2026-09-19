@@ -2,7 +2,7 @@
   "id": "bp-focused-agent-session-python",
   "name": "focused-agent-session",
   "language": "python",
-  "version": "0.28.0",
+  "version": "0.29.0",
   "description": "Persistent worker sessions with agentic controller investigation, full-project document memory, disposable sandbox checks and durable recovery. Bounded worker file actions: write and edit tools with exact-occurrence edits and a per-call argument bound with feedback.",
   "tags": [
     "agent-session",
@@ -18,7 +18,7 @@
     },
     {
       "id": "infra-sandboxed-shell-execution-python",
-      "version": "1.10.0"
+      "version": "1.11.0"
     },
     {
       "id": "data-session-event-log-python",
