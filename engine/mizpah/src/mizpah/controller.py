@@ -347,6 +347,14 @@ def uncovered_deliverable_terms(observation: dict[str, Any], extra_unknowns: lis
     return problems
 
 
+RETRY_SUFFIX = re.compile(r'(_v\d+|_current|_again|_fix(ed)?|_retry|_redo|_\d+)+$')
+
+
+def stem(unknown_id: str) -> str:
+    """`repair_docs_handwritten_v2`, `..._current` and `..._again` are one reading asked three times."""
+    return RETRY_SUFFIX.sub('', unknown_id)
+
+
 def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path | None = None) -> tuple[dict[str, Any], list[str]]:
     """Structural floor: every unknown cites a brief entry and names a source that exists; every task
     resolves an open unknown. The quantity is the unknown id — the controller does not pick a second name."""
@@ -371,6 +379,14 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             refusals.append('unknown '+repr(uid)+': id must match ^[a-z][a-z0-9_]*$'); continue
         if uid in existing_unknowns:
             refusals.append('unknown '+uid+': already exists ('+str(existing_unknowns[uid]['status'])+')'); continue
+        # The same reading minted a third time under a new suffix is a loop, not a plan: two attempts that came
+        # back false or blocked mean the source or the brief is wrong, and that is a proposal (docs_page minted
+        # repair_docs_handwritten_compliance, _v2 and _current in a row, 2026-09-19).
+        twins = [u for u in existing_unknowns.values() if stem(u['id']) == stem(uid) and u['id'] != uid]
+        if len(twins) >= 2:
+            refusals.append('unknown '+uid+': the third attempt at '+stem(uid)+' ('+', '.join(t['id'] for t in twins)+' already exist); '
+                            'a reading that failed twice is not re-minted — propose the change to the need or deliverable '
+                            'it cites, with the two readings as evidence, or leave it'); continue
         bad_refs = [r for r in refs if r.partition(':')[0] not in counts or not r.partition(':')[2].isdigit()
                     or not 1 <= int(r.partition(':')[2]) <= counts[r.partition(':')[0]]]
         if not refs or bad_refs:

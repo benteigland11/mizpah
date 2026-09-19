@@ -356,3 +356,19 @@ def test_a_number_citing_a_deliverable_is_a_reading_not_an_artifact(project: Pat
              evidence_needed='count characters per line', source='report/survey.md')],
         tasks=[dict(id='measure', unknowns=['report_line_length'], bucket='low', title='measure')]), observation, project)
     assert [u['id'] for u in accepted['unknowns']] == ['report_line_length'], refusals
+
+
+def test_a_third_attempt_at_the_same_reading_is_refused(project: Path) -> None:
+    observation = controller.observe(CONFIG, project)
+    first = dict(unknowns=[dict(id='report_ok', cites='need:1', type='boolean', claim='ok', evidence_needed='read')],
+                 tasks=[dict(id='t1', unknowns=['report_ok'], bucket='low', title='a')])
+    accepted, _ = controller.guard(first, observation, project)
+    controller.apply(CONFIG, project, accepted)
+    observation = controller.observe(CONFIG, project)
+    accepted, _ = controller.guard(dict(unknowns=[dict(id='report_ok_v2', cites='need:1', type='boolean', claim='ok', evidence_needed='read')],
+                                        tasks=[dict(id='t2', unknowns=['report_ok_v2'], bucket='low', title='b')]), observation, project)
+    controller.apply(CONFIG, project, accepted)
+    observation = controller.observe(CONFIG, project)
+    accepted, refusals = controller.guard(dict(unknowns=[dict(id='report_ok_current', cites='need:1', type='boolean', claim='ok', evidence_needed='read')],
+                                               tasks=[dict(id='t3', unknowns=['report_ok_current'], bucket='low', title='c')]), observation, project)
+    assert not accepted['unknowns'] and any('third attempt at report_ok' in r for r in refusals)
