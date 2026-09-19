@@ -13,6 +13,7 @@ If the project-files section is not enough to route or bucket well, look first: 
  "tasks": [{"id": "snake_case", "title": "...", "unknowns": ["..."], "bucket": "low|medium|high", "deps": []}],
  "proposals": [{"summary": "...", "need": "new need text", "deliverable": "...", "non_goal": "...", "evidence": "..."}],
  "rebucket": [{"task": "<id>", "bucket": "medium|high", "why": "..."}],
+ "unblock": [{"task": "<id>", "after": "<done task that built what was missing>"}],
  "done": false, "why": "one sentence"}
 Ids match ^[a-z][a-z0-9_]*$. Unknowns that already exist are not listed again; a task lists only the unknowns it resolves.
 

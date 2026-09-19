@@ -232,7 +232,9 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
            for t in observation['tasks']):
         lines.append('A task blocked by its worker with a reason means the source could not be read as the unknown '
                      'asks: the question needs a different source, or the brief needs to change. That is what '
-                     'proposals are for; do not re-mint the same question.')
+                     'proposals are for; do not re-mint the same question. One exception: a source that did not exist '
+                     'yet because another task builds it — once that task is done, release the blocked one with '
+                     '"unblock": [{"task": "<id>", "after": "<the task that built it>"}].')
     budget = observation.get('budget') or {}
     if budget:
         lines.append('Points: budget '+str(budget.get('budget_points'))+', planned '+str(budget.get('points_plan'))+
@@ -346,7 +348,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
     existing_tasks = {t['id'] for t in observation['tasks']}
     open_unknowns = {u['id'] for u in observation['unknowns'] if u['status'] in OPEN_UNKNOWN}
     routed = {u for t in observation['tasks'] if t['status'] in OPEN_TASK for u in (t.get('unknowns') or [t['unknown']])}
-    unknowns, tasks, proposals, rebucket = [], [], [], []
+    unknowns, tasks, proposals, rebucket, unblock = [], [], [], [], []
     for item in decision.get('unknowns') or []:
         if not isinstance(item, dict):
             refusals.append('unknown entry is not an object'); continue
@@ -494,6 +496,25 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         artifact_ids = {u['id'] for u in unknowns if u.get('creates') and not u.get('enabler')} | {
             u['id'] for u in observation['unknowns'] if 'creates ' in str(u.get('notes') or '') and '; enabler ' not in str(u.get('notes') or '')}
         builds = any(u in artifact_ids for u in ids)
+        # A reading of a file some task builds waits for that task: the static audit of site/index.html was
+        # routed beside the page build and blocked on an absent file (landing-en, 2026-09-19).
+        creators: dict[str, str] = {}
+        for u in unknowns:
+            if u.get('creates') and not u.get('enabler'):
+                creators[u['creates'].lower()] = next((t['id'] for t in tasks if u['id'] in t['unknowns']), '')
+        for u in observation['unknowns']:
+            notes = str(u.get('notes') or '')
+            if 'creates ' in notes and '; enabler ' not in notes:
+                made = notes.split('creates ', 1)[1].split(';')[0].strip().lower()
+                owner_task = next((t['id'] for t in observation['tasks'] if u['id'] in (t.get('unknowns') or [])
+                                   and t['status'] in OPEN_TASK), '')
+                creators.setdefault(made, owner_task)
+        if not builds:
+            mine = ' '.join(str(u.get('source') or '')+' '+str(u.get('claim') or '') for u in unknowns if u['id'] in ids).lower()
+            for made, owner_task in creators.items():
+                if owner_task and owner_task != tid and made and made in mine and owner_task not in deps:
+                    deps.append(owner_task)
+                    refusals.append('task '+tid+': reads '+made+', which '+owner_task+' builds — added that dependency')
         reading_tasks = [t['id'] for t in tasks if not any(u in artifact_ids for u in t['unknowns'])]
         reading_tasks += [t['id'] for t in observation['tasks'] if t['status'] in OPEN_TASK
                           and not any(u in artifact_ids for u in (t.get('unknowns') or []))]
@@ -540,6 +561,20 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         if bucket not in BUCKETS or BUCKETS.index(bucket) <= BUCKETS.index(current['bucket'] or 'low'):
             refusals.append('rebucket '+tid+': bucket must be above '+str(current['bucket'])); continue
         rebucket.append(dict(task=tid, bucket=bucket, why=str(item.get('why') or '')))
+    for item in decision.get('unblock') or []:
+        if not isinstance(item, dict):
+            refusals.append('unblock entry is not an object'); continue
+        tid, after = str(item.get('task') or ''), str(item.get('after') or '')
+        current = by_id.get(tid)
+        if current is None:
+            refusals.append('unblock '+repr(tid)+': no such task'); continue
+        if current['status'] != 'blocked' or str(current.get('blocked_reason') or '').startswith(BUDGET_BLOCK):
+            refusals.append('unblock '+tid+': only a task its worker blocked can be released (budget blocks are re-bucketed)'); continue
+        waited = by_id.get(after)
+        if waited is None or waited['status'] != 'done':
+            # A release needs a reason the map can check: the task whose completion changed the source.
+            refusals.append('unblock '+tid+': "after" must name a task that has since completed (the one that built what was missing)'); continue
+        unblock.append(dict(task=tid, after=after))
     done = decision.get('done')
     done = bool(done) if isinstance(done, bool) else None
     if done is True:
@@ -548,13 +583,13 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             done = False
             refusals.append('done refused: '+'; '.join(uncovered)+' — mint one unknown per named thing (with `creates`), '
                             'each claim naming it and the known it must agree with')
-    return dict(unknowns=unknowns, tasks=tasks, proposals=proposals, rebucket=rebucket,
+    return dict(unknowns=unknowns, tasks=tasks, proposals=proposals, rebucket=rebucket, unblock=unblock,
                 done=done, why=str(decision.get('why') or '')), refusals
 
 
 def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> dict[str, list[str]]:
     """Write the accepted decision through Terra; proposals are queued, never accepted here."""
-    done = dict(unknowns=[], tasks=[], proposals=[], rebucket=[])
+    done = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[])
     for u in accepted['unknowns']:
         args = ['unknown', 'create', u['id'], '--claim', u['claim'], '--evidence', u['evidence_needed'],
                 '--type', u['type'], '--quantity', u['quantity'],
@@ -604,6 +639,9 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
         terra(config, project, 'route', 'set-effort', r['task'], '--bucket', r['bucket'])
         terra(config, project, 'route', 'unblock', r['task'])
         done['rebucket'].append(r['task']+'→'+r['bucket'])
+    for r in accepted.get('unblock') or []:
+        terra(config, project, 'route', 'unblock', r['task'])
+        done.setdefault('unblock', []).append(r['task']+' after '+r['after'])
     return done
 
 
@@ -653,7 +691,7 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
     client = model_client(config)
     observation = observe(config, project)
     refusals: list[str] = []
-    accepted = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], done=None, why='')
+    accepted = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], done=None, why='')
     record: dict[str, Any] = dict(mode=mode, observation=observation, attempts=[])
     looks = 0
     attempt = 0
@@ -668,7 +706,7 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
             continue
         wants = decision.get('look') if isinstance(decision, dict) else None
         if isinstance(wants, list) and wants and looks < LOOK_ROUNDS \
-                and not any(decision.get(k) for k in ('unknowns', 'tasks', 'proposals', 'rebucket')):
+                and not any(decision.get(k) for k in ('unknowns', 'tasks', 'proposals', 'rebucket', 'unblock')):
             # A look costs no attempt: the controller reads before it decides, up to LOOK_ROUNDS times.
             looks += 1
             looked = observation.setdefault('looked', {})
@@ -680,7 +718,7 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
         attempt += 1
         accepted, refusals = guard(decision, observation, project)
         record['attempts'].append(dict(raw=raw, accepted=accepted, refusals=refusals))
-        minted_nothing = not any(accepted[k] for k in ('unknowns', 'tasks', 'proposals', 'rebucket'))
+        minted_nothing = not any(accepted[k] for k in ('unknowns', 'tasks', 'proposals', 'rebucket', 'unblock'))
         if minted_nothing and accepted.get('done') is not True and attempt == 1:
             # It described what is owed but routed nothing: ask once for the unknowns or an explicit done.
             refusals = refusals + ['you minted nothing and did not say "done": true — if the map still owes the '
@@ -689,19 +727,19 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
             continue
         if not refusals or attempt == 2:
             break
-        if any(accepted[k] for k in ('unknowns', 'tasks', 'proposals', 'rebucket')):
+        if any(accepted[k] for k in ('unknowns', 'tasks', 'proposals', 'rebucket', 'unblock')):
             # Keep what passed; ask only about what did not.
             applied = apply(config, project, accepted)
-            record.setdefault('applied', dict(unknowns=[], tasks=[], proposals=[], rebucket=[]))
+            record.setdefault('applied', dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[]))
             for key in applied:
                 record['applied'][key] += applied[key]
             looked = observation.get('looked')
             observation = observe(config, project)
             if looked:
                 observation['looked'] = looked
-            accepted = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], done=accepted.get('done'), why=accepted['why'])
+            accepted = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], done=accepted.get('done'), why=accepted['why'])
     applied = apply(config, project, accepted)
-    record.setdefault('applied', dict(unknowns=[], tasks=[], proposals=[], rebucket=[]))
+    record.setdefault('applied', dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[]))
     for key in applied:
         record['applied'][key] += applied[key]
     record['refused'] = refusals

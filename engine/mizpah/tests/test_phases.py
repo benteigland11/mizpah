@@ -167,3 +167,25 @@ def test_enabler_gates_the_needs_that_name_it(instrumented: Path) -> None:
         dict(id='contrast', cites='need:2', type='number', claim='contrast', evidence_needed='render and read')],
         tasks=[dict(id='measure', unknowns=['contrast'], bucket='low', title='measure')]), observation, instrumented)
     assert not refusals, refusals
+
+
+def test_reading_of_a_built_file_waits_for_its_builder_and_unblock_needs_a_done_task(project: Path) -> None:
+    observation = controller.observe(CONFIG, project)
+    decision = dict(unknowns=[
+        dict(id='line_count', cites='need:1', type='number', claim='lines under src', evidence_needed='wc -l over src'),
+        dict(id='survey_report', cites='deliverable:1', type='boolean', creates='report/survey.md',
+             claim='report/survey.md states line_count', evidence_needed='read and compare'),
+        dict(id='report_headings', cites='need:2', type='number', claim='headings in report/survey.md', evidence_needed='count # lines',
+             source='report/survey.md'),
+    ], tasks=[dict(id='count', unknowns=['line_count'], bucket='low', title='count'),
+              dict(id='write', unknowns=['survey_report'], bucket='low', title='write', deps=['count']),
+              dict(id='audit', unknowns=['report_headings'], bucket='low', title='audit the report')])
+    accepted, refusals = controller.guard(decision, observation, project)
+    audit = next(t for t in accepted['tasks'] if t['id'] == 'audit')
+    assert audit['deps'] == ['write'], (audit, refusals)
+    assert any('audit' in r and 'added that dependency' in r for r in refusals)
+    controller.apply(CONFIG, project, accepted)
+    terra(project, 'route', 'block', 'count', '--reason', 'the file is absent')
+    observation = controller.observe(CONFIG, project)
+    accepted, refusals = controller.guard(dict(unblock=[dict(task='count', after='write')]), observation, project)
+    assert not accepted['unblock'] and any('"after" must name a task that has since completed' in r for r in refusals)

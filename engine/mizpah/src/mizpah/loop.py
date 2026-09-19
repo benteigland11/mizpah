@@ -144,7 +144,7 @@ def failing_step(config: dict[str, Any], project: Path, journal: Path, mode: str
         with log.open('a') as handle:
             handle.write(json.dumps(dict(at=time.time(), where='controller:'+mode, error=str(error)[:500],
                                          trace=traceback.format_exc()[-2000:]))+'\n')
-        return dict(mode=mode, applied=dict(unknowns=[], tasks=[], proposals=[], rebucket=[]), refused=[],
+        return dict(mode=mode, applied=dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[]), refused=[],
                     why='', error=str(error)[:300])
 
 
@@ -278,7 +278,7 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                 stop = 'deadline'
                 break
             minted = record['eval']['applied']
-            if not any(minted[k] for k in ('unknowns', 'tasks', 'rebucket')) and not pickable(config, project, root):
+            if not any(minted[k] for k in ('unknowns', 'tasks', 'rebucket', 'unblock')) and not pickable(config, project, root):
                 if close_phase(config, project, record, log):
                     # The eval looked and minted nothing (a suite resolved false would have drawn a repair task) and
                     # the map says every entry is resolved: the phase is met and the next cycle routes the next one.
