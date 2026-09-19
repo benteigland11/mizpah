@@ -861,11 +861,43 @@ STOP = {'with', 'from', 'that', 'this', 'into', 'every', 'each', 'must', 'their'
         'change', 'after', 'before', 'agreeing', 'prints', 'python3'}
 
 
+def uncovered_by_procedures(config: dict[str, Any], used: list[str], unknowns: list[dict[str, Any]]) -> dict[str, list[str]]:
+    """Per followed procedure, the task's unknowns none of its steps mention: the pressure a wider brief puts on a method.
+
+    An unknown counts as covered when two stems of its id or claim occur in the procedure's title, description
+    or steps. The eval mints unknowns a procedure never anticipated; each one it leaves uncovered is a step the
+    worker took without the procedure's help — and the step the next worker should find written down."""
+    import subprocess as sp
+    out: dict[str, list[str]] = {}
+    for procedure_id in used:
+        try:
+            text = sp.run([config['mizpah']['playbook'], 'load', procedure_id], capture_output=True, text=True, timeout=30).stdout
+            doc = json.loads(text[text.find('{'):])
+        except (ValueError, OSError, sp.SubprocessError):
+            continue
+        body = ' '.join([str(doc.get('title') or ''), str(doc.get('description') or '')]
+                        +[str(st.get('title') or '')+' '+str(st.get('do') or '') for st in doc.get('steps') or []]).lower().replace('-', ' ')
+        missing = []
+        for u in unknowns:
+            words = {w for w in re.findall(r'[a-z0-9]{4,}', (str(u.get('id') or '')+' '+str(u.get('claim') or '')).lower().replace('_', ' '))
+                     if w not in STOP}
+            if shared_stems(words, body) < 2:
+                missing.append(str(u.get('id')))
+        if missing:
+            out[procedure_id] = missing
+    return out
+
+
 def green_message(gate: dict[str, Any], unknown_id: str | list[str], used: list[str] = (), cost: dict[str, Any] | None = None,
-                  skips: dict[str, list[str]] | None = None) -> str:
+                  skips: dict[str, list[str]] | None = None, uncovered: dict[str, list[str]] | None = None) -> str:
     if isinstance(unknown_id, list):
         unknown_id = ', '.join(unknown_id)
     paid = ''
+    if uncovered:
+        rows = ['  - '+proc+': '+', '.join(ids) for proc, ids in uncovered.items()]
+        paid += (' Unknowns this task resolved that the procedure you followed has no step for:\n'+'\n'.join(rows)+
+                 '\n For each, `playbook add-step` the step you actually took (the reading, the widget, the exact command) '
+                 'where it belongs in the walk; a procedure grows by the unknowns that stretched it.')
     if skips:
         rows = ['  - '+proc+': '+'; '.join(steps) for proc, steps in skips.items()]
         paid += (' Steps you marked `[-]` not needed:\n'+'\n'.join(rows)+
@@ -1299,8 +1331,10 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
     budget = cap
     if gate['ok'] and budget-status['completed_worker_turns'] > 0:
         # Only after green: the method goes into the library, and only through the harvest.
-        session.continue_with(green_message(gate, task_unknown_ids(task), procedures_used(root), tool_fight(root),
-                                            checklist_skips(session.workspace())))
+        followed = procedures_used(root)
+        session.continue_with(green_message(gate, task_unknown_ids(task), followed, tool_fight(root),
+                                            checklist_skips(session.workspace()),
+                                            uncovered_by_procedures(config, followed, unknowns)))
         status = run_through_outages(session, config, root, maximum_worker_turns=budget-status['completed_worker_turns'])
         session.prune_workspaces()
         widgets = harvest_widgets(session.workspace(), root, config)
