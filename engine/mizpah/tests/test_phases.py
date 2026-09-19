@@ -466,7 +466,10 @@ def test_a_route_reply_without_the_deliverable_is_sent_back_for_the_builder(proj
 def test_a_builder_naming_a_deliverable_file_gets_its_cite_inferred(project: Path) -> None:
     observation = controller.observe(CONFIG, project)
     accepted, refusals = controller.guard(dict(unknowns=[
-        dict(id='survey_md_built', type='boolean', creates='report/survey.md', claim='report/survey.md is written from the readings',
-             evidence_needed='read it')],
-        tasks=[dict(id='write', unknowns=['survey_md_built'], bucket='low', title='write')]), observation, project)
-    assert accepted['unknowns'] and accepted['unknowns'][0]['cites'] == 'deliverable:1', refusals
+        dict(id='survey_md_built', type='boolean', creates='report/survey.md', claim='report/survey.md is written stating line_count',
+             evidence_needed='read it'),
+        dict(id='line_count', cites='need:1', type='number', claim='lines', evidence_needed='wc')],
+        tasks=[dict(id='count', unknowns=['line_count'], bucket='low', title='count'),
+               dict(id='write', unknowns=['survey_md_built'], bucket='low', title='write', deps=['count'])]), observation, project)
+    built = next(u for u in accepted['unknowns'] if u['id'] == 'survey_md_built')
+    assert built['cites'] == 'deliverable:1', refusals
