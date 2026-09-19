@@ -505,11 +505,18 @@ class FocusedSession:
         return value
 
     def _client(self, original: ModelClient) -> ModelClient:
+        """The same client with this session's journal added to its observer.
+
+        A subclass (a hosted provider with its own counting and capabilities) is kept: the copy is made
+        through its class with the same attributes, not rebuilt as a plain ModelClient."""
         def observer(kind: str, payload: dict[str, Any]) -> None:
             self._event(kind, payload)
             if original.observer:
                 original.observer(kind, payload)
-        return ModelClient(original.config, transport=original.transport, observer=observer)
+        copy = object.__new__(type(original))
+        copy.__dict__.update(original.__dict__)
+        copy.observer = observer
+        return copy
 
     def _guidance_message(self) -> list[dict[str, Any]]:
         text = self.progress.applied_guidance() if self.settings.reference is not None else ''
