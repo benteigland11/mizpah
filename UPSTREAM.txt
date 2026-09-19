@@ -111,3 +111,6 @@ diverged:
   /svc/<name> (read-only to commands). start/stop/wait are request files the host carries out when the command
   ends and reports in that command's stdout; `wait` blocks the host, not the model. SandboxedShell.stop_all()
   for the owner; Mizpah's run_task stops them in a finally. bp-focused-agent-session 0.26.0 → 0.27.0
+- harness: infra-sandboxed-shell-execution 1.8.0 → 1.8.1 gains ShellConfig.refused_paths: a command naming one is
+  refused unexecuted (the bind stays so the tools run). Mizpah refuses engine/ and .venv/lib: the worker read terra
+  internals for 200 turns on a verification task instead of blocking with "input known X is wrong".

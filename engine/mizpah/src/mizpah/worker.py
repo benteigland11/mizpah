@@ -777,7 +777,8 @@ def bindings(config: dict[str, Any], root: Path, map_id: str, checkins: bool | N
     services = ServiceLimits(**sandbox['services']) if sandbox.get('services') else None
     shell = ShellConfig(**(config['shell'] | dict(scratch_root=str(scratch), limits=ShellLimits(**config['shell']['limits']),
                                                  read_only_binds=tuple(sandbox['read_only_binds']), environment=environment,
-                                                 share_network=bool(sandbox.get('share_network', False)), services=services)))
+                                                 share_network=bool(sandbox.get('share_network', False)), services=services,
+                                                 refused_paths=tuple(sandbox.get('refused_paths') or ()))))
     return worker, checkin, SandboxedShell(shell)
 
 

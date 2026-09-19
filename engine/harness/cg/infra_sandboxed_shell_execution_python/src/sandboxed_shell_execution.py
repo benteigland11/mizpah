@@ -87,6 +87,10 @@ class ShellConfig:
     # None: nothing outlives a command. Set: the `svc` command is on PATH in every command and services
     # share the host network namespace with commands, so share_network is required.
     services: ServiceLimits | None = None
+    # Host paths a command may not name: a toolchain that must be bound to run (an editable install's
+    # source) but is not the worker's to read. A command whose text contains one is refused unexecuted
+    # with the reason; the tools still run because the bind stays. Prefixes, matched as substrings.
+    refused_paths: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if any(not Path(value).is_absolute() for value in
@@ -105,6 +109,9 @@ class ShellConfig:
             if not name or '=' in name or not isinstance(value, str):
                 raise ValueError('Environment entries must be NAME -> string value')
         object.__setattr__(self, 'network_files', tuple(self.network_files))
+        object.__setattr__(self, 'refused_paths', tuple(self.refused_paths))
+        if any(not Path(entry).is_absolute() for entry in self.refused_paths):
+            raise ValueError('refused_paths must be absolute host paths')
         object.__setattr__(self, 'snapshot_ignore', tuple(self.snapshot_ignore))
         if any('/' in name or not name for name in self.snapshot_ignore):
             raise ValueError('snapshot_ignore entries are directory basenames')
@@ -445,6 +452,12 @@ class SandboxedShell:
             raise ValueError('Timeout exceeds the configured command limit')
         _members(workspace, limits.workspace_bytes, limits.max_files)
         start = time.monotonic()
+        named = [p for p in config.refused_paths if p in command]
+        if named:
+            return ShellResult('rejected', None, '', '', False, False, workspace, (), time.monotonic()-start,
+                               'refused: the command names '+', '.join(named)+', which is the toolchain, not your workspace. '
+                               'Read tools through their --help and the errors they print; a refusal you cannot resolve '
+                               'is a reason to block the task, not source to read.')
         unit = 'isolated-shell-'+uuid4().hex
         if self._services:
             self._mirror_workspace(workspace)

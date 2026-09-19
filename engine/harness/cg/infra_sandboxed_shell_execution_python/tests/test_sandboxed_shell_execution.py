@@ -442,3 +442,12 @@ def test_a_service_outlives_commands_and_sees_the_workspace_as_of_each_command(t
         assert '.svc' not in ' '.join(workspace_files(ws, byte_limit=10**8, file_limit=10000))
     finally:
         shell.stop_all()
+
+
+def test_a_command_naming_a_refused_path_is_rejected_unexecuted(tmp_path):
+    shell = SandboxedShell(ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits(),
+                                       refused_paths=('/opt/toolchain/src',)))
+    result = shell.run('sed -n 1,40p /opt/toolchain/src/cli.py', b'')
+    assert result.status == 'rejected' and result.exit_code is None and 'not your workspace' in result.detail
+    with pytest.raises(ValueError):
+        ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits(), refused_paths=('relative',))

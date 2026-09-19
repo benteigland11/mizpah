@@ -21,7 +21,11 @@
       "lifetime_seconds": 21600,
       "maximum_services": 4,
       "wait_seconds": 1800
-    }
+    },
+    "refused_paths": [
+      "/home/Vinscen/mizpah/engine",
+      "/home/Vinscen/mizpah/.venv/lib"
+    ]
   },
   "turn_budget": {
     "low": 60,
