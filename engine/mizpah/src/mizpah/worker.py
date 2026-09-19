@@ -954,7 +954,7 @@ def model_up(config: dict[str, Any]) -> bool:
 
 
 def run_through_outages(session: FocusedSession, config: dict[str, Any], root: Path, *, maximum_worker_turns: int,
-                        wait_seconds: int = 300) -> dict[str, Any]:
+                        wait_seconds: int = 300, health: Any = None) -> dict[str, Any]:
     """`session.run`, but a model server that goes away mid-call is waited for, not counted as a failure.
 
     A supervised server restarts in seconds; the session discards the torn call and continues. Only a server
@@ -974,10 +974,9 @@ def run_through_outages(session: FocusedSession, config: dict[str, Any], root: P
             (root/'outages.jsonl').open('a').write(json.dumps(dict(at=time.time(), error=str(error)[:200], outage=outages))+'\n')
             if outages > 5:
                 raise
-            deadline = time.time()+wait_seconds
-            while time.time() <= deadline and not model_up(config):
-                time.sleep(5)
-            if not model_up(config):
+            from . import ops
+            checker = health or ops.Health(config, root)
+            if not checker.wait_for_model(config['worker']['endpoint']['base_url'], wait_seconds=wait_seconds):
                 raise
             discarded = session.discard_pending()
             if discarded:

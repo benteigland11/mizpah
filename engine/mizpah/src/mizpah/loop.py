@@ -15,7 +15,7 @@ import time
 import traceback
 from typing import Any
 
-from . import controller, worker
+from . import controller, ops, worker
 from .worker import terra
 
 
@@ -96,18 +96,31 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
     tasks_run = 0
     errors = 0
     stalled_evals = 0
+    health = ops.Health(config, root)
+    config['mizpah']['run_root'] = str(root)   # the controller's outage wait records health here too
+
+    def report(stop_reason: str | None = None) -> None:
+        try:
+            ops.write_report(config, project, root, cycles+([record] if record and record not in cycles else []), stop_reason, started)
+        except Exception as error:  # noqa: BLE001 — the report never ends the run
+            with log.open('a') as handle:
+                handle.write(json.dumps(dict(at=time.time(), where='report', error=str(error)[:300]))+'\n')
+    record: dict[str, Any] = {}
     stop = 'max_cycles'
 
     def out_of_time() -> bool:
         return deadline is not None and time.time() > deadline
 
     for cycle in range(1, max_cycles+1):
-        record: dict[str, Any] = dict(cycle=cycle, tasks=[], evals=[], started_at=time.time())
+        record = dict(cycle=cycle, tasks=[], evals=[], started_at=time.time())
         if not pickable(config, project, root):
             record['route'] = failing_step(config, project, journal, 'route', log)
             if record['route'].get('error'):
                 errors += 1
         while tasks_run < max_tasks and not out_of_time():
+            if not health.disk_ok(root, project):
+                stop = 'disk_high'
+                break
             ready = pickable(config, project, root)
             if not ready:
                 break
@@ -164,7 +177,8 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
             # against the worker's entitlement writeback.
             record['evals'].append(failing_step(config, project, journal, 'eval', log))
             (root/'loop.json').write_text(json.dumps(dict(cycles=cycles+[record], tasks_run=tasks_run), indent=1))
-        if stop == 'driver_failing':
+            report()
+        if stop in ('driver_failing', 'disk_high'):
             cycles.append(record)
             break
         if not record['evals']:
@@ -196,6 +210,10 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
         if tasks_run >= max_tasks:
             stop = 'max_tasks'
             break
+    report(stop)
+    if stop not in ('nothing_owed', 'max_cycles', 'max_tasks'):
+        ops.notify(config, root, project.name+' stopped: '+stop,
+                   str(tasks_run)+' tasks in '+str(round((time.time()-started)/3600, 2))+' h; report at '+str(root/'report.md'))
     result = dict(stop=stop, cycles=cycles, tasks_run=tasks_run, hours=round((time.time()-started)/3600, 2),
                   blocked=[dict(id=t['id'], reason=t.get('blocked_reason')) for t in blocked(config, project)],
                   open_proposals=terra(config, project, 'brief', 'show').get('open_proposals'))

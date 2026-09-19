@@ -44,5 +44,12 @@
   "checkin_output_tokens": 2048,
   "scaffolding": {
     "checkins": false
+  },
+  "ops": {
+    "model_unit": "ornith-gpu0.service",
+    "restart_after_seconds": 60,
+    "restart_cooldown_seconds": 600,
+    "disk_high_percent": 92,
+    "notify_command": "notify-send \"$MIZPAH_TITLE\" \"$MIZPAH_BODY\""
   }
 }

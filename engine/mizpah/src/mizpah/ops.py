@@ -1,0 +1,228 @@
+"""What a loop needs to run unattended: a health check that heals what it can, a report a person reads in the
+morning, and a way to say the few things that need saying now.
+
+Config, under `ops` in the Mizpah config (all optional):
+  model_unit            a user systemd unit for the model server; started when /health stays down
+  restart_after_seconds how long the server may be down before the unit is started (default 60)
+  restart_cooldown_seconds  no second start within this window (default 600)
+  disk_high_percent     the run stops before a full disk corrupts it (default 92)
+  notify_command        a shell command run with MIZPAH_TITLE and MIZPAH_BODY in its environment, for the
+                        events that change what a person does next (run stopped, server down, disk high)
+
+Everything here is derived from files the loop already writes; nothing is a second bookkeeping path.
+"""
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import time
+from typing import Any
+import urllib.request
+
+
+def settings(config: dict[str, Any]) -> dict[str, Any]:
+    return dict(model_unit=None, restart_after_seconds=60, restart_cooldown_seconds=600, disk_high_percent=92,
+                notify_command=None) | dict(config['mizpah'].get('ops') or {})
+
+
+# ---------------------------------------------------------------- health
+
+def model_up(base_url: str, timeout: float = 5.0) -> bool:
+    try:
+        with urllib.request.urlopen(base_url.rstrip('/')+'/health', timeout=timeout) as response:
+            return response.status == 200
+    except OSError:
+        return False
+
+
+class Health:
+    """One per run. `wait_for_model` is what the outage loops call instead of sleeping on /health alone."""
+
+    def __init__(self, config: dict[str, Any], root: Path) -> None:
+        self.config = config
+        self.ops = settings(config)
+        self.root = root
+        self.log = root/'health.jsonl'
+        self.last_restart = 0.0
+
+    def _record(self, **fields: Any) -> None:
+        self.log.open('a').write(json.dumps(dict(at=time.time(), **fields))+'\n')
+
+    def wait_for_model(self, base_url: str, *, wait_seconds: float) -> bool:
+        """True when the server answers within wait_seconds; starts its unit once it has been down long enough."""
+        down_since = time.time()
+        deadline = down_since+wait_seconds
+        while time.time() <= deadline:
+            if model_up(base_url):
+                return True
+            unit = self.ops['model_unit']
+            if (unit and time.time()-down_since >= self.ops['restart_after_seconds']
+                    and time.time()-self.last_restart >= self.ops['restart_cooldown_seconds']):
+                self.last_restart = time.time()
+                started = subprocess.run(['systemctl', '--user', 'start', unit], capture_output=True, text=True,
+                                         timeout=60, check=False)
+                self._record(event='model_unit_started', unit=unit, ok=started.returncode == 0,
+                             error=(started.stderr or '').strip()[:300])
+                notify(self.config, self.root, 'model server restarted',
+                       unit+' was down '+str(int(time.time()-down_since))+' s; started it')
+            time.sleep(5)
+        self._record(event='model_down', base_url=base_url, waited=wait_seconds)
+        notify(self.config, self.root, 'model server down', base_url+' did not answer for '+str(int(wait_seconds))+' s')
+        return False
+
+    def disk_ok(self, *paths: Path) -> bool:
+        """False when any filesystem a run writes to is past the watermark; recorded and notified once each."""
+        ok = True
+        for path in paths:
+            try:
+                usage = shutil.disk_usage(path)
+            except OSError:
+                continue
+            percent = 100*usage.used/usage.total if usage.total else 0
+            if percent >= self.ops['disk_high_percent']:
+                ok = False
+                key = 'disk_high:'+str(path)
+                if not getattr(self, key, False):
+                    setattr(self, key, True)
+                    self._record(event='disk_high', path=str(path), percent=round(percent, 1))
+                    notify(self.config, self.root, 'disk high', str(path)+' is '+str(round(percent, 1))+'% full')
+        return ok
+
+
+# ---------------------------------------------------------------- notify
+
+def notify(config: dict[str, Any], root: Path, title: str, body: str) -> None:
+    """The few events that change what a person does next. Logged always; sent when a command is configured."""
+    (root/'notify.jsonl').open('a').write(json.dumps(dict(at=time.time(), title=title, body=body))+'\n')
+    command = settings(config)['notify_command']
+    if not command:
+        return
+    try:
+        subprocess.run(command, shell=True, timeout=30, check=False, capture_output=True,
+                       env=dict(os.environ, MIZPAH_TITLE=title, MIZPAH_BODY=body))
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+# ---------------------------------------------------------------- report
+
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    rows = []
+    for line in path.read_text().splitlines():
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            continue
+    return rows
+
+
+def write_report(config: dict[str, Any], project: Path, root: Path, cycles: list[dict[str, Any]],
+                 stop: str | None, started: float) -> Path:
+    """root/report.md: the run as a person would want to read it, rebuilt after every task and eval."""
+    lines = ['# '+project.name+' — '+('running' if stop is None else 'stopped: '+stop),
+             '', 'engine '+_engine_version()+' · model '+str(config['worker']['endpoint']['base_url'])
+             +' · '+str(round((time.time()-started)/3600, 2))+' h · '
+             +str(sum(len(c.get('tasks') or []) for c in cycles))+' tasks', '']
+    lines.append('## Tasks')
+    for cycle in cycles:
+        for task in cycle.get('tasks') or []:
+            playbook = task.get('playbook') or {}
+            widgets = task.get('widgets') or {}
+            flags = []
+            if task.get('blocked_reason'):
+                flags.append('blocked: '+str(task['blocked_reason'])[:160])
+            if playbook.get('installed'):
+                flags.append('procedures +'+', '.join(playbook['installed']))
+            if playbook.get('rejected'):
+                flags.append('procedures rejected '+str(len(playbook['rejected'])))
+            for key in ('checked_in', 'rejected'):
+                if widgets.get(key):
+                    flags.append('widgets '+key+' '+', '.join(str(w) for w in widgets[key]))
+            if task.get('problems'):
+                flags.append('gate: '+'; '.join(str(p)[:80] for p in task['problems'][:2]))
+            lines.append('- `'+str(task.get('task'))+'` '+str(task.get('verdict'))+' in '+str(task.get('turns'))+' turns'
+                         +(' — '+' · '.join(flags) if flags else ''))
+        for step in [cycle.get('route')]+list(cycle.get('evals') or []):
+            if not step:
+                continue
+            applied = step.get('applied') or {}
+            summary = ', '.join(k+' '+str(len(v)) for k, v in applied.items() if v) or 'nothing'
+            refused = len(step.get('refused') or [])
+            lines.append('  - '+str(step.get('mode'))+': applied '+summary+(', refused '+str(refused) if refused else '')
+                         +(' — done' if step.get('done') is True else '')
+                         +(' — error: '+str(step['error'])[:120] if step.get('error') else ''))
+    outages = [r for t in (root/'tasks').glob('*') for r in _read_jsonl(t/'outages.jsonl')] if (root/'tasks').exists() else []
+    health = _read_jsonl(root/'health.jsonl')
+    notes = _read_jsonl(root/'errors.jsonl')
+    services = [r for t in (root/'tasks').glob('*') for r in _read_jsonl(t/'services.jsonl')] if (root/'tasks').exists() else []
+    lines += ['', '## Infrastructure',
+              '- outages: '+str(len(outages))+(' (last: '+str(outages[-1].get('error'))[:100]+')' if outages else ''),
+              '- health events: '+', '.join(str(h.get('event')) for h in health) if health else '- health events: none',
+              '- driver errors: '+str(len(notes))+(' (last: '+str(notes[-1].get('where'))+' — '+str(notes[-1].get('error'))[:100]+')' if notes else ''),
+              '- services stopped at task end: '+str(sum(len(s.get('stopped') or []) for s in services))]
+    score = _score(project)
+    if score:
+        lines += ['', '## Score', score]
+    blocked = _blocked(config, project)
+    if blocked:
+        lines += ['', '## Blocked', *('- `'+b['id']+'`: '+str(b.get('reason'))[:300] for b in blocked)]
+    proposals = _proposals(project)
+    if proposals:
+        lines += ['', '## Proposals waiting for a person', *('- '+p for p in proposals)]
+    path = root/'report.md'
+    path.write_text('\n'.join(lines)+'\n')
+    return path
+
+
+def _engine_version() -> str:
+    try:
+        return subprocess.run(['git', '-C', str(Path(__file__).resolve().parents[3]), 'rev-parse', '--short', 'HEAD'],
+                              capture_output=True, text=True, timeout=5).stdout.strip() or '?'
+    except (OSError, subprocess.SubprocessError):
+        return '?'
+
+
+def _score(project: Path) -> str:
+    """The fixture scorer's last line, when the project came from a fixture; nothing otherwise."""
+    key = project.parent/(project.name+'.key.json')
+    if not key.exists():
+        return ''
+    try:
+        from fixtures import score as scorer
+        rows = scorer.score(project)
+    except Exception:  # noqa: BLE001 — a scorer that cannot run is not the run's problem
+        return ''
+    ok = sum(1 for r in rows if r['ok'])
+    wrong = [r for r in rows if not r['ok']]
+    text = str(ok)+'/'+str(len(rows))+' checks pass'
+    for r in wrong[:6]:
+        text += '\n- '+r['kind']+' '+(str(r.get('id') or r.get('file') or r.get('need')))+(
+            ': expected '+str(r.get('expected'))+', map has '+str(r.get('found')) if r['kind'] == 'truth' else
+            ': '+str(r.get('note') or ('untraced '+str(r.get('untraced'))[:80])) if r['kind'] == 'trace' else '')
+    return text
+
+
+def _blocked(config: dict[str, Any], project: Path) -> list[dict[str, Any]]:
+    try:
+        from .worker import terra
+        return [dict(id=t['id'], reason=t.get('blocked_reason')) for t in terra(config, project, 'route', 'status')['tasks']
+                if t['status'] == 'blocked']
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _proposals(project: Path) -> list[str]:
+    path = project/'.terra'/'brief.json'
+    if not path.exists():
+        return []
+    try:
+        brief = json.loads(path.read_text())
+    except ValueError:
+        return []
+    return [str(p.get('id'))+' '+str(p.get('summary') or '').split(' — evidence:')[0][:200]
+            for p in brief.get('proposals') or [] if p.get('status') in (None, 'open', 'pending')]

@@ -555,11 +555,11 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
     return done
 
 
-def decide_through_outages(client: Any, config: dict[str, Any], system: str, user: str, wait_seconds: int = 300):
+def decide_through_outages(client: Any, config: dict[str, Any], system: str, user: str, wait_seconds: int = 300,
+                           health: Any = None):
     """A model server that is restarting is waited for (its supervisor brings it back in seconds), not a failed step."""
-    import time
-    import urllib.request
     from cg.backend_persistent_model_session_python.src.persistent_model_session import ModelTransportError, RejectedGeneration
+    from . import ops
     outages = 0
     while True:
         try:
@@ -570,15 +570,9 @@ def decide_through_outages(client: Any, config: dict[str, Any], system: str, use
             outages += 1
             if outages > 5:
                 raise
-            deadline = time.time()+wait_seconds
-            while time.time() <= deadline:
-                try:
-                    with urllib.request.urlopen(config['controller']['endpoint']['base_url'].rstrip('/')+'/health', timeout=5) as r:
-                        if r.status == 200:
-                            break
-                except OSError:
-                    pass
-                time.sleep(5)
+            checker = health or ops.Health(config, Path(config['mizpah'].get('run_root') or '.'))
+            if not checker.wait_for_model(config['controller']['endpoint']['base_url'], wait_seconds=wait_seconds):
+                raise
 
 
 def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dict[str, Any]:
