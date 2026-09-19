@@ -638,19 +638,29 @@ def session_calls(root: Path) -> list[tuple[str, dict[str, Any], dict[str, Any]]
 
 
 def procedures_used(root: Path) -> list[str]:
-    """Domain procedure ids the worker opened with `playbook start`/`load` (the bootstrap excluded)."""
+    """Domain procedure ids the worker opened — `playbook start`/`load`/`open` at bash or the playbook_open tool
+    (the bootstrap excluded)."""
     used: list[str] = []
     for name, args, _ in session_calls(root):
         words = (args.get('command') or '').split() if name == 'bash' else []
-        if (len(words) >= 3 and words[0] == 'playbook' and words[1] in ('start', 'load')
+        if (len(words) >= 3 and words[0] == 'playbook' and words[1] in ('start', 'load', 'open')
                 and words[2] not in used and words[2] not in BOOTSTRAP_PROCEDURES):
             used.append(words[2])
+        elif name == 'playbook_open' and args.get('id') and args['id'] not in used and args['id'] not in BOOTSTRAP_PROCEDURES:
+            used.append(str(args['id']))
     return used
 
 
 def procedures_created(root: Path) -> list[str]:
+    """Procedure ids the worker created — `playbook create` at bash or the playbook_create tool — that succeeded.
+    A mint the harvest cannot see is a mint thrown away: every procedure Ornith wrote on 2026-09-19 went through
+    the typed tool and was marked ignored."""
     created: list[str] = []
     for name, args, result in session_calls(root):
+        if name == 'playbook_create':
+            if result.get('exit_code') == 0 and args.get('id') and args['id'] not in created:
+                created.append(str(args['id']))
+            continue
         command = args.get('command') or '' if name == 'bash' else ''
         # `cd /work && playbook create <id> ...`, line continuations, chained commands: find the create anywhere.
         for match in re.finditer(r'(?:^|[;&|]\s*)playbook\s+create\s+([a-z0-9][a-z0-9_-]*)', command, re.MULTILINE):
