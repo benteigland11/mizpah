@@ -467,7 +467,10 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         deps = [str(d) for d in item.get('deps') or []]
         bad = [d for d in deps if d not in existing_tasks and not any(t['id'] == d for t in tasks)]
         if bad:
-            refusals.append('task '+tid+': unknown dependency '+', '.join(bad)); continue
+            # A dependency on a task refused above (or never named) is dropped, not fatal: one bad task
+            # otherwise sinks every task behind it and every unknown they carried (components, 2026-09-19).
+            refusals.append('task '+tid+': dropped dependency '+', '.join(bad)+' (refused or absent); kept the task')
+            deps = [d for d in deps if d not in bad]
         title = str(item.get('title') or '').strip()
         if not title:
             refusals.append('task '+tid+': title is required'); continue
