@@ -289,7 +289,16 @@ def uncovered_deliverable_terms(observation: dict[str, Any], extra_unknowns: lis
         citing = ' '.join((u['id']+' '+str(u.get('claim') or '')).lower() for u in unknowns
                           if ('cites '+ref) in str(u.get('notes') or ''))
         terms = [t for t in re.findall(r'`([^`]+)`', text) if t and len(t) <= 60]
-        missing = [t for t in terms if t.lower() not in citing and t.split()[-1].strip('<>').lower() not in citing]
+        def covered(term: str) -> bool:
+            low = term.lower()
+            if low in citing:
+                return True
+            # `python3 -m weather <command>`: a placeholder names a family; the invocation prefix must appear.
+            if '<' in low:
+                prefix = low.split('<')[0].strip()
+                return bool(prefix) and prefix in citing
+            return term.split()[-1].strip('<>').lower() in citing
+        missing = [t for t in terms if not covered(t)]
         if missing:
             problems.append(ref+' names '+', '.join('`'+m+'`' for m in missing)+' but no unknown citing it mentions them')
     return problems

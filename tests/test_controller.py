@@ -318,3 +318,13 @@ def test_controller_can_look_at_files_before_deciding(config: dict, project: Pat
     text = render_observation(observation, 'route')
     assert '# src/a.py (you asked to see this)' in text and '# Project files (' in text and 'src/a.py (1 KB)' in text
     assert repo_digest(project)['kinds'] == {'.py': 1, '.txt': 1}
+
+
+def test_a_placeholder_term_is_covered_by_its_prefix(config: dict, project: Path):
+    """`python3 -m weather <command>` is a family; unknowns naming `python3 -m weather stations` cover it."""
+    from mizpah.controller import uncovered_deliverable_terms
+    observation = dict(brief=dict(deliverables=['tool/cli.py runnable as `python3 -m tool <command>` with `stations`']),
+                       unknowns=[dict(id='cli_stations_ok', claim='`python3 -m tool stations` prints the count', notes='cites deliverable:1')])
+    assert uncovered_deliverable_terms(observation) == []
+    observation['unknowns'][0]['claim'] = 'the stations command prints the count'
+    assert uncovered_deliverable_terms(observation) == ['deliverable:1 names `python3 -m tool <command>` but no unknown citing it mentions them']
