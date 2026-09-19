@@ -17,7 +17,7 @@ import shutil
 import sys
 import textwrap
 
-from .suite import brief, key_path, terra
+from .suite import brief, key_path, phase
 
 DEFAULT_SOURCE = Path(__file__).resolve().parents[2]/'terra'
 
@@ -88,9 +88,8 @@ def improve(project: Path, source: Path = DEFAULT_SOURCE) -> None:
           notes='Two phases: survey first (needs 1 to 7 are readings over the tree, taken before any file changes), then '
                 'the change (needs 8 to 11). '+NOTE)
     # Two phases: the controller routes the survey to closure before a single change unknown can be minted.
-    terra(project, 'brief', 'phase', 'survey', '--title', 'Survey the package into readings', '--needs', '1-7')
-    terra(project, 'brief', 'phase', 'change', '--title', 'Change one function with the suite as the reference',
-          '--needs', '8-11', '--deliverables', '1-3')
+    phase(project, 'survey', 'Survey the package into readings', needs='1-7', points=150)
+    phase(project, 'change', 'Change one function with the suite as the reference', needs='8-11', deliverables='1-3', points=200)
     key_path(project).write_text(json.dumps(dict(fixture='improve', key=dict(
         by_need={}, targets={'6': True, '8': '<=0.75*need:5', '9': True, '10': True, '11': '>=need:7'})), indent=1)+'\n')
 

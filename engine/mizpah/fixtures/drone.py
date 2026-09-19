@@ -17,7 +17,7 @@ from pathlib import Path
 import sys
 import textwrap
 
-from .suite import brief, key_path, terra
+from .suite import brief, key_path, phase
 
 SPEC = dict(
     airframe_mass_kg=1.20, payload_mass_kg=0.35, motors=4, motor_max_thrust_kg=0.90,
@@ -116,9 +116,8 @@ def drone(project: Path) -> None:
           'of materials is traceable to readings.', needs, deliverables, budget=500,
           notes='Numbers by two independent methods where possible; the report and the script print the same figures; '
                 'the selection phase consumes the sizing phase\'s knowns by id.')
-    terra(project, 'brief', 'phase', 'sizing', '--title', 'Size the pack', '--needs', '1-13', '--deliverables', '1-2')
-    terra(project, 'brief', 'phase', 'selection', '--title', 'Choose motors and ESCs, re-check the sizing',
-          '--needs', '14-20', '--deliverables', '3-4')
+    phase(project, 'sizing', 'Size the pack', needs='1-13', deliverables='1-2', points=200)
+    phase(project, 'selection', 'Choose motors and ESCs, re-check the sizing', needs='14-20', deliverables='3-4', points=200)
     # key
     per_motor = z['power']/z['pack_v']/4
     motor = min((m for m in CATALOG['motors'] if m['max_thrust_kg']*4 >= 1.5*z['aum']), key=lambda m: m['mass_kg'])

@@ -94,6 +94,28 @@ def _loop_alive(root: Path) -> bool:
     return probe.returncode == 0
 
 
+def advance_enabler(config: dict[str, Any], project: Path, task: dict[str, Any], result: dict[str, Any], log: Path) -> dict[str, Any]:
+    """A complete enabler task makes its enabler ready at its path; a widget harvested from the task graduates it."""
+    eid = str(task['enabler_id'])
+    outcome: dict[str, Any] = dict(enabler=eid, status='ready')
+    try:
+        brief = terra(config, project, 'brief', 'show')
+        path = next((e.get('path') for e in brief.get('enablers') or [] if e.get('id') == eid), '') or ''
+        widgets = [w for r in (result.get('rounds') or []) for k in ('checked_in', 'unchanged')
+                   for w in ((r.get('widgets') or {}).get(k) or [])]
+        widgets = widgets or [w for k in ('checked_in', 'unchanged') for w in ((result.get('widgets') or {}).get(k) or [])]
+        args = ['brief', 'enabler', eid, 'ready']+(['--path', path] if path else [])
+        terra(config, project, *args)
+        if widgets:
+            terra(config, project, 'brief', 'enabler', eid, 'graduated', '--graduates-to', widgets[0])
+            outcome.update(status='graduated', widget=widgets[0])
+    except RuntimeError as error:
+        outcome['error'] = str(error)[:300]
+        with log.open('a') as handle:
+            handle.write(json.dumps(dict(at=time.time(), where='enabler:'+eid, error=str(error)[:500]))+'\n')
+    return outcome
+
+
 def phase_open(config: dict[str, Any], project: Path) -> bool:
     """A phase the map has not met is still open: the controller's "done" is not the brief's."""
     from . import phases
@@ -210,6 +232,8 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                 if result['verdict'] == 'stopped':
                     stop = 'stopped_by_operator'
                     break
+                if task.get('enabler_id') and result['verdict'] == 'complete':
+                    record.setdefault('enablers', []).append(advance_enabler(config, project, task, result, log))
                 if result['verdict'] == 'incomplete':
                     reason = ('worker budget exhausted' if result['session'] != 'complete' else 'gate rounds exhausted'
                               )+' at '+str(result['turns'])+' turns (safety cap; the worker never blocked itself); gate: '+'; '.join(result['problems'])[:400]

@@ -214,6 +214,13 @@ def render_assignment(task: dict[str, Any], unknowns: list[dict[str, Any]], map_
     acceptance = [a for a in task.get('acceptance') or [] if not str(a).startswith('unknown:')]
     if acceptance:
         lines.append('Acceptance: '+'; '.join(acceptance))
+    if task.get('enabler_id'):
+        lines.append('This task builds the enabler `'+str(task['enabler_id'])+'`: an instrument the brief needs before its '
+                     'readings can be taken, which is a widget. Search the widget library first (`cartograph search`, '
+                     'several terms): an installed widget that does the job is the instrument — install it at the path the '
+                     'unknown names and the unknown reads true when its validate passes. Only when nothing fits, create it, '
+                     'give it tests, and it is checked in after green. The instrument is never itself a finding: the reading '
+                     'is that it exists at its path and validates.')
     lines.append('Your map is `'+map_id+'` (TERRA_MAP is set): probes are shared, but the unknowns, your runs and '
                  'the knowns you graduate live there.')
     ids = [u['id'] for u in unknowns]

@@ -17,7 +17,7 @@ from typing import Any
 from cg.bp_focused_agent_session_python.src import EndpointConfig, ModelClient, llama_model_client
 from cg.backend_persistent_model_session_python.src.persistent_model_session import parse_turn
 
-from . import briefs, phases
+from . import briefs, enablers, phases
 from .worker import terra
 
 ID_PATTERN = re.compile(r'^[a-z][a-z0-9_]*$')
@@ -154,6 +154,7 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
     lines = ['# Brief (reference, v'+str(brief.get('version'))+', '+str(brief.get('status'))+')',
              'Mission: '+str(brief.get('mission'))]
     lines += phases.render(brief)
+    lines += enablers.render(brief)
     cited: dict[str, list[str]] = {}
     for u in observation['unknowns']:
         notes = str(u.get('notes') or '')
@@ -165,7 +166,7 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
         lines.append(key.capitalize()+':'+('' if entries else ' (none)'))
         for i, entry in enumerate(entries):
             ref = key[:-1].replace('non_goal', 'non-goal')+':'+str(i+1)
-            lines.append('  '+ref+' '+str(entry)+(phases.tag(brief, ref) if key != 'non_goals' else ''))
+            lines.append('  '+ref+' '+str(entry)+((phases.tag(brief, ref)+enablers.tag(brief, ref)) if key != 'non_goals' else ''))
             if key == 'deliverables':
                 for line in cited.get(ref, []):
                     lines.append('      ↳ '+line[:160])
@@ -368,7 +369,22 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         later = phases.refused_cites(brief, refs)
         if later:
             refusals.append('unknown '+uid+': '+'; '.join(later)); continue
-        item = dict(item, cites=cites, also=refs[1:])
+        enabler = str(item.get('enabler') or '').strip()
+        table = enablers.by_id(brief)
+        if enabler:
+            if enabler not in table:
+                refusals.append('unknown '+uid+': enabler '+repr(enabler)+' is not declared in the brief ('+', '.join(table) or 'none'+')'); continue
+            if str(table[enabler].get('status') or 'needed') in enablers.LIVE:
+                refusals.append('unknown '+uid+': enabler '+enabler+' is already '+str(table[enabler]['status'])); continue
+            if item.get('type') != 'boolean':
+                refusals.append('unknown '+uid+': an enabler unknown is boolean — the instrument exists and validates'); continue
+            if not item.get('creates') and table[enabler].get('path'):
+                item = dict(item, creates=table[enabler]['path'])
+        else:
+            waiting = enablers.waiting(brief, refs)
+            if waiting:
+                refusals.append('unknown '+uid+': '+'; '.join(waiting)); continue
+        item = dict(item, cites=cites, also=refs[1:], enabler=enabler)
         if item.get('type') not in TYPES:
             refusals.append('unknown '+uid+': type must be one of '+', '.join(TYPES)); continue
         claim, evidence_needed = str(item.get('claim') or '').strip(), str(item.get('evidence_needed') or '').strip()
@@ -403,7 +419,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         # is kept as a hint and never refused.
         unknowns.append(dict(id=uid, claim=claim, evidence_needed=evidence_needed,
                              type=item['type'], quantity=uid, unit=str(item.get('unit') or ''), cites=cites, source=source,
-                             creates=creates, also=item.get('also') or []))
+                             creates=creates, also=item.get('also') or [], enabler=item.get('enabler') or ''))
     # An artifact is verified by agreement with the map, so its unknown must say which knowns (or
     # unknowns minted alongside) its content agrees with. Without that anchor the probe can only check
     # that the file exists: a report with a table of invented stations passed on 2026-09-18.
@@ -411,7 +427,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
     for item in list(unknowns):
         # Citing a deliverable makes it an artifact unknown whether or not `creates` was set; "exits 0"
         # against `source: environment` is the same existence check by another door.
-        artifact = item['creates'] or item['cites'].startswith('deliverable:')
+        artifact = (item['creates'] or item['cites'].startswith('deliverable:')) and not item.get('enabler')
         if artifact and item.get('type') == 'label':
             # An artifact is verified by agreement with the map, never by recording what it prints.
             refusals.append('unknown '+item['id']+': an artifact unknown is an agreement, not a label — make it boolean '
@@ -474,8 +490,9 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         title = str(item.get('title') or '').strip()
         if not title:
             refusals.append('task '+tid+': title is required'); continue
-        artifact_ids = {u['id'] for u in unknowns if u.get('creates')} | {
-            u['id'] for u in observation['unknowns'] if 'creates ' in str(u.get('notes') or '')}
+        # An enabler is built before the readings, not after them: it is not an artifact that agrees with the map.
+        artifact_ids = {u['id'] for u in unknowns if u.get('creates') and not u.get('enabler')} | {
+            u['id'] for u in observation['unknowns'] if 'creates ' in str(u.get('notes') or '') and '; enabler ' not in str(u.get('notes') or '')}
         builds = any(u in artifact_ids for u in ids)
         reading_tasks = [t['id'] for t in tasks if not any(u in artifact_ids for u in t['unknowns'])]
         reading_tasks += [t['id'] for t in observation['tasks'] if t['status'] in OPEN_TASK
@@ -484,7 +501,11 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             # An artifact that must agree with the map cannot be built before the readings exist.
             refusals.append('task '+tid+': it builds an artifact that must agree with the map, so it depends on the '
                             'tasks that produce those knowns; add deps from: '+', '.join(dict.fromkeys(reading_tasks))); continue
-        tasks.append(dict(id=tid, title=title, unknowns=ids, unknown=ids[0], bucket=item['bucket'], deps=deps))
+        carried = {u['enabler'] for u in unknowns if u['id'] in ids and u.get('enabler')}
+        if len(carried) > 1:
+            refusals.append('task '+tid+': one enabler per task ('+', '.join(sorted(carried))+')'); continue
+        tasks.append(dict(id=tid, title=title, unknowns=ids, unknown=ids[0], bucket=item['bucket'], deps=deps,
+                          enabler=next(iter(carried), '')))
     covered = {u for t in tasks for u in t['unknowns']}
     for uid in minted - covered:
         refusals.append('unknown '+uid+': minted without a task; every unknown is routed by exactly one task')
@@ -539,18 +560,26 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
                 '--type', u['type'], '--quantity', u['quantity'],
                 '--notes', 'cites '+u['cites']+('; also '+', '.join(u['also']) if u.get('also') else '')
                 +('; source '+u['source'] if u.get('source') else '')
-                +('; creates '+u['creates'] if u.get('creates') else '')]
+                +('; creates '+u['creates'] if u.get('creates') else '')
+                +('; enabler '+u['enabler'] if u.get('enabler') else '')]
         if u['unit']:
             args += ['--unit', u['unit']]
         terra(config, project, *args)
         done['unknowns'].append(u['id'])
     now = phases.current(terra(config, project, 'brief', 'show')) if accepted['tasks'] else None
+    sectors = set()
+    if now and (project/'.terra'/'route.json').exists():
+        sectors = {s.get('id') for s in json.loads((project/'.terra'/'route.json').read_text()).get('sectors') or []}
     for t in accepted['tasks']:
         ids = t.get('unknowns') or [t['unknown']]
         args = ['route', 'add', t['id'], '--title', t['title'], '--map', ids[0], '--bucket', t['bucket'],
-                '--skill', 'terra-probe']
+                '--skill', 'tooling' if t.get('enabler') else 'terra-probe']
+        if t.get('enabler'):
+            args += ['--role', 'enabler', '--enabler', t['enabler']]
         if now:
             args += ['--phase', now['id']]
+            if now['id'] in sectors:
+                args += ['--sector', now['id']]   # the phase's provision: its points, not the next phase's
         for extra in ids[1:]:
             args += ['--accept', 'unknown:'+extra]  # the task resolves these too; Terra's map_id holds only one
         for dep in t['deps']:
@@ -562,6 +591,8 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
             done.setdefault('refused', []).append(t['id']+': '+str(error)[:300])
             continue
         done['tasks'].append(t['id'])
+        if t.get('enabler'):
+            terra(config, project, 'brief', 'enabler', t['enabler'], 'building')
     for p in accepted['proposals']:
         args = ['brief', 'propose', '--summary', p['summary']+' — evidence: '+p['evidence']]
         for key in ('need', 'deliverable', 'non_goal', 'mission'):

@@ -108,7 +108,7 @@ RENDER_NOTE = (
 )
 
 
-def landing(project: Path) -> None:
+def landing(project: Path, *, enablers: bool = False) -> None:
     content = project/'content'
     content.mkdir(parents=True)
     (content/'pitch.md').write_text(PITCH)
@@ -124,17 +124,17 @@ def landing(project: Path) -> None:
     needs = [
         'Know the number of <section> elements site/index.html has',                                              # 1
         'Know whether every section of the page opens with a heading (an h1 in the hero, an h2 elsewhere)',       # 2
-        'Know the contrast ratio of body paragraph text against its background as rendered at 1280 px',           # 3
+        'Know the contrast ratio of body paragraph text against its background as rendered at 1280 px (page_readings)',  # 3
         "Know the contrast ratio of the primary call to action's text against its button background",             # 4
-        'Know whether the page overflows horizontally when rendered 375 px wide',                                 # 5
+        'Know whether the page overflows horizontally when rendered 375 px wide (page_readings)',                 # 5
         'Know whether the page overflows horizontally when rendered 1280 px wide',                                # 6
         'Know the page weight in kilobytes: site/index.html plus every file it references',                       # 7
         'Know the number of distinct font families the rendered page uses',                                       # 8
         'Know the number of distinct margin and padding values site/style.css uses (its spacing scale)',          # 9
-        'Know whether the primary call to action is visible above the fold at 1280 by 800',                       # 10
+        'Know whether the primary call to action is visible above the fold at 1280 by 800 (page_readings)',       # 10
         'Know the number of <img> elements without alt text',                                                     # 11
         'Know the body paragraph text size in pixels as rendered',                                                # 12
-        'Know the mean paragraph line length in characters as rendered at 1280 px',                              # 13
+        'Know the mean paragraph line length in characters as rendered at 1280 px (page_readings)',              # 13
         'Know the number of distinct colors site/style.css declares',                                             # 14
         'Know whether every number the evidence section states appears as a value in content/evidence.json',     # 15
         'Know the number of requests the page makes to any URL outside site/ (external fonts, scripts, images)',  # 16
@@ -144,7 +144,7 @@ def landing(project: Path) -> None:
         'external requests, with the sections hero, how it works, the three tools, evidence and get started in that '
         'order, its words from content/pitch.md and its constraints from content/brand.md',
         'site/shots/desktop-1280.png and site/shots/mobile-375.png: screenshots of the final page rendered by '
-        'headless chromium at 1280 and 375 px wide',
+        'headless chromium at 1280 and 375 px wide (page_readings)',
         'report/design.md: one row per measured property (brief needs 1 to 16) stating the reading on the map and '
         'whether it meets the target in content/targets.json, with a closing line counting the targets met',
     ]
@@ -152,7 +152,11 @@ def landing(project: Path) -> None:
           'prove its design properties the way the loop proves anything: by measuring the rendered page.',
           needs, deliverables, budget=400,
           notes='Build the page first, then measure it; a reading is taken off the rendered page or the files, never '
-                'estimated. '+RENDER_NOTE)
+                'estimated. '+RENDER_NOTE,
+          enablers=[('page_readings', 'Headless page readings', 'cg/frontend-headless-page-cli-python',
+                     'A command-line instrument over headless chromium: serve or open a page, read its text, element boxes, '
+                     'computed styles and requests, take a screenshot at a viewport width. The readings that name it are '
+                     'taken through it.')] if enablers else ())
     key_path(project).write_text(json.dumps(dict(fixture='landing', key=dict(
         by_need={}, targets=TARGETS, evidence_numbers=[v for v in EVIDENCE.values() if isinstance(v, (int, float))],
         evidence_section='evidence')), indent=1)+'\n')
@@ -164,7 +168,7 @@ def main() -> None:
     if project.exists():
         raise SystemExit(str(project)+' exists')
     project.mkdir(parents=True)
-    landing(project)
+    landing(project, enablers='--enablers' in sys.argv)
     print(project)
 
 

@@ -31,3 +31,13 @@ A brief may declare phases, each owning some needs and deliverables; the observa
 the current phase: a later phase's entries name knowns that do not exist yet, and the guard refuses them. A phase closes
 by itself when every entry it owns has a resolved unknown and no task of it is open — "done" inside a phase means the
 phase is met, not the brief. A closed phase's knowns are the anchors the next phase's needs name by id.
+
+## Enablers
+
+A brief may declare enablers: instruments it needs before readings can be taken (a page reader, a catalog lookup).
+A need or deliverable that names an enabler's id waits until the enabler is ready; the guard refuses unknowns for it
+until then. Route the enabler first: one boolean unknown with "enabler": "<id>" (the instrument exists at its path
+and validates) and a task for it, bucketed by how much is unknown about building it — the worker searches the widget
+library before building, so an instrument another project graduated is an install. When it is ready, mint the
+readings that name it.
+

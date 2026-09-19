@@ -106,3 +106,64 @@ def test_tasks_carry_the_phase_and_close_moves_on(project: Path) -> None:
         dict(id='branch_count_after', cites='need:3', type='number', claim='after', evidence_needed='ast walk')],
         tasks=[dict(id='after', unknowns=['branch_count_after'], bucket='low', title='after')]), observation, project)
     assert not refusals, refusals
+
+
+@pytest.fixture
+def instrumented(tmp_path: Path) -> Path:
+    p = tmp_path/'instrumented'
+    p.mkdir()
+    terra(p, 'init')
+    terra(p, 'brief', 'init', '--title', 'Needs an instrument', '--mission', 'measure a page')
+    terra(p, 'brief', 'set', '--status', 'active', '--budget-points', '100',
+          '--need', 'Know the number of files', '--need', 'Know the contrast ratio as rendered (page_readings)',
+          '--deliverable', 'report/x.md: the readings',
+          '--enabler', 'page_readings:Headless page readings:cg/frontend-headless-page-cli-python')
+    terra(p, 'route', 'init')
+    terra(p, 'brief', 'phase', 'all', '--title', 'All', '--needs', '1-2', '--deliverables', '1')
+    terra(p, 'route', 'sector-add', 'all', '--title', 'All', '--points', '60')
+    return p
+
+
+def test_enabler_gates_the_needs_that_name_it(instrumented: Path) -> None:
+    observation = controller.observe(CONFIG, instrumented)
+    text = controller.render_observation(observation, 'route')
+    assert 'page_readings [needed] Headless page readings — at cg/frontend-headless-page-cli-python' in text
+    assert '(waits for enabler page_readings)' in text
+    decision = dict(unknowns=[
+        dict(id='file_count', cites='need:1', type='number', claim='files', evidence_needed='count them'),
+        dict(id='contrast', cites='need:2', type='number', claim='contrast', evidence_needed='render and read'),
+        dict(id='page_reader_ready', cites='need:2', type='boolean', enabler='page_readings',
+             claim='the page reader exists at its path and validates', evidence_needed='cartograph validate exits 0'),
+    ], tasks=[dict(id='count', unknowns=['file_count'], bucket='low', title='count'),
+              dict(id='measure', unknowns=['contrast'], bucket='low', title='measure'),
+              dict(id='reader', unknowns=['page_reader_ready'], bucket='medium', title='page reader')])
+    accepted, refusals = controller.guard(decision, observation, instrumented)
+    assert {u['id'] for u in accepted['unknowns']} == {'file_count', 'page_reader_ready'}
+    assert any('contrast' in r and 'names enabler page_readings (needed)' in r for r in refusals)
+    reader = next(t for t in accepted['tasks'] if t['id'] == 'reader')
+    assert reader['enabler'] == 'page_readings'
+    controller.apply(CONFIG, instrumented, accepted)
+    tasks = {t['id']: t for t in terra(instrumented, 'route', 'status')['tasks']}
+    assert tasks['reader']['enabler_id'] == 'page_readings' and tasks['reader']['role'] == 'enabler'
+    assert tasks['reader']['sector_id'] == 'all' and tasks['count']['sector_id'] == 'all'
+    brief = terra(instrumented, 'brief', 'show')
+    assert brief['enablers'][0]['status'] == 'building'
+    # The sector caps the phase: a third task would exceed its 60 points (3 + 8 so far; high is 21 → 32, fine; two highs → over).
+    with pytest.raises(AssertionError):
+        terra(instrumented, 'route', 'add', 'big1', '--title', 'b', '--map', 'file_count', '--bucket', 'high', '--sector', 'all')
+        terra(instrumented, 'route', 'add', 'big2', '--title', 'b', '--map', 'file_count', '--bucket', 'high', '--sector', 'all')
+        terra(instrumented, 'route', 'add', 'big3', '--title', 'b', '--map', 'file_count', '--bucket', 'high', '--sector', 'all')
+    # The enabler task completes with a harvested widget: ready, then graduated to that widget.
+    from mizpah import loop
+    outcome = loop.advance_enabler(CONFIG, instrumented, dict(enabler_id='page_readings'),
+                                  dict(widgets=dict(checked_in=['frontend-headless-page-cli-python'])), instrumented/'errors.jsonl')
+    assert outcome == dict(enabler='page_readings', status='graduated', widget='frontend-headless-page-cli-python')
+    brief = terra(instrumented, 'brief', 'show')
+    assert brief['enablers'][0]['status'] == 'graduated' and brief['enablers'][0]['graduates_to'] == 'frontend-headless-page-cli-python'
+    # Now the contrast reading is mintable, and the need no longer waits.
+    observation = controller.observe(CONFIG, instrumented)
+    assert '(waits for enabler' not in controller.render_observation(observation, 'eval')
+    accepted, refusals = controller.guard(dict(unknowns=[
+        dict(id='contrast', cites='need:2', type='number', claim='contrast', evidence_needed='render and read')],
+        tasks=[dict(id='measure', unknowns=['contrast'], bucket='low', title='measure')]), observation, instrumented)
+    assert not refusals, refusals

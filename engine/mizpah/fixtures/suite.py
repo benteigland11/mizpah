@@ -32,7 +32,8 @@ def terra(project: Path, *args: str) -> None:
 
 
 def brief(project: Path, title: str, mission: str, needs: list[str], deliverables: list[str], budget: int,
-          notes: str = '') -> None:
+          notes: str = '', enablers: list[tuple[str, str, str, str]] = ()) -> None:
+    """`enablers`: (id, title, path, notes) — instruments the brief needs; a need that names an id waits for it."""
     terra(project, 'init')
     terra(project, 'brief', 'init', '--title', title, '--mission', mission)
     args = ['brief', 'set', '--status', 'active', '--budget-points', str(budget)]
@@ -42,8 +43,25 @@ def brief(project: Path, title: str, mission: str, needs: list[str], deliverable
         args += ['--need', need]
     for deliverable in deliverables:
         args += ['--deliverable', deliverable]
+    for eid, etitle, path, _ in enablers:
+        args += ['--enabler', eid+':'+etitle+(':'+path if path else '')]
     terra(project, *args)
+    for eid, _, _, enotes in enablers:
+        if enotes:
+            terra(project, 'brief', 'enabler', eid, 'needed', '--notes', enotes)
     terra(project, 'route', 'init')
+
+
+def phase(project: Path, phase_id: str, title: str, *, needs: str = '', deliverables: str = '', points: int | None = None) -> None:
+    """A phase owning brief entries; with `points`, a sector of the same id caps what its tasks may draw."""
+    args = ['brief', 'phase', phase_id, '--title', title]
+    if needs:
+        args += ['--needs', needs]
+    if deliverables:
+        args += ['--deliverables', deliverables]
+    terra(project, *args)
+    if points is not None:
+        terra(project, 'route', 'sector-add', phase_id, '--title', title, '--points', str(points))
 
 
 def stamp(project: Path, name: str, key: dict) -> None:

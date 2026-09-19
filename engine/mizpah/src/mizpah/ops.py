@@ -237,6 +237,12 @@ def write_report(config: dict[str, Any], project: Path, root: Path, cycles: list
         for ph in phase_rows:
             lines.append('- `'+str(ph.get('phase'))+'` '+('closed → '+str(ph.get('next') or 'all phases closed') if ph.get('closed')
                          else 'still open: '+'; '.join(str(x) for x in ph.get('problems') or [])[:300]))
+    enabler_rows = [e for c in cycles for e in (c.get('enablers') or [])]
+    if enabler_rows:
+        lines += ['', '## Enablers']
+        for e in enabler_rows:
+            lines.append('- `'+str(e.get('enabler'))+'` '+str(e.get('status'))+(' → widget '+str(e['widget']) if e.get('widget') else '')
+                         +(' (error: '+str(e['error'])[:200]+')' if e.get('error') else ''))
     score = _score(project)
     if score:
         lines += ['', '## Score', score]
