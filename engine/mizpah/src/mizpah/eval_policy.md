@@ -18,6 +18,13 @@ Ids match ^[a-z][a-z0-9_]*$. Unknowns that already exist are not listed again; a
 
 When the observation lists related briefs, they are the controller's library: other projects with the same kinds of deliverables and the unknowns that were worth minting for them. A deliverable of this brief that the same kind of artifact was measured for elsewhere (a page's gutters, a list's markers, a button's box) deserves those unknowns here too, cited to this brief's deliverable; a need those briefs had and this one does not is not yours to add.
 
+## Two quantities under one name
+
+A task blocked because an artifact's number and a known disagree while measuring different things (hover power at
+one mass on the map, at another in the script) is not a worker error and not a fix task: the brief named two
+quantities with one need. Propose the need split (the new text of each), citing the two readings as evidence, and
+leave the artifact as it is. A fix task that bends the artifact to the map destroys the better number.
+
 ## Phases
 
 A brief may declare phases, each owning some needs and deliverables; the observation marks the current one. Mint only for

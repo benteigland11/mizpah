@@ -744,8 +744,11 @@ def artifact_agreement_problems(project: Path, unknown_ids: list[str]) -> list[s
             continue
         if not any(values_agree('number', v, value) for _, v in numeric):
             problems.append('artifact known '+uid+' = '+str(value)+' but the known'+('s' if len(numeric) > 1 else '')+' it must agree with '
-                            +', '.join(a+' = '+str(round(v, 6)) for a, v in numeric)+' — the artifact prints a different number; '
-                            'fix the artifact (or the probe reads the wrong line), never the map')
+                            +', '.join(a+' = '+str(round(v, 6)) for a, v in numeric)+' — the artifact prints a different number. '
+                            'If the artifact is wrong (or the probe reads the wrong line), fix it, never the map. If the '
+                            'artifact measures a different quantity than the known (the same name at another mass, '
+                            'another point, another unit), do not bend it to the map: block the task naming both '
+                            'quantities, so the brief can be made to name them apart')
     return problems
 
 
