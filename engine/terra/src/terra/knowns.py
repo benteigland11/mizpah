@@ -622,6 +622,10 @@ def save_known(project_root: Path, record: dict[str, Any]) -> Path:
         record = recompute_typed_node(
             record, project_root=project_root, run_dir_fn=run_dir
         )
+        # The canonical scalar lives in the record too, so a raw read of the file agrees with
+        # `known get` (workers grep knowns/*.json and found the value only inside stats).
+        from .readings import extract_value
+        record["value"] = extract_value(record)
     # validate after recompute (confidence demotion already applied)
     blocks = validate_known_record(record, expected_id=kid)
     if blocks:
