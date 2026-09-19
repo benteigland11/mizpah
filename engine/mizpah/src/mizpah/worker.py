@@ -218,7 +218,9 @@ def render_assignment(task: dict[str, Any], unknowns: list[dict[str, Any]], map_
     ids = [u['id'] for u in unknowns]
     lines.append('Your probes already exist, one per unknown, each measuring only its own quantity: '+
                  ', '.join('`.terra/map/probes/'+i+'_probe/`' for i in ids)+'. For each, write its `measure.py` '
-                 '(a few lines returning {"<unknown id>": value}), validate, run. Do not create other probes.')
+                 '(a few lines returning {"<unknown id>": value}), validate, run. Do not create other probes. '
+                 'A probe runs with the project root as its working directory: open files and run commands by '
+                 'relative path; do not derive the root from `__file__` (measure.py is four levels down).')
     for uid, known_ids in (inputs or {}).items():
         lines.append('`'+uid+'_probe` declares the map knowns '+', '.join('`'+k+'`' for k in known_ids)+
                      ' as inputs: its measure() gets their values in ctx["inputs"] and compares against them.')
