@@ -645,3 +645,43 @@ the contrast ratio of candidate 3 s mark fill against white is not known
 the contrast ratio of candidate 1 s mark fill against near black  111 is not known 
 the contrast ratio of candidate 2 s mark fill against near black  111 is not known 
 the contrast ratio of candidate 3 s mark fill against near black  111 is not known 
+Measure mean paragraph line length at 1280 px
+1280 characters length line mean paragraph
+the mean paragraph line length in characters at 1280 px is known
+Verify monochrome and wordmark variants
+candidate fill font mark mizpah mono monochrome named paths sets single text
+it is not known whether every candidate has a monochrome mark mono svg using a single fill 
+it is not known whether every candidate has a wordmark svg that sets mizpah as paths or text with a named font 
+Measure mean paragraph line length at 375 px
+characters length line mean paragraph
+the mean paragraph line length in characters at 375 px is known
+Audit candidate ideas and SVG authorship constraints
+mark candidate candidates content different distinct drawn exactly expresses external hand idea
+each of the exactly three candidates is a different idea drawn from content name md  and each mark svg and rationale md expresses that distinct idea 
+every candidate mark svg  mark mono svg  and wordmark svg is hand written svg with no raster image or external reference 
+Validate that brand/type.md covers the brief and matches the map
+brand documents families measures readings resolved scale sizes step type using
+brand type md documents the scale  families  sizes at each step  and measures using the resolved readings
+Inspect type CSS ratios, families, faces, and required rules
+brand type required contains element rule font ratio sizes decimals named rounded
+the ratio of h1 to h2 font sizes in brand type css  rounded to 2 decimals  is known 
+the ratio of h2 to h3 font sizes in brand type css  rounded to 2 decimals  is known 
+the number of font families named by brand type css is known  with each classified as a system stack or a self hosted file under brand fonts  and checked for a beside the file licence 
+brand type css defines the type system through the required custom properties 
+brand type css contains the required h1 element rule 
+brand type css contains the required h2 element rule 
+Verify witness-heap mark.svg artifact
+agrees brand candidate exists external handwritten heap mark marks svgs witness
+brand marks witness heap mark svg exists and agrees with all candidate svgs handwritten no external
+Measure scheme contrasts and validate every allowed pair
+background contrast dark light ratio text accent scheme body brand colour json
+the contrast ratio of body text against the page background in the light scheme is not known 
+the contrast ratio of body text against the page background in the dark scheme is not known 
+the contrast ratio of the accent colour against the light background is not known 
+the contrast ratio of the accent colour against the dark background is not known 
+the lower of the accent contrast ratios across the light and dark schemes is not known 
+it is not known whether every text background pair in brand pairs json clears 4 5 1 in both schemes 
+Validate the type sample stylesheet links
+brand html sample type uses tokens
+brand type sample html uses brand type css 
+brand type sample html uses brand tokens css 

@@ -129,6 +129,7 @@ def observe(config: dict[str, Any], project: Path) -> dict[str, Any]:
     related_briefs = briefs.related(config, brief) if config['mizpah'].get('brief_library', True) else []
     registry = capabilities.render(config, brief)
     return dict(
+        project_path=str(project),
         repo=repo_digest(project),
         brief={key: brief.get(key) for key in ('title', 'version', 'status', 'mission', 'needs', 'deliverables',
                                                 'non_goals', 'enablers', 'budget_points', 'phases', 'open_proposals')}
@@ -174,6 +175,12 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
                     lines.append('      ↳ '+line[:160])
                 if not cited.get(ref):
                     lines.append('      ↳ (no unknown cites this deliverable)')
+    # The ledger of things the deliverables name and who makes them exist. A reading of a file nobody builds can
+    # only block; the controller minted readers before builders on every brief that built something (2026-09-19).
+    ledger = deliverable_ledger(observation)
+    if ledger:
+        lines.append('Deliverable files (what must exist before it can be read — route the builder first, readers depend on it):')
+        lines += ['  '+line for line in ledger]
     if brief.get('budget_points') is not None:
         lines.append('Budget points: '+str(brief['budget_points']))
     proposals = brief.get('proposals') or []
@@ -247,11 +254,17 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
         lines.append('A task blocked on budget resumes from where it stopped if you re-bucket it.')
     if any(t['status'] == 'blocked' and not str(t.get('blocked_reason') or '').startswith(BUDGET_BLOCK)
            for t in observation['tasks']):
-        lines.append('A task blocked by its worker with a reason means the source could not be read as the unknown '
+        unbuilt = [t for t in observation['tasks'] if t['status'] == 'blocked'
+                   and re.search(r'does not exist|do not exist|not exist|missing|absent|no such|not present|only .* exist', str(t.get('blocked_reason') or ''), re.I)]
+        if unbuilt:
+            lines.append('Blocked on a source that does not exist yet ('+', '.join(t['id'] for t in unbuilt)+'): this is your '
+                         'routing, not the brief — the reading was routed before anything built its source. Look at the '
+                         'deliverable files above: if nobody builds it, mint the artifact unknown that creates it (boolean, '
+                         '`creates`) with a task, then release the blocked task once with "unblock" after that task is done. '
+                         'Do not release it before the builder has run, and do not mint the reading again under another name.')
+        lines.append('A task blocked by its worker for any other reason means the source could not be read as the unknown '
                      'asks: the question needs a different source, or the brief needs to change. That is what '
-                     'proposals are for; do not re-mint the same question. One exception: a source that did not exist '
-                     'yet because another task builds it — once that task is done, release the blocked one with '
-                     '"unblock": [{"task": "<id>", "after": "<the task that built it>"}].')
+                     'proposals are for; do not re-mint the same question.')
     budget = observation.get('budget') or {}
     if budget:
         lines.append('Points: budget '+str(budget.get('budget_points'))+', planned '+str(budget.get('points_plan'))+
@@ -317,6 +330,33 @@ def source_exists(project: Path, source: str) -> bool:
     if any(ch in source for ch in '*?['):
         return any(True for _ in project.glob(source))
     return (project/source).exists()
+
+
+def deliverable_ledger(observation: dict[str, Any]) -> list[str]:
+    """Each file a deliverable names: built, or which unknown/task creates it, or nobody."""
+    project = observation.get('project_path')
+    creators: dict[str, tuple[str, str]] = {}
+    for u in observation['unknowns']:
+        notes = str(u.get('notes') or '')
+        if 'creates ' in notes and '; enabler ' not in notes:
+            made = notes.split('creates ', 1)[1].split(';')[0].strip()
+            task = next((t['id']+' ['+t['status']+']' for t in observation['tasks'] if u['id'] in (t.get('unknowns') or [])), '(no task)')
+            creators[made.lower()] = (u['id'], task)
+    lines = []
+    seen = set()
+    for index, text in enumerate(observation['brief'].get('deliverables') or [], start=1):
+        for path in re.findall(r'`([^`]+)`|([\w./-]+\.[A-Za-z0-9]{1,5})', str(text)):
+            name = (path[0] or path[1]).strip().lstrip('/')
+            if not name or ' ' in name or name in seen or '.' not in name.rsplit('/', 1)[-1]:
+                continue
+            seen.add(name)
+            low = name.lower()
+            exists = bool(project) and (Path(project)/name.split('<')[0].rstrip('/')).exists() if '<' not in name else False
+            exists = exists or (bool(project) and '<' in name and any(Path(project).glob(name.replace('<candidate>', '*').replace('<function>', '*'))))
+            maker = next((v for k, v in creators.items() if k == low or k.endswith('/'+low.rsplit('/', 1)[-1]) or low.startswith(k)), None)
+            state = 'built' if exists else ('creates: '+maker[0]+' → '+maker[1] if maker else 'NOBODY BUILDS IT YET')
+            lines.append('deliverable:'+str(index)+' '+name+' — '+state)
+    return lines
 
 
 def uncovered_deliverable_terms(observation: dict[str, Any], extra_unknowns: list[dict[str, Any]] = (), *,
