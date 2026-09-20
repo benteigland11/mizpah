@@ -250,8 +250,9 @@ def score(project: Path) -> dict:
     velocities = [n.velocity for n in notes]
     pedal = [c for i in pm.instruments for c in i.control_changes if c.number == 64]
     downs = [c for c in pedal if c.value >= 64]
-    bars = max(1, duration/(4*60/max(pm.estimate_tempo(), 1)))
     tempi = pm.get_tempo_changes()[1]
+    # Bars at the file's first tempo (estimate_tempo needs onsets and refuses block chords, 54 notes in 9 bars).
+    bars = max(1, duration/(4*60/max(float(tempi[0]) if len(tempi) else 120.0, 1)))
     # hand span: notes sounding together, split at middle C as a crude hand line
     onsets = {}
     for n in notes:
