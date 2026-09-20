@@ -1342,6 +1342,18 @@ def uncovered_by_procedures(config: dict[str, Any], used: list[str], unknowns: l
     return out
 
 
+def refusal_message(refused: list[tuple[str, str]]) -> str:
+    """The library's reasons for refusing what the worker built, and the one chance to fix them."""
+    lines = ['The gate is green and your work is done; one thing remains. The library refused what you built, for these '
+             'reasons — fix them and it is checked in; leave them and the work stays only in this project:']
+    for kind, reason in refused:
+        lines.append('- '+kind+' '+reason)
+    lines.append('A widget must validate (`cartograph validate cg/<dir>`): tests under tests/ that pass, no project names or '
+                 'paths in src/, every dependency declared. A procedure must validate (`playbook validate <id>`). '
+                 'Fix, validate, then reply that you are done; do not start other work.')
+    return '\n'.join(lines)
+
+
 def green_message(gate: dict[str, Any], unknown_id: str | list[str], used: list[str] = (), cost: dict[str, Any] | None = None,
                   skips: dict[str, list[str]] | None = None, uncovered: dict[str, list[str]] | None = None) -> str:
     if isinstance(unknown_id, list):
@@ -1819,6 +1831,25 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         deps = declare_artifact_deps(config, project, unknowns)
         rounds.append(dict(turns=status['completed_worker_turns'], session=status['status'], gate='playbook',
                            final_text=status['final_text'], playbook=playbook, widgets=widgets, artifact_deps=deps))
+        # One repair round: the library refused something the worker built, for reasons it can act on (a
+        # missing test, a project name in src/, a hardcoded path). Without this the worker never saw the
+        # validator's words and real work did not compound.
+        refused = [('widget', r) for r in widgets['rejected']]+[('procedure', r) for r in playbook['rejected']]
+        if refused and status['status'] == 'complete' and budget-status['completed_worker_turns'] > 0:
+            session.continue_with(refusal_message(refused))
+            status = run_through_outages(session, config, root, maximum_worker_turns=budget-status['completed_worker_turns'])
+            session.prune_workspaces()
+            again_w = harvest_widgets(evidence(session), root, config)
+            again_p = harvest_playbook(evidence(session), store, config,
+                                       allowed=tuple(procedures_used(root)+procedures_created(root)))
+            for key in ('checked_in', 'unchanged'):
+                widgets[key] = sorted(set(widgets[key]) | set(again_w[key]))
+            widgets['rejected'] = [r for r in again_w['rejected']]
+            for key in ('installed', 'created', 'improved', 'ignored'):
+                playbook[key] = sorted(set(playbook.get(key) or []) | set(again_p.get(key) or []))
+            playbook['rejected'] = [r for r in again_p['rejected']]
+            rounds.append(dict(turns=status['completed_worker_turns'], session=status['status'], gate='library_repair',
+                               final_text=status['final_text'], playbook=again_p, widgets=again_w))
     verdict = ('complete' if gate['ok'] else 'blocked_by_worker' if blocked_reason is not None
                else 'stopped' if status['status'] == 'stopped' else 'incomplete')
     result = dict(task=task['id'], unknown=task['map_id'], unknowns=task_unknown_ids(task), map=map_id, resumed=resuming,
