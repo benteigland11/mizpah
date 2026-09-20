@@ -362,7 +362,7 @@ def test_placeholder_addresses_block_and_new_kinds_load() -> None:
     vertex = fixed.get('vertex_ai')
     assert providers.missing_client_id(vertex) is None
     assert vertex.base_url_for() == 'https://eu-aiplatform.googleapis.com/v1/projects/p1/locations/eu/endpoints/openapi'
-    assert vertex.models_url == 'https://eu-aiplatform.googleapis.com/v1/publishers/google/models'
+    assert vertex.models_url == 'https://eu-aiplatform.googleapis.com/v1beta1/publishers/google/models'
 
 
 def test_settings_are_set_one_at_a_time(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
