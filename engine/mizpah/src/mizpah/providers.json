@@ -839,6 +839,101 @@
       "context_window": 128000,
       "timeout_seconds": 900,
       "notes": "Ollama's hosted models with an ollama.com key; same shape as a local Ollama."
+    },
+    {
+      "name": "qwen_oauth",
+      "display_name": "Qwen Code (free tier, qwen.ai account)",
+      "auth": {
+        "kind": "device_code",
+        "device_authorization_endpoint": "https://chat.qwen.ai/api/v1/oauth2/device/code",
+        "token_endpoint": "https://chat.qwen.ai/api/v1/oauth2/token",
+        "client_id": "f0304373b74a44d2b584a3fb70ca9e56",
+        "scopes": [
+          "openid",
+          "profile",
+          "email",
+          "model.completion"
+        ],
+        "pkce": true
+      },
+      "api_base_url": "https://{resource_url}/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "token_metadata_fields": [
+        "resource_url"
+      ],
+      "models": [
+        "coder-model",
+        "vision-model"
+      ],
+      "default_model": "coder-model",
+      "models_path": null,
+      "reasoning_efforts": [],
+      "token_count": "usage_calibrated",
+      "context_window": 1000000,
+      "timeout_seconds": 900,
+      "notes": "Qwen Code CLI's device flow (Apache-2.0 QwenLM/qwen-code: PKCE-bound device grant against chat.qwen.ai; the token response names the API host in resource_url, usually portal.qwen.ai). Aliases coder-model / vision-model track the current Qwen coder. Alibaba has not published a third-party policy; OSS forks ship this the same way."
+    },
+    {
+      "name": "bedrock_api",
+      "display_name": "Amazon Bedrock (API key)",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "AWS_BEARER_TOKEN_BEDROCK"
+      },
+      "api_base_url": "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [],
+      "default_model": null,
+      "models_path": "/models",
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "Bedrock API keys (console > Bedrock > API keys) as a bearer against the OpenAI-compatible endpoint; change the region in the address with configure. IAM SigV4 signing is not wired; use an API key. Models that only speak the Converse API are not reachable on this endpoint."
+    },
+    {
+      "name": "vertex_ai",
+      "display_name": "Google Vertex AI (gcloud login)",
+      "auth": {
+        "kind": "authorized_user_file",
+        "path": "~/.config/gcloud/application_default_credentials.json",
+        "token_endpoint": "https://oauth2.googleapis.com/token",
+        "expected_type": "authorized_user",
+        "environment_variable": "GOOGLE_APPLICATION_CREDENTIALS"
+      },
+      "api_base_url": "https://us-central1-aiplatform.googleapis.com/v1/projects/YOUR-PROJECT/locations/us-central1/endpoints/openapi",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [
+        "google/gemini-3.8-flash",
+        "google/gemini-3.5-pro"
+      ],
+      "default_model": "google/gemini-3.8-flash",
+      "models_path": null,
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "token_count": "usage_calibrated",
+      "context_window": 1000000,
+      "timeout_seconds": 900,
+      "notes": "Vertex's OpenAI-compatible endpoint with Application Default Credentials: run `gcloud auth application-default login`, then sign in here (the refresh token in that file is adopted; access tokens are minted from it). Set the address to your project and region with configure. Service-account JSON keys are not supported (they need RSA signing); use a user login."
     }
   ]
 }

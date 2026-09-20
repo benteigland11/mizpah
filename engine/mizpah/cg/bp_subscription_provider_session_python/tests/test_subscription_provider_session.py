@@ -23,8 +23,8 @@ from src.subscription_provider_session import (  # noqa: E402
 # The blueprint's own public surface accepts profiles and stores by value; build them through the
 # façade's exposed types so tests never reach past it.
 from src.subscription_provider_session import CredentialStore, ProviderProfile  # noqa: E402
-from src.subscription_provider_session import ApiKeyAuth, DeviceCodeFlow, NoAuth, OAuthPkceFlow  # noqa: E402
-from src.subscription_provider_session import QuarantinedCredential, RefreshPolicy  # noqa: E402
+from src.subscription_provider_session import ApiKeyAuth, AuthorizedUserFileAuth, DeviceCodeFlow, NoAuth, OAuthPkceFlow  # noqa: E402
+from src.subscription_provider_session import QuarantinedCredential, RefreshFailed, RefreshPolicy  # noqa: E402
 
 NOW = datetime(2030, 1, 1, tzinfo=timezone.utc)
 
@@ -368,6 +368,62 @@ def test_session_header_is_stable_per_transport(store: CredentialStore) -> None:
     session.transport(session_id="fixed")("/chat/completions", {"messages": [{"role": "user", "content": "c"}]})
     ids = [c["headers"]["x-session"] for c in http.calls if "/chat/completions" in c["url"]]
     assert ids[0] == ids[1] == first.session_id and ids[2] == "fixed" and ids[0] != "fixed"
+
+
+def test_pkce_device_flow_and_per_user_host(store: CredentialStore) -> None:
+    profile = ProviderProfile("per_user", "Per user", DeviceCodeFlow(device_authorization_endpoint="https://auth.example.org/device/code",
+                                                                      token_endpoint="https://auth.example.org/token", client_id="c", pkce=True),
+                              "https://{resource_url}/v1", "/chat/completions", models_path="/models",
+                              credential_headers={"Authorization": "Bearer {token}"}, token_metadata_fields=("resource_url",),
+                              models=("m",), default_model="m")
+    http = FakeHttp()
+    http.token_answers += [
+        (200, {"device_code": "dc", "user_code": "AB-12", "verification_uri": "https://auth.example.org/activate", "expires_in": 600}),
+        (200, {"access_token": "at", "refresh_token": "rt", "expires_in": 3600, "resource_url": "portal.example.org"}),
+    ]
+    session = _session(profile, store, http)
+    record = session.login()
+    device = parse_qs(http.calls[0]["body"].decode())
+    poll = parse_qs(http.calls[1]["body"].decode())
+    assert device["code_challenge_method"] == ["S256"] and len(device["code_challenge"][0]) > 20
+    assert "code_verifier" in poll and poll["code_verifier"][0] != device["code_challenge"][0]
+    assert record.metadata["resource_url"] == "portal.example.org"
+    http.model_answers.append(HttpResponse(200, {}, json.dumps({"data": [{"id": "m"}]}).encode()))
+    assert session.list_models() == ["m"] and http.calls[-1]["url"] == "https://portal.example.org/v1/models"
+    http.model_answers.append(HttpResponse(200, {"content-type": "application/json"}, json.dumps(
+        {"choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+         "usage": {"prompt_tokens": 1, "completion_tokens": 1}}).encode()))
+    session.transport()("/chat/completions", {"messages": [{"role": "user", "content": "u"}]})
+    assert http.calls[-1]["url"] == "https://portal.example.org/v1/chat/completions"
+    # a refresh keeps the per-user host
+    http.token_answers.append((200, {"access_token": "at2", "expires_in": 3600}))
+    refreshed = session._refresh(session.credential())
+    assert refreshed.metadata["resource_url"] == "portal.example.org" and refreshed.secret["refresh_token"] == "rt"
+
+
+def test_authorized_user_file_login_and_refresh(store: CredentialStore, tmp_path: Path) -> None:
+    adc = tmp_path / "adc.json"
+    profile = ProviderProfile("cloud", "Cloud", AuthorizedUserFileAuth(path=str(adc), token_endpoint="https://oauth.example.org/token"),
+                              "https://region.example.org/v1/projects/p/endpoints/openapi", "/chat/completions",
+                              credential_headers={"Authorization": "Bearer {token}"})
+    http = FakeHttp()
+    session = _session(profile, store, http)
+    with pytest.raises(LoginError, match="no credentials file"):
+        session.login()
+    adc.write_text(json.dumps({"type": "service_account", "client_email": "x"}))
+    with pytest.raises(LoginError, match="service_account"):
+        session.login()
+    adc.write_text(json.dumps({"type": "authorized_user", "client_id": "cid", "client_secret": "csec", "refresh_token": "rt"}))
+    http.token_answers.append((200, {"access_token": "minted", "expires_in": 3600, "token_type": "Bearer"}))
+    record = session.login()
+    form = parse_qs(http.calls[0]["body"].decode())
+    assert form["grant_type"] == ["refresh_token"] and form["client_secret"] == ["csec"] and form["client_id"] == ["cid"]
+    assert record.secret["access_token"] == "minted" and record.secret["client_secret"] == "csec"
+    assert record.metadata["source_file"] == str(adc) and session.status()["signed_in"]
+    http.token_answers.append((400, {"error": "invalid_grant", "error_description": "revoked"}))
+    with pytest.raises(RefreshFailed):
+        session._refresh(session.credential())
+    assert session.status()["quarantined"]
 
 
 def test_endpoint_and_count(store: CredentialStore) -> None:

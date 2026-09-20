@@ -338,3 +338,15 @@ def test_configure_set_edits_any_endpoint_field(tmp_path: Path, capsys: pytest.C
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_placeholder_addresses_block_and_new_kinds_load() -> None:
+    reg = providers.registry({}, environ={})
+    assert 'needs its address' in (providers.missing_client_id(reg.get('vertex_ai')) or '')
+    assert 'needs its address' in (providers.missing_client_id(reg.get('azure_openai')) or '')
+    qwen = reg.get('qwen_oauth')
+    assert qwen.auth.kind == 'device_code' and qwen.auth.pkce and providers.missing_client_id(qwen) is None
+    assert qwen.base_url_for({'resource_url': 'portal.qwen.ai'}) == 'https://portal.qwen.ai/v1'
+    assert reg.get('bedrock_api').auth.environment_variable == 'AWS_BEARER_TOKEN_BEDROCK'
+    fixed = providers.registry({'mizpah': {'providers': {'vertex_ai': {'api_base_url': 'https://eu-aiplatform.googleapis.com/v1/projects/p/locations/eu/endpoints/openapi'}}}}, environ={})
+    assert providers.missing_client_id(fixed.get('vertex_ai')) is None

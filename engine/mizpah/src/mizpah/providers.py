@@ -118,7 +118,7 @@ def registry(config: dict[str, Any] | None = None, environ: dict[str, str] | Non
 
 def session_for(name: str, config: dict[str, Any] | None = None, *, open_browser: bool = True) -> ProviderSession:
     profile = registry(config).get(name)
-    return ProviderSession(profile, CredentialStore(credential_path(config)), open_browser=open_browser)
+    return ProviderSession(profile, CredentialStore(credential_path(config)), open_browser=open_browser, user_agent='mizpah/0.1')
 
 
 def available_models(session: ProviderSession) -> tuple[list[dict[str, Any]], str]:
@@ -162,6 +162,9 @@ def available_models(session: ProviderSession) -> tuple[list[dict[str, Any]], st
 
 def missing_client_id(profile: ProviderProfile) -> str | None:
     """A sentence for the user when a flow cannot start, else None."""
+    if 'YOUR-' in profile.api_base_url:
+        return (f'{profile.display_name} needs its address: run mizpah-provider configure {profile.name} '
+                f'--set api_base_url=... (or edit it on the sheet). {profile.notes}'.strip())
     client_id = getattr(profile.auth, 'client_id', None)
     if profile.auth.kind in ('oauth_pkce', 'device_code') and not client_id:
         variable = CLIENT_ID_ENVIRONMENT.get(profile.name, '<none>')

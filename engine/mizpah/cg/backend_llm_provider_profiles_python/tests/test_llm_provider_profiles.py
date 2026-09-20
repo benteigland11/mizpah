@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.llm_provider_profiles import (  # noqa: E402
     ApiKeyAuth,
+    AuthorizedUserFileAuth,
     DeviceCodeFlow,
     NoAuth,
     OAuthPkceFlow,
@@ -69,6 +70,22 @@ def test_no_auth_and_efforts() -> None:
     assert local.headers_for("") == {}
     with pytest.raises(ValueError):
         ProviderProfile("n", "N", NoAuth(), "http://x", "/v1", reasoning_efforts=("low",), default_reasoning_effort="max")
+
+
+def test_base_url_template_and_file_auth() -> None:
+    per_user = ProviderProfile("p", "P", DeviceCodeFlow(pkce=True), "https://{resource_url}/v1", "/chat/completions",
+                               models_path="/models", token_metadata_fields=("resource_url",))
+    assert per_user.auth.pkce and per_user.token_metadata_fields == ("resource_url",)
+    assert per_user.base_url_for({"resource_url": "portal.example.org"}) == "https://portal.example.org/v1"
+    assert per_user.base_url_for({"resource_url": "https://portal.example.org/"}) == "https://portal.example.org/v1"
+    assert per_user.base_url_for({}) == "https://{resource_url}/v1"  # unfilled: left for the caller to notice
+    assert per_user.models_url_for({"resource_url": "portal.example.org"}) == "https://portal.example.org/v1/models"
+    plain = ProviderProfile("q", "Q", ApiKeyAuth(), "https://api.example.org/v1", "/x")
+    assert plain.base_url_for({"resource_url": "ignored"}) == "https://api.example.org/v1"
+    filed = auth_from_dict({"kind": "authorized_user_file", "path": "~/.config/tool/adc.json",
+                            "token_endpoint": "https://oauth.example.org/token", "environment_variable": "TOOL_CREDENTIALS"})
+    assert isinstance(filed, AuthorizedUserFileAuth) and filed.expected_type == "authorized_user"
+    assert profile_from_dict(dict(per_user.to_dict())) == per_user
 
 
 def test_validation() -> None:

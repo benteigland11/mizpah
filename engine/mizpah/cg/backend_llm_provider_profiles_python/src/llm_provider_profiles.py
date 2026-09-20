@@ -15,7 +15,7 @@ from typing import Any, Mapping
 
 WIRE_DIALECTS = ("chat_completions", "responses")
 TOKEN_COUNT_STRATEGIES = ("tokenize_endpoint", "usage_calibrated")
-AUTH_KINDS = ("oauth_pkce", "device_code", "api_key", "none")
+AUTH_KINDS = ("oauth_pkce", "device_code", "api_key", "none", "authorized_user_file")
 
 
 @dataclass(frozen=True)
@@ -46,6 +46,8 @@ class DeviceCodeFlow:
     scopes: tuple[str, ...] = ()
     extra_authorization_params: dict[str, str] = field(default_factory=dict)
     extra_token_params: dict[str, str] = field(default_factory=dict)
+    # Some servers bind the device grant to a PKCE pair (challenge on the device request, verifier on the poll).
+    pkce: bool = False
 
 
 @dataclass(frozen=True)
@@ -57,13 +59,26 @@ class ApiKeyAuth:
 
 
 @dataclass(frozen=True)
+class AuthorizedUserFileAuth:
+    """A refresh token already on disk, written by a vendor's own CLI login (an 'authorized user' file:
+    client_id, client_secret, refresh_token). Signing in means reading it; the access token is minted
+    from ``token_endpoint`` with the refresh grant."""
+
+    kind: str = field(default="authorized_user_file", init=False)
+    path: str = ""
+    token_endpoint: str = ""
+    expected_type: str = "authorized_user"
+    environment_variable: str | None = None
+
+
+@dataclass(frozen=True)
 class NoAuth:
     """An endpoint that takes no credential: a local server, or a proxy that authenticates by network."""
 
     kind: str = field(default="none", init=False)
 
 
-AuthSpec = OAuthPkceFlow | DeviceCodeFlow | ApiKeyAuth | NoAuth
+AuthSpec = OAuthPkceFlow | DeviceCodeFlow | ApiKeyAuth | NoAuth | AuthorizedUserFileAuth
 
 
 @dataclass(frozen=True)
@@ -81,6 +96,8 @@ class ProviderProfile:
     models_path: str | None = None
     reasoning_efforts: tuple[str, ...] = ()
     default_reasoning_effort: str | None = None
+    # Token-response fields worth keeping beside the credential (an account id, a per-user API host).
+    token_metadata_fields: tuple[str, ...] = ()
     token_count: str = "usage_calibrated"
     context_window: int | None = None
     timeout_seconds: float = 600.0
@@ -105,10 +122,34 @@ class ProviderProfile:
         if self.default_reasoning_effort is not None and self.default_reasoning_effort not in self.reasoning_efforts:
             raise ValueError("default_reasoning_effort must be one of reasoning_efforts")
 
+    def base_url_for(self, metadata: Mapping[str, Any] | None = None) -> str:
+        """``api_base_url`` with any ``{field}`` filled from the credential's metadata.
+
+        A provider that tells each user their own API host in the token response writes it as e.g.
+        ``https://{resource_url}/v1``; a bare host value is accepted and given ``https://``.
+        """
+        template = self.api_base_url
+        if "{" not in template:
+            return template
+        values = {key: str(value) for key, value in (metadata or {}).items()}
+        for key, value in values.items():
+            if "{" + key + "}" not in template:
+                continue
+            if value.startswith(("http://", "https://")):
+                template = template.replace("https://{" + key + "}", "{" + key + "}").replace("http://{" + key + "}", "{" + key + "}")
+            values[key] = value.rstrip("/")
+        try:
+            return template.format(**values).rstrip("/")
+        except (KeyError, IndexError):
+            return template
+
+    def models_url_for(self, metadata: Mapping[str, Any] | None = None) -> str | None:
+        return None if self.models_path is None else self.base_url_for(metadata).rstrip("/") + self.models_path
+
     @property
     def models_url(self) -> str | None:
         """Where a live model list can be fetched with the credential headers, if the provider has one."""
-        return None if self.models_path is None else self.api_base_url.rstrip("/") + self.models_path
+        return self.models_url_for(None)
 
     def headers_for(self, access_token: str, metadata: Mapping[str, Any] | None = None) -> dict[str, str]:
         """Static headers plus credential headers rendered from the token and its metadata.
@@ -139,7 +180,8 @@ def _jsonable(data: dict[str, Any]) -> dict[str, Any]:
 
 def auth_from_dict(data: Mapping[str, Any]) -> AuthSpec:
     kind = data.get("kind")
-    classes = {"oauth_pkce": OAuthPkceFlow, "device_code": DeviceCodeFlow, "api_key": ApiKeyAuth, "none": NoAuth}
+    classes = {"oauth_pkce": OAuthPkceFlow, "device_code": DeviceCodeFlow, "api_key": ApiKeyAuth, "none": NoAuth,
+               "authorized_user_file": AuthorizedUserFileAuth}
     if kind not in classes:
         raise ValueError(f"auth.kind must be one of {AUTH_KINDS}")
     cls = classes[kind]
@@ -157,7 +199,7 @@ def profile_from_dict(data: Mapping[str, Any]) -> ProviderProfile:
     if "auth" not in kwargs:
         raise ValueError("profile needs an auth block")
     kwargs["auth"] = auth_from_dict(kwargs["auth"])
-    for key in ("models", "reasoning_efforts", "unsupported_fields"):
+    for key in ("models", "reasoning_efforts", "unsupported_fields", "token_metadata_fields"):
         if key in kwargs:
             kwargs[key] = tuple(kwargs[key])
     return ProviderProfile(**kwargs)

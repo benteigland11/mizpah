@@ -31,6 +31,7 @@ from cg.backend_chat_responses_codec_python.src.chat_responses_codec import (
 from cg.backend_hosted_token_estimator_python.src.hosted_token_estimator import HostedTokenEstimator
 from cg.backend_llm_provider_profiles_python.src.llm_provider_profiles import (
     ApiKeyAuth,
+    AuthorizedUserFileAuth,
     DeviceCodeFlow,
     NoAuth,
     OAuthPkceFlow,
@@ -78,8 +79,8 @@ __all__ = [
     "ProviderSession", "ProviderTransport", "LoginPrompt", "LoginError", "NotSignedIn",
     "HttpResponse", "HttpCall", "WireResponse", "urllib_http",
     # the inputs a consumer builds (re-exported so nothing reaches past the façade)
-    "ProviderProfile", "OAuthPkceFlow", "DeviceCodeFlow", "ApiKeyAuth", "NoAuth", "ModelInfo",
-    "CredentialStore", "CredentialRecord", "QuarantinedCredential", "RefreshPolicy", "HostedTokenEstimator",
+    "ProviderProfile", "OAuthPkceFlow", "DeviceCodeFlow", "ApiKeyAuth", "NoAuth", "AuthorizedUserFileAuth", "ModelInfo",
+    "CredentialStore", "CredentialRecord", "QuarantinedCredential", "RefreshPolicy", "RefreshFailed", "HostedTokenEstimator",
 ]
 
 DEFAULT_LOGIN_TIMEOUT_SECONDS = 300.0
@@ -182,6 +183,8 @@ class ProviderSession:
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
     sleep: Callable[[float], None] = time.sleep
     browser_opener: Callable[[str], Any] | None = None
+    # Sent on every request unless the profile names its own; some auth servers refuse a library default.
+    user_agent: str = "provider-session/1.0"
 
     # -- sign in / out ------------------------------------------------------
 
@@ -200,6 +203,8 @@ class ProviderSession:
             token = self._login_pkce(auth, on_prompt)
         elif isinstance(auth, DeviceCodeFlow):
             token = self._login_device(auth, on_prompt)
+        elif isinstance(auth, AuthorizedUserFileAuth):
+            return self._login_authorized_user_file(auth)
         else:
             raise LoginError(f"unsupported auth kind {auth.kind!r}")
         return self._store_token(token, auth_kind=auth.kind)
@@ -232,7 +237,7 @@ class ProviderSession:
         """Does the endpoint answer at all? Any HTTP status but 503 counts; a socket error does not."""
         url = self.profile.models_url or self.profile.api_base_url
         try:
-            response = self.http("GET", url, {"Accept": "application/json"}, None, timeout_seconds)
+            response = self.http("GET", url, self._headers({"Accept": "application/json"}), None, timeout_seconds)
         except (OSError, URLError, TimeoutError) as error:
             return False, f"{type(error).__name__}: {error}"
         if response.status == 503:
@@ -266,11 +271,11 @@ class ProviderSession:
         has no list endpoint; raises ``NotSignedIn`` / ``QuarantinedCredential`` without a usable
         credential and ``LookupError`` when the endpoint answers badly.
         """
-        url = self.profile.models_url
-        if url is None:
+        if self.profile.models_path is None:
             return []
         record = self._bearer().ensure_fresh()
-        headers = {"Accept": "application/json"}
+        url = self.profile.models_url_for(record.metadata) or ""
+        headers = self._headers({"Accept": "application/json"})
         headers.update(self.profile.headers_for(record.secret["access_token"], record.metadata))
         response = self.http("GET", url, headers, None, self.profile.timeout_seconds)
         if not 200 <= response.status < 300:
@@ -312,8 +317,14 @@ class ProviderSession:
         return normalize_oauth_token_response(payload, received_at=self.clock())
 
     def _login_device(self, auth: DeviceCodeFlow, on_prompt: Callable[[LoginPrompt], None] | None) -> OAuthTokenRecord:
+        authorization_fields = list(auth.extra_authorization_params.items())
+        token_fields = list(auth.extra_token_params.items())
+        if auth.pkce:
+            pair = create_pkce_authorization()
+            authorization_fields += [("code_challenge", pair.code_challenge), ("code_challenge_method", "S256")]
+            token_fields.append(("code_verifier", pair.code_verifier))
         config = DeviceCodeConfig(auth.device_authorization_endpoint, auth.token_endpoint, auth.client_id, auth.scopes,
-                                  tuple(auth.extra_authorization_params.items()), tuple(auth.extra_token_params.items()))
+                                  tuple(authorization_fields), tuple(token_fields))
 
         def post(request: RequestDescriptor) -> tuple[int, dict[str, Any]]:
             return self._post_form(request.url, request.headers, request.body)
@@ -330,6 +341,30 @@ class ProviderSession:
             raise LoginError(str(error)) from error
         return normalize_oauth_token_response(payload, received_at=self.clock())
 
+    def _login_authorized_user_file(self, auth: AuthorizedUserFileAuth) -> CredentialRecord:
+        """Adopt the refresh token a vendor's own login wrote, then mint the first access token."""
+        import os
+        from pathlib import Path
+
+        candidates = [os.environ.get(auth.environment_variable or "") or "", auth.path]
+        path = next((Path(c).expanduser() for c in candidates if c and Path(c).expanduser().is_file()), None)
+        if path is None:
+            raise LoginError(f"no credentials file at {auth.path}; run the vendor's login first")
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError as error:
+            raise LoginError(f"{path} is not JSON") from error
+        if data.get("type") != auth.expected_type:
+            raise LoginError(f"{path} is a {data.get('type')!r} credential; only {auth.expected_type!r} is supported here")
+        missing = [k for k in ("client_id", "client_secret", "refresh_token") if not data.get(k)]
+        if missing:
+            raise LoginError(f"{path} lacks {', '.join(missing)}")
+        seed = CredentialRecord(self.profile.name, {"access_token": "", "refresh_token": data["refresh_token"],
+                                                    "client_id": data["client_id"], "client_secret": data["client_secret"]},
+                                {"auth_kind": auth.kind, "source_file": str(path)})
+        self.store.put(seed.key, seed.secret, seed.metadata)
+        return self._refresh(seed)
+
     def _prompt(self, on_prompt: Callable[[LoginPrompt], None] | None, prompt: LoginPrompt) -> None:
         if self.open_browser:
             if self.browser_opener is not None:
@@ -344,12 +379,18 @@ class ProviderSession:
 
     # -- credential plumbing -------------------------------------------------
 
-    def _store_token(self, token: OAuthTokenRecord, *, auth_kind: str) -> CredentialRecord:
+    def _store_token(self, token: OAuthTokenRecord, *, auth_kind: str, extra_secret: dict[str, Any] | None = None,
+                     extra_metadata: dict[str, Any] | None = None) -> CredentialRecord:
         metadata: dict[str, Any] = {"auth_kind": auth_kind, "scopes": list(token.scopes)}
+        metadata.update(extra_metadata or {})
         if token.expires_at is not None:
             metadata["expires_at"] = token.expires_at.isoformat()
+        for name in self.profile.token_metadata_fields:
+            value = (token.raw or {}).get(name)
+            if value not in (None, ""):
+                metadata[name] = value
         metadata.update(self._claims_metadata(token))
-        secret = {"access_token": token.access_token, "token_type": token.token_type}
+        secret = {"access_token": token.access_token, "token_type": token.token_type, **(extra_secret or {})}
         if token.refresh_token:
             secret["refresh_token"] = token.refresh_token
         if token.id_token:
@@ -383,9 +424,14 @@ class ProviderSession:
             failure = RefreshFailed("credential cannot be refreshed; sign in again", terminal=True)
             self.store.quarantine(self.profile.name, str(failure))
             raise failure
-        config = OAuthPkceConfig("", auth.token_endpoint, auth.client_id, "")
-        request = build_refresh_token_request(config, refresh_token=refresh_token)
-        status, payload = self._post_form(request.url, request.headers, request.body)
+        if isinstance(auth, AuthorizedUserFileAuth):
+            body = urlencode({"grant_type": "refresh_token", "refresh_token": refresh_token,
+                              "client_id": record.secret.get("client_id", ""), "client_secret": record.secret.get("client_secret", "")})
+            status, payload = self._post_form(auth.token_endpoint, {"Content-Type": "application/x-www-form-urlencoded"}, body)
+        else:
+            config = OAuthPkceConfig("", auth.token_endpoint, auth.client_id, "")
+            request = build_refresh_token_request(config, refresh_token=refresh_token)
+            status, payload = self._post_form(request.url, request.headers, request.body)
         if status != 200 or payload.get("error") or not payload.get("access_token"):
             failure = classify_refresh_failure(status, payload)
             if failure.terminal:
@@ -394,8 +440,9 @@ class ProviderSession:
         if not payload.get("refresh_token"):
             payload = dict(payload, refresh_token=refresh_token)
         token = normalize_oauth_token_response(payload, received_at=self.clock())
-        stored = self._store_token(token, auth_kind=auth.kind)
-        return stored
+        keep = {k: v for k, v in record.secret.items() if k in ("client_id", "client_secret")}
+        carry = {k: v for k, v in record.metadata.items() if k in self.profile.token_metadata_fields or k == "source_file"}
+        return self._store_token(token, auth_kind=auth.kind, extra_secret=keep, extra_metadata=carry)
 
     def _bearer(self) -> BearerSession[CredentialRecord]:
         def expires_at(record: CredentialRecord) -> datetime | None:
@@ -404,8 +451,13 @@ class ProviderSession:
 
         return BearerSession(self.credential(), self._refresh, expires_at, policy=self.refresh_policy, clock=self.clock)
 
+    def _headers(self, headers: Mapping[str, str]) -> dict[str, str]:
+        merged = {"User-Agent": self.user_agent}
+        merged.update(headers)
+        return merged
+
     def _post_form(self, url: str, headers: Mapping[str, str], body: str) -> tuple[int, dict[str, Any]]:
-        response = self.http("POST", url, headers, body.encode("utf-8"), self.profile.timeout_seconds)
+        response = self.http("POST", url, self._headers(headers), body.encode("utf-8"), self.profile.timeout_seconds)
         try:
             payload = json.loads(response.body.decode("utf-8") or "{}")
         except ValueError:
@@ -445,7 +497,7 @@ class ProviderTransport:
             return WireResponse(None, "", time.monotonic() - started, error, failure_kind="codec", definitive=True)
 
         def send(record: CredentialRecord) -> tuple[int, HttpResponse | str]:
-            headers = dict(JSON_HEADERS)
+            headers = self.session._headers(JSON_HEADERS)
             headers.update(self.profile.headers_for(record.secret["access_token"], dict(record.metadata, session=self.session_id)))
             try:
                 response = self.session.http("POST", self._url(path), headers, body_bytes, timeout)
@@ -464,7 +516,8 @@ class ProviderTransport:
         return self._decode(result, elapsed, payload)
 
     def _url(self, path: str) -> str:
-        return self.profile.api_base_url.rstrip("/") + path
+        record = self.session.store.peek(self.profile.name)
+        return self.profile.base_url_for(record.metadata if record else None).rstrip("/") + path
 
     def _encode(self, payload: dict[str, Any]) -> tuple[bytes, str | None]:
         body = dict(payload)
