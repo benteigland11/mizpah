@@ -233,6 +233,40 @@ def reap_leaks(root: Path, live_roots: list[Path] = (), *, where: str = '') -> l
     return leaks
 
 
+def journal_usage(journal: Path) -> dict[str, Any]:
+    """Tokens one session journal consumed: calls, prompt, completion, cached and the cache share."""
+    out = dict(calls=0, prompt=0, completion=0, cached=0)
+    try:
+        with journal.open() as handle:
+            for line in handle:
+                if '"model_response"' not in line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    continue
+                payload = event.get('payload') or {}
+                if event.get('event_type') != 'model_response' or payload.get('status') != 200:
+                    continue
+                body = payload.get('body')
+                if isinstance(body, str):
+                    try:
+                        body = json.loads(body)
+                    except ValueError:
+                        continue
+                u = (body or {}).get('usage') or {}
+                if not u:
+                    continue
+                out['calls'] += 1
+                out['prompt'] += int(u.get('prompt_tokens') or 0)
+                out['completion'] += int(u.get('completion_tokens') or 0)
+                out['cached'] += int((u.get('prompt_tokens_details') or {}).get('cached_tokens') or 0)
+    except OSError:
+        pass
+    out['cache_share'] = round(out['cached']/out['prompt'], 3) if out['prompt'] else None
+    return out
+
+
 def usage_summary(root: Path) -> list[dict[str, Any]]:
     """Per (role, model): calls, prompt/completion/cached tokens and the cache share — the worker from its
     session journals, the controller from its steps. What a person reads on the notice of completion."""

@@ -1866,7 +1866,8 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
                   turns=status['completed_worker_turns'], turn_budget=budget, turn_estimate=estimate, overruns=overruns,
                   session=status['status'],
                   handoffs=status['handoffs'], checkins=status['controller_reviews'], held_guidance=status['held_guidance'],
-                  checkin_document=session.project_document(), rounds=rounds, playbook=playbook, widgets=widgets)
+                  checkin_document=session.project_document(), rounds=rounds, playbook=playbook, widgets=widgets,
+                  usage=ops.journal_usage(root/'events'/'session.jsonl'))
     (root/'result.json').write_text(json.dumps(result, indent=1))
     return result
 
