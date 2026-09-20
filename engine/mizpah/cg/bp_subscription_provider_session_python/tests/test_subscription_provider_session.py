@@ -353,6 +353,23 @@ def test_no_auth_profile_is_signed_in_when_reachable(store: CredentialStore) -> 
     assert session.login().metadata == {"auth_kind": "none"}
 
 
+def test_session_header_is_stable_per_transport(store: CredentialStore) -> None:
+    keyed = ProviderProfile("keyed", "Keyed", ApiKeyAuth(environment_variable="K"), "https://api.example.org/v1", "/chat/completions",
+                            credential_headers={"Authorization": "Bearer {token}", "x-session": "{session}"})
+    http = FakeHttp()
+    session = _session(keyed, store, http)
+    session.login(api_key="sk-1")
+    chat = json.dumps({"choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+                       "usage": {"prompt_tokens": 1, "completion_tokens": 1}}).encode()
+    first = session.transport()
+    http.model_answers += [HttpResponse(200, {}, chat)] * 3
+    first("/chat/completions", {"messages": [{"role": "user", "content": "a"}]})
+    first("/chat/completions", {"messages": [{"role": "user", "content": "b"}]})
+    session.transport(session_id="fixed")("/chat/completions", {"messages": [{"role": "user", "content": "c"}]})
+    ids = [c["headers"]["x-session"] for c in http.calls if "/chat/completions" in c["url"]]
+    assert ids[0] == ids[1] == first.session_id and ids[2] == "fixed" and ids[0] != "fixed"
+
+
 def test_endpoint_and_count(store: CredentialStore) -> None:
     session = _session(pkce_profile(), store, FakeHttp())
     assert session.endpoint() == {"base_url": "https://api.example.org/backend", "completion_path": "/responses",

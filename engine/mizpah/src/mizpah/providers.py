@@ -48,6 +48,29 @@ def _merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
+def shipped_names() -> set[str]:
+    return {item['name'] for item in json.loads(SHIPPED_PROFILES.read_text())['profiles']}
+
+
+LOCAL_KINDS = {
+    # llama.cpp: exact /tokenize counting through the native guarded client
+    'llama': dict(completion_path='/v1/chat/completions', models_path='/v1/models', token_count='tokenize_endpoint'),
+    # anything else that speaks /v1/chat/completions without a key: Ollama, LM Studio, vLLM, ...
+    'openai': dict(completion_path='/chat/completions', models_path='/models', token_count='usage_calibrated'),
+}
+
+
+def local_profile(name: str, base_url: str, kind: str, display_name: str | None = None) -> dict[str, Any]:
+    """A complete no-auth profile for a server on this machine, as config data."""
+    if kind not in LOCAL_KINDS:
+        raise ValueError(f'kind must be one of {sorted(LOCAL_KINDS)}')
+    if not base_url.startswith(('http://', 'https://')):
+        raise ValueError('base url must start with http:// or https://')
+    return dict(name=name, display_name=display_name or name, auth={'kind': 'none'}, api_base_url=base_url.rstrip('/'),
+                wire='chat_completions', models=[], reasoning_efforts=[], context_window=None, timeout_seconds=900,
+                local_kind=kind, **LOCAL_KINDS[kind])
+
+
 def registry(config: dict[str, Any] | None = None, environ: dict[str, str] | None = None) -> ProfileRegistry:
     """Shipped profiles, then ``mizpah.providers`` overrides by name, then client ids from the environment."""
     env = os.environ if environ is None else environ

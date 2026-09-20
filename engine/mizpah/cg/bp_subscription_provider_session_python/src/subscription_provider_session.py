@@ -21,6 +21,7 @@ from typing import Any, Callable, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from uuid import uuid4
 
 from cg.backend_chat_responses_codec_python.src.chat_responses_codec import (
     chat_to_responses,
@@ -248,9 +249,9 @@ class ProviderSession:
             raise NotSignedIn(f"not signed in to {self.profile.display_name}")
         return record
 
-    def transport(self) -> ProviderTransport:
-        """A ``(path, payload) -> WireResponse`` callable for a model client."""
-        return ProviderTransport(self)
+    def transport(self, *, session_id: str | None = None) -> ProviderTransport:
+        """A ``(path, payload) -> WireResponse`` callable for a model client; one conversation id per call."""
+        return ProviderTransport(self, session_id=session_id)
 
     def count(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Prompt-token estimate in the shape a model client's ``count`` returns."""
@@ -415,9 +416,11 @@ class ProviderSession:
 class ProviderTransport:
     """The callable a model client posts through. Chat Completions in, Chat Completions out."""
 
-    def __init__(self, session: ProviderSession) -> None:
+    def __init__(self, session: ProviderSession, *, session_id: str | None = None) -> None:
         self.session = session
         self.profile = session.profile
+        # One conversation id per transport; a profile's header template may cite it as {session}.
+        self.session_id = session_id or uuid4().hex
 
     def request_metadata(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         """What changed on the wire, with no authentication material."""
@@ -443,7 +446,7 @@ class ProviderTransport:
 
         def send(record: CredentialRecord) -> tuple[int, HttpResponse | str]:
             headers = dict(JSON_HEADERS)
-            headers.update(self.profile.headers_for(record.secret["access_token"], record.metadata))
+            headers.update(self.profile.headers_for(record.secret["access_token"], dict(record.metadata, session=self.session_id)))
             try:
                 response = self.session.http("POST", self._url(path), headers, body_bytes, timeout)
             except (OSError, URLError, TimeoutError) as exc:

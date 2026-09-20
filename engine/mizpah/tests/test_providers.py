@@ -163,33 +163,73 @@ def _serve(handler_body: bytes, status: int = 200):
     return server, f'http://127.0.0.1:{server.server_address[1]}'
 
 
-def test_local_profiles_follow_reachability_and_use_writes_llama_client(tmp_path: Path, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_added_local_server_follows_reachability_and_use_writes_llama_client(tmp_path: Path, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path))
     engine = tmp_path / 'engine.json'
     harness = tmp_path / 'harness.json'
     harness.write_text(json.dumps({'worker': {'generation': {'model': '/x.gguf', 'top_k': 4}}, 'controller': {}}))
     engine.write_text(json.dumps({'harness_config': 'harness.json'}))
-    assert provider_cli.main(['--config', str(engine), 'models', 'local_llama']) == 0
+    assert provider_cli.main(['--config', str(engine), 'list']) == 0
+    assert not any(p['auth_kind'] == 'none' for p in json.loads(capsys.readouterr().out)['providers'])  # none shipped
+    assert provider_cli.main(['--config', str(engine), 'add-local', 'openai_api', '--base-url', 'http://x']) == 2
+    assert 'shipped' in json.loads(capsys.readouterr().out)['error']
+    assert provider_cli.main(['--config', str(engine), 'add-local', 'box', '--base-url', 'x']) == 2
+    capsys.readouterr()
+    assert provider_cli.main(['--config', str(engine), 'add-local', 'box', '--base-url', 'http://127.0.0.1:9/', '--kind', 'llama',
+                              '--display-name', 'The box']) == 0
+    added = json.loads(capsys.readouterr().out)
+    assert added['event'] == 'added' and added['custom'] and added['auth_kind'] == 'none' and added['signed_in'] is False
+    assert added['api_base_url'] == 'http://127.0.0.1:9' and added['display_name'] == 'The box'
+    assert provider_cli.main(['--config', str(engine), 'models', 'box']) == 0
     assert json.loads(capsys.readouterr().out)['source'] == 'unreachable'
-    assert provider_cli.main(['--config', str(engine), 'use', 'local_llama', 'anything']) == 2
+    assert provider_cli.main(['--config', str(engine), 'use', 'box', 'anything']) == 2
     assert 'not answering' in json.loads(capsys.readouterr().out)['error']
 
     server, base = _serve(json.dumps({'data': [{'id': 'local-7b'}, {'id': 'local-70b'}]}).encode())
     try:
-        assert provider_cli.main(['--config', str(engine), 'configure', 'local_llama', '--base-url', base + '/']) == 0
+        assert provider_cli.main(['--config', str(engine), 'configure', 'box', '--base-url', base + '/']) == 0
         out = json.loads(capsys.readouterr().out)
-        assert out['override'] == {'api_base_url': base} and out['reachable'] is True
-        assert json.loads(engine.read_text())['providers']['local_llama']['api_base_url'] == base
-        assert provider_cli.main(['--config', str(engine), 'models', 'local_llama']) == 0
+        assert out['override']['api_base_url'] == base and out['override']['local_kind'] == 'llama' and out['reachable'] is True
+        assert provider_cli.main(['--config', str(engine), 'models', 'box']) == 0
         out = json.loads(capsys.readouterr().out)
         assert out['source'] == 'live' and out['models'] == ['local-7b', 'local-70b'] and out['details'][0]['efforts'] == []
-        assert provider_cli.main(['--config', str(engine), 'use', 'local_llama', 'local-70b', '--effort', 'high']) == 0
+        assert provider_cli.main(['--config', str(engine), 'use', 'box', 'local-70b', '--effort', 'high']) == 0
         out = json.loads(capsys.readouterr().out)
         assert out['transport'] == 'llama_client' and out['effort'] is None  # no ladder: effort is not sent
         worker = json.loads(harness.read_text())['worker']
         assert worker['provider'] == 'llama_client' and 'subscription' not in worker
         assert worker['endpoint']['base_url'] == base and worker['endpoint']['tokenize_path'] == '/tokenize'
         assert worker['generation'] == {'model': 'local-70b', 'top_k': 4} and worker['known_issues']['repetition']
+        assert provider_cli.main(['--config', str(engine), 'list']) == 0
+        rows = {p['provider']: p for p in json.loads(capsys.readouterr().out)['providers']}
+        assert rows['box']['custom'] is True and rows['openai_api']['custom'] is False
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert provider_cli.main(['--config', str(engine), 'remove', 'openai_api']) == 2
+    capsys.readouterr()
+    assert provider_cli.main(['--config', str(engine), 'remove', 'box']) == 0
+    assert json.loads(capsys.readouterr().out) == {'event': 'removed', 'provider': 'box'}
+    assert 'box' not in json.loads(engine.read_text())['providers']
+    assert provider_cli.main(['--config', str(engine), 'remove', 'box']) == 2
+
+
+def test_openai_local_kind_goes_through_the_session_transport(tmp_path: Path, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path))
+    engine = tmp_path / 'engine.json'
+    harness = tmp_path / 'harness.json'
+    harness.write_text(json.dumps({'worker': {}, 'controller': {}}))
+    engine.write_text(json.dumps({'harness_config': 'harness.json'}))
+    server, base = _serve(json.dumps({'data': [{'id': 'm'}]}).encode())
+    try:
+        assert provider_cli.main(['--config', str(engine), 'add-local', 'ollama', '--base-url', base]) == 0
+        capsys.readouterr()
+        assert provider_cli.main(['--config', str(engine), 'use', 'ollama', 'm']) == 0
+        assert json.loads(capsys.readouterr().out)['transport'] == 'subscription'
+        worker = json.loads(harness.read_text())['worker']
+        assert worker['provider'] == 'subscription' and worker['subscription'] == 'ollama'
+        assert worker['endpoint']['completion_path'] == '/chat/completions'
     finally:
         server.shutdown()
         server.server_close()

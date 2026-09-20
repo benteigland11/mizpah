@@ -15,7 +15,8 @@ from typing import Any
 
 from cg.bp_subscription_provider_session_python.src.subscription_provider_session import LoginError, LoginPrompt
 
-from mizpah.providers import available_models, credential_path, missing_client_id, registry, session_for
+from mizpah.providers import (available_models, credential_path, local_profile, missing_client_id, registry, session_for,
+                              shipped_names)
 
 
 LLAMA_ONLY_GENERATION_KEYS = ('reasoning_format', 'reasoning_budget_tokens', 'chat_template_kwargs', 'top_k', 'min_p', 'seed')
@@ -35,12 +36,14 @@ def _emit(payload: dict[str, Any]) -> None:
 def cmd_list(args: argparse.Namespace) -> int:
     config = _config(args.config)
     store_path = credential_path(config)
+    shipped = shipped_names()
     rows = []
     for name in registry(config).names():
         session = session_for(name, config)
         status = session.status()
         status['blocked'] = missing_client_id(session.profile)
         status['api_base_url'] = session.profile.api_base_url
+        status['custom'] = name not in shipped
         rows.append(status)
     _emit(dict(credentials_file=str(store_path), providers=rows))
     return 0
@@ -170,6 +173,56 @@ def cmd_use(args: argparse.Namespace) -> int:
     return 0
 
 
+def _write_override(config_path: Path | None, name: str, override: dict[str, Any] | None) -> dict[str, Any]:
+    """Set (or with None, delete) mizpah.providers.<name> in the engine config; returns the raw file."""
+    if config_path is None:
+        _emit(dict(event='error', error='this command needs --config (the engine config to write into)'))
+        raise SystemExit(2)
+    raw = json.loads(config_path.read_text())
+    target = raw['mizpah'] if 'mizpah' in raw else raw
+    overrides = target.setdefault('providers', {})
+    if override is None:
+        overrides.pop(name, None)
+    else:
+        overrides[name] = override
+    config_path.write_text(json.dumps(raw, indent=2)+'\n')
+    return raw
+
+
+def cmd_add_local(args: argparse.Namespace) -> int:
+    """Add a server on this machine as a provider: a full no-auth profile in the engine config."""
+    if args.name in shipped_names():
+        _emit(dict(event='error', provider=args.name, error='that name is a shipped provider; pick another'))
+        return 2
+    try:
+        profile = local_profile(args.name, args.base_url, args.kind, args.display_name)
+    except ValueError as error:
+        _emit(dict(event='error', provider=args.name, error=str(error)))
+        return 2
+    _write_override(args.config, args.name, profile)
+    session = session_for(args.name, _config(args.config))
+    status = session.status()
+    status['api_base_url'] = session.profile.api_base_url
+    status['custom'] = True
+    _emit(dict(event='added', **status))
+    return 0
+
+
+def cmd_remove(args: argparse.Namespace) -> int:
+    """Remove a provider the person added (shipped ones cannot be removed, only overridden)."""
+    if args.provider in shipped_names():
+        _emit(dict(event='error', provider=args.provider, error='shipped providers cannot be removed'))
+        return 2
+    config = _config(args.config)
+    if args.provider not in registry(config).names():
+        _emit(dict(event='error', provider=args.provider, error='no such provider'))
+        return 2
+    session_for(args.provider, config).logout()
+    _write_override(args.config, args.provider, None)
+    _emit(dict(event='removed', provider=args.provider))
+    return 0
+
+
 def cmd_configure(args: argparse.Namespace) -> int:
     """Override a profile field in the engine config (mizpah.providers.<name>), e.g. a local server's address."""
     if args.config is None:
@@ -223,6 +276,15 @@ def main(argv: list[str] | None = None) -> int:
     configure.add_argument('--base-url', default=None); configure.add_argument('--default-model', default=None)
     configure.add_argument('--client-id', default=None)
     configure.set_defaults(run=cmd_configure)
+    add_local = commands.add_parser('add-local', help='add a server on this machine as a provider')
+    add_local.add_argument('name', help='short id, e.g. my_llama')
+    add_local.add_argument('--base-url', required=True)
+    add_local.add_argument('--kind', choices=('llama', 'openai'), default='openai',
+                           help='llama: llama.cpp server with exact /tokenize counting; openai: any /v1/chat/completions server')
+    add_local.add_argument('--display-name', default=None)
+    add_local.set_defaults(run=cmd_add_local)
+    remove = commands.add_parser('remove', help='remove a provider you added'); remove.add_argument('provider')
+    remove.set_defaults(run=cmd_remove)
     args = parser.parse_args(argv)
     return args.run(args)
 

@@ -2,7 +2,7 @@
   "meta": {
     "id": "backend-llm-provider-profiles-python",
     "name": "LLM Provider Profiles",
-    "version": "1.2.0",
+    "version": "1.2.1",
     "domain": "backend",
     "tags": [
       "llm",
@@ -25,7 +25,7 @@
   },
   "validation": {
     "engine_version": 1,
-    "validated_at": "2026-09-19T17:19:25.219506+00:00",
+    "validated_at": "2026-09-20T00:16:27.618139+00:00",
     "runtime": "python 3.12.13"
   }
 }
