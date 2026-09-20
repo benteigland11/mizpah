@@ -264,12 +264,27 @@ def score(project: Path) -> dict:
                 spans.append(max(hand)-min(hand))
     last = sorted(notes, key=lambda n: n.start)[-1]
     final = sorted({p % 12 for p in onsets[max(onsets)]}) if onsets else []
+    # Pedal placement, not count: a hold that lasts through a harmony change is mud (attempt 1: 32 of 32 holds,
+    # 187 of 254 bass changes smeared); a down that follows its onset within 50 ms is a clean change.
+    cc = sorted((c.time, c.value) for c in pm.instruments[0].control_changes if c.number == 64) if pm.instruments else []
+    holds, cur = [], None
+    for t, v in cc:
+        if v >= 64 and cur is None:
+            cur = t
+        elif v < 64 and cur is not None:
+            holds.append((cur, t)); cur = None
+    times = sorted(onsets)
+    bass = [min(onsets[t]) for t in times]
+    changes = [t for t, (a, b) in zip(times[1:], zip(bass, bass[1:])) if a % 12 != b % 12]
+    pedal_place = dict(pedal_holds=len(holds),
+                       holds_through_harmony_change=sum(1 for s, e in holds if any(s < c < e for c in changes)),
+                       downs_within_50ms_of_onset=sum(1 for s, _ in holds if any(0 <= s-t <= 0.05 for t in times)))
     # Texture, the part of "variety" a listener hears: how long notes are held and how many start per second
     # (attempt 1 was busy and scattered, attempt 2 slower and chordal; the counts above said the opposite).
     texture = dict(mean_note_seconds=round(sum(n.end-n.start for n in notes)/len(notes), 2), onsets_per_second=round(len(onsets)/max(duration, 0.1), 2),
                    notes_at_once_mean=round(sum(len(v) for v in onsets.values())/max(len(onsets), 1), 1),
                    pitch_range=[min(n.pitch for n in notes), max(n.pitch for n in notes)])
-    return dict(ok=True, file=str(mids[0].relative_to(project)), seconds=round(duration, 1), notes=len(notes), **texture,
+    return dict(ok=True, file=str(mids[0].relative_to(project)), seconds=round(duration, 1), notes=len(notes), **texture, **pedal_place,
                 velocity_min=min(velocities), velocity_max=max(velocities), velocity_span=max(velocities)-min(velocities),
                 pedal_changes=len(pedal), pedal_downs_per_bar=round(len(downs)/bars, 2), tempo_changes=len(tempi),
                 tempo_min=round(min(tempi), 1), tempo_max=round(max(tempi), 1),
