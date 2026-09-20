@@ -116,6 +116,19 @@ def commit_procedures(store: Path, message: str, author: str = 'mizpah worker <w
         return False
 
 
+def library_tick(config: dict[str, Any], store: Path) -> dict[str, Any]:
+    """A green gate is the playbook's clock: the ledger sees new procedures and retires what nobody has
+    touched for long enough (use it or lose it). Bootstrap procedures never retire. Never fails the run."""
+    import subprocess
+    try:
+        out = subprocess.run([config['mizpah']['playbook'], 'library', 'tick', '--protect', 'mizpah-'],
+                             capture_output=True, text=True, timeout=30,
+                             env=dict(os.environ, XDG_DATA_HOME=str(store.parent.parent)))
+        return json.loads(out.stdout) if out.returncode == 0 else {}
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return {}
+
+
 def _crew(spec: dict[str, Any]) -> dict[str, Any]:
     """A role's model, both as the report labels it and as its parts."""
     gen = spec.get('generation') or {}
@@ -411,6 +424,11 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                 try:
                     # One session root per task, so a re-bucketed task resumes its own session.
                     result = worker.run_task(config, project, root/'tasks'/task['id'], task['id'])
+                    if result.get('verdict') == 'complete':
+                        ticked = library_tick(config, Path(config['mizpah']['playbook_store']).expanduser())
+                        if ticked.get('retired'):
+                            result['playbook'] = dict(result.get('playbook') or {}, retired=ticked['retired'])
+                            (root/'tasks'/task['id']/'result.json').write_text(json.dumps(result, indent=1))
                     # Whatever the worker filed or improved in the playbook lands as one commit in its name.
                     commit_procedures(Path(config['mizpah']['playbook_store']).expanduser(),
                                       'work order '+task['id']+' · '+project.name+' ('+result.get('verdict', '?')+')',
@@ -529,7 +547,7 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
     report(stop)
     try:
         if not priorart.benchmark(project):   # a benchmark run is measured, not remembered
-            briefs.record(config, project, stop, cycles)   # the controller's library grows by one finished run
+            briefs.record(config, project, stop, cycles, session=root)   # the controller's library grows by one completed run
     except Exception as error:  # noqa: BLE001
         with log.open('a') as handle:
             handle.write(json.dumps(dict(at=time.time(), where='briefs.record', error=str(error)[:300]))+'\n')

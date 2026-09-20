@@ -31,8 +31,15 @@ def store_dir(config: dict[str, Any]) -> Path:
     return base
 
 
-def record(config: dict[str, Any], project: Path, stop: str, cycles: list[dict[str, Any]]) -> Path | None:
-    """Write this run's brief, unknowns and outcome to the store (one file per run)."""
+USABLE_STOPS = ('nothing_owed',)   # a run the controller may learn from ended on its own merits: complete
+
+
+def record(config: dict[str, Any], project: Path, stop: str, cycles: list[dict[str, Any]], session: Path | None = None) -> Path | None:
+    """Write this run's brief, unknowns and outcome to the store (one file per run) — only a run that completed.
+    Before this every exit was recorded (77 of 93 records were interrupted, blocked, stalled or crashed runs,
+    2026-09-20), and the controller's prior art drew on unknowns nothing had resolved."""
+    if stop not in USABLE_STOPS:
+        return None
     brief_path = project/layout.dirname(project)/'brief.json'
     if not brief_path.exists():
         return None
@@ -45,7 +52,7 @@ def record(config: dict[str, Any], project: Path, stop: str, cycles: list[dict[s
         unknowns.append(dict(id=u['id'], type=u.get('type'), claim=str(u.get('claim') or '')[:200],
                              cites=cites.group(1) if cites else None, resolved=u.get('status') == 'resolved'))
     tasks = [t for c in cycles for t in (c.get('tasks') or [])]
-    doc = dict(project=project.name, recorded_at=time.time(), stop=stop, title=brief.get('title'),
+    doc = dict(project=project.name, session=str(session) if session else None, recorded_at=time.time(), stop=stop, title=brief.get('title'),
                mission=brief.get('mission'), needs=list(brief.get('needs') or []), deliverables=list(brief.get('deliverables') or []),
                unknowns=unknowns, tasks=len(tasks), turns=sum(int(t.get('turns') or 0) for t in tasks),
                proposals=[str(p.get('summary') or '')[:200] for p in brief.get('proposals') or []])
@@ -62,15 +69,44 @@ def _stems(words: set[str]) -> set[str]:
     return {w[:5] for w in words}
 
 
+def _archived(doc: dict[str, Any]) -> bool:
+    """A record whose session was archived in the app is not usable: the sidebar is where sessions are managed."""
+    session = doc.get('session')
+    if not session:
+        return False
+    try:
+        return bool(json.loads((Path(session)/'run.json').read_text()).get('archived'))
+    except (OSError, ValueError):
+        return False
+
+
 def stored(config: dict[str, Any]) -> list[dict[str, Any]]:
-    """Every recorded run in the library, unreadable files skipped."""
+    """Every usable recorded run in the library: completed, not archived; unreadable files skipped."""
     out = []
     for path in sorted(store_dir(config).glob('*.json')):
         try:
-            out.append(json.loads(path.read_text()))
+            doc = json.loads(path.read_text())
         except (OSError, ValueError):
             continue
+        if doc.get('stop') not in USABLE_STOPS or _archived(doc):
+            continue
+        out.append(doc)
     return out
+
+
+def prune(config: dict[str, Any]) -> list[str]:
+    """Remove records the library must not read: runs that did not complete, and archived sessions. Returns the
+    file names removed."""
+    gone = []
+    for path in sorted(store_dir(config).glob('*.json')):
+        try:
+            doc = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if doc.get('stop') not in USABLE_STOPS or _archived(doc):
+            path.unlink()
+            gone.append(path.name)
+    return gone
 
 
 def related(config: dict[str, Any], brief: dict[str, Any], *, limit: int = 2) -> list[dict[str, Any]]:
