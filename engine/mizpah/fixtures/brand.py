@@ -253,23 +253,28 @@ def headline(project: Path) -> None:
         'Know the number of candidates in copy/headlines.json (each a headline and a subhead)',                                    # 1
         'Know the length in characters of the longest headline and of the longest subhead',                                        # 2
         'Know the number of banned words or marks (content/banned.json) across all candidates',                                     # 3
-        'Know, for each candidate, how many of the facts in content/facts.json its headline plus subhead carry, and the best count',  # 4
+        'Know, for each candidate, how many of the facts in content/facts.json its headline plus subhead carry, and the best '
+        'count — three or more is the target',                                                                                   # 4
         'Know whether every number any candidate states appears as a value in content/evidence.json',                               # 5
         'Know whether every candidate names the product ("Mizpah") in the headline or the subhead',                                 # 6
         'Know whether copy/headlines.md shows every candidate with its readings and a one-line note on what it leads with',        # 7
+        'Know how many candidates state at least one number from content/evidence.json (18 of 18, 233 procedures, one GPU) in '
+        'the headline or subhead — six or more of the ten is the target; a slogan without a number is the weaker candidate',      # 8
     ]
     deliverables = [
         '`copy/headlines.json`: ten candidates, each {"headline": ..., "subhead": ..., "leads_with": ...}, headlines at most 60 '
         'characters, subheads at most 140, from content/product.md and content/name.md, no banned word',
-        '`copy/headlines.md`: the candidates with their readings (needs 2 to 6) and a closing table; the choice is a person\'s',
+        '`copy/headlines.md`: the candidates with their readings (needs 2 to 6 and 8) and a closing table; the choice is a person\'s',
     ]
     brief(project, 'Headline candidates', 'Write ten headline and subhead pairs for mizpah.ai that carry the most of what '
           'matters in the fewest words, invent nothing, and report the readings so a person can choose.', needs, deliverables,
           budget=200, notes='Coverage is counted by fact: a fact is carried when its content words appear (stemmed) in the '
-                            'candidate. Fewer words at equal coverage is better; say so in the report.',
+                            'candidate. Fewer words at equal coverage is better; say so in the report. A number from '
+                            'evidence.json is worth more than an adjective: "18 of 18 readings correct" says what "trustworthy" '
+                            'cannot.',
           non_goals=['No `choice` between candidates', 'No `claim` that is not in content/ (numbers only from evidence.json)'])
     key_path(project).write_text(json.dumps(dict(fixture='headline', key=dict(by_need={1: 10, 3: 0, 5: True, 6: True, 7: True},
-                                                                             targets={2: '<=140', 4: '>=3'})), indent=1)+'\n')
+                                                                             targets={2: '<=140', 4: '>=3', 8: '>=6'})), indent=1)+'\n')
 
 
 def pitch_copy(project: Path) -> None:
