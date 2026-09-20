@@ -510,6 +510,7 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
         ops.notify(config, root, project.name+' stopped: '+stop,
                    str(tasks_run)+' tasks in '+str(round((time.time()-started)/3600, 2))+' h; report at '+str(root/'report.md'))
     result = dict(stop=stop, cycles=cycles, tasks_run=tasks_run, hours=round((time.time()-started)/3600, 2), leaks=ops.leak_summary(root),
+                  usage=ops.usage_summary(root),
                   blocked=[dict(id=t['id'], reason=t.get('blocked_reason')) for t in blocked(config, project)],
                   open_proposals=terra(config, project, 'brief', 'show').get('open_proposals'))
     (root/'loop.json').write_text(json.dumps(result, indent=1))

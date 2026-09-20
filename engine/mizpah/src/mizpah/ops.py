@@ -233,6 +233,57 @@ def reap_leaks(root: Path, live_roots: list[Path] = (), *, where: str = '') -> l
     return leaks
 
 
+def usage_summary(root: Path) -> list[dict[str, Any]]:
+    """Per (role, model): calls, prompt/completion/cached tokens and the cache share — the worker from its
+    session journals, the controller from its steps. What a person reads on the notice of completion."""
+    rows: dict[tuple[str, str], dict[str, Any]] = {}
+
+    def add(role: str, model: Any, prompt: Any, completion: Any, cached: Any) -> None:
+        key = (role, str(model or '?'))
+        r = rows.setdefault(key, dict(role=role, model=str(model or '?'), calls=0, prompt=0, completion=0, cached=0))
+        r['calls'] += 1
+        r['prompt'] += int(prompt or 0)
+        r['completion'] += int(completion or 0)
+        r['cached'] += int(cached or 0)
+    for step in _read_jsonl(Path(root)/'controller.jsonl'):
+        for u in step.get('usage') or []:
+            add('controller', u.get('model'), u.get('prompt'), u.get('completion'), u.get('cached'))
+    for journal in sorted(Path(root).glob('tasks/*/events/session.jsonl')):
+        try:
+            with journal.open() as handle:
+                for line in handle:
+                    if '"model_response"' not in line:
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except ValueError:
+                        continue
+                    if event.get('event_type') != 'model_response':
+                        continue
+                    payload = event.get('payload') or {}
+                    if payload.get('status') != 200:
+                        continue
+                    body = payload.get('body')
+                    if isinstance(body, str):
+                        try:
+                            body = json.loads(body)
+                        except ValueError:
+                            continue
+                    u = (body or {}).get('usage') or {}
+                    if not u:
+                        continue
+                    role = 'worker' if payload.get('purpose') in ('worker', 'handoff') else str(payload.get('purpose') or 'worker')
+                    add(role, (body or {}).get('model'), u.get('prompt_tokens'), u.get('completion_tokens'),
+                        (u.get('prompt_tokens_details') or {}).get('cached_tokens'))
+        except OSError:
+            continue
+    out = []
+    for r in rows.values():
+        r['cache_share'] = round(r['cached']/r['prompt'], 3) if r['prompt'] else None
+        out.append(r)
+    return sorted(out, key=lambda r: (r['role'] != 'controller', r['role'], r['model']))
+
+
 def leak_summary(root: Path) -> dict[str, Any]:
     """What the run leaked so far, by command: the report's line and the number a person watches."""
     rows = _read_jsonl(Path(root)/'leaks.jsonl')
@@ -278,6 +329,11 @@ def write_report(config: dict[str, Any], project: Path, root: Path, cycles: list
              '', 'engine '+_engine_version()+' · model '+model_label(config['worker'])
              +' · '+str(round((time.time()-started)/3600, 2))+' h · '
              +str(sum(len(c.get('tasks') or []) for c in cycles))+' tasks', '']
+    usage = usage_summary(root)
+    if usage:
+        lines.append('Models: '+'; '.join(r['role']+' '+r['model']+' — '+str(r['calls'])+' calls, '+f"{r['prompt']:,} in / {r['completion']:,} out"
+                                        +(', cache '+str(round(r['cache_share']*100))+'%' if r['cache_share'] is not None else '') for r in usage))
+        lines.append('')
     leaks = leak_summary(root)
     if leaks['count']:
         lines.append('**Leaked processes reaped: '+str(leaks['count'])+'** ('

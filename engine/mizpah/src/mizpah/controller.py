@@ -1208,10 +1208,29 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
     project = project.resolve()
     system = config['mizpah']['route_policy'] if mode == 'route' else config['mizpah']['eval_policy']
     client = model_client(config)
+    # What each call cost: model, prompt/completion/cached tokens, so the run can say what its controller spent.
+    usage: list[dict[str, Any]] = []
+
+    def observe_usage(kind: str, payload: dict[str, Any]) -> None:
+        if kind != 'model_response' or payload.get('status') != 200:
+            return
+        body = payload.get('body')
+        if isinstance(body, str):
+            try:
+                body = json.loads(body)
+            except ValueError:
+                body = {}
+        u = (body or {}).get('usage') or {}
+        if u:
+            usage.append(dict(model=(body or {}).get('model'), prompt=u.get('prompt_tokens'), completion=u.get('completion_tokens'),
+                              cached=(u.get('prompt_tokens_details') or {}).get('cached_tokens'),
+                              cost_ticks=u.get('cost_in_usd_ticks')))
+    previous_observer = getattr(client, 'observer', None)
+    client.observer = (lambda k, p: (observe_usage(k, p), previous_observer(k, p) if previous_observer else None)[0])
     observation = observe(config, project)
     refusals: list[str] = []
     accepted = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[], done=None, why='')
-    record: dict[str, Any] = dict(mode=mode, observation=observation, attempts=[])
+    record: dict[str, Any] = dict(mode=mode, observation=observation, attempts=[], usage=usage)
     looks = 0
     attempt = 0
     while attempt < 2:
