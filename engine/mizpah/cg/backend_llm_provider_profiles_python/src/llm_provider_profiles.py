@@ -11,6 +11,7 @@ caller supplies them (see the example for the shape).
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, fields
+import re
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
@@ -101,6 +102,8 @@ class ProviderProfile:
     token_metadata_fields: tuple[str, ...] = ()
     # Prepended to every listed model id when the completion endpoint wants a qualified name.
     model_id_prefix: str = ""
+    # Values for {field}s in the URLs that are settings rather than credential facts: a project, a region.
+    template_values: dict[str, str] = field(default_factory=dict)
     token_count: str = "usage_calibrated"
     context_window: int | None = None
     timeout_seconds: float = 600.0
@@ -133,22 +136,34 @@ class ProviderProfile:
         """
         return self._fill(self.api_base_url, metadata)
 
+    def unfilled_fields(self, metadata: Mapping[str, Any] | None = None) -> list[str]:
+        """``{field}``s in the address that neither the settings nor the credential (will) supply, in order.
+
+        A field named in ``token_metadata_fields`` arrives with the token, so it is never "unfilled" here."""
+        known = set(self.template_values) | set(metadata or {}) | set(self.token_metadata_fields) | {"base_host"}
+        found: list[str] = []
+        for name in re.findall(r"{([a-zA-Z_][a-zA-Z0-9_]*)}", self.api_base_url + " " + (self.models_path or "")):
+            if name not in known and name not in found:
+                found.append(name)
+        return found
+
     def _fill(self, template: str, metadata: Mapping[str, Any] | None) -> str:
         if "{" not in template:
             return template
-        # {base_host} is always available: the host of api_base_url, so a list URL can follow the address.
-        values = {"base_host": urlsplit(self.api_base_url).netloc}
+        values = {key: str(value) for key, value in self.template_values.items()}
         values.update({key: str(value) for key, value in (metadata or {}).items()})
+        # {base_host} is always available: the host of the (filled) address, so a list URL can follow it.
+        if template != self.api_base_url:
+            values["base_host"] = urlsplit(self._fill(self.api_base_url, metadata)).netloc
         for key, value in values.items():
             if "{" + key + "}" not in template:
                 continue
             if value.startswith(("http://", "https://")):
                 template = template.replace("https://{" + key + "}", "{" + key + "}").replace("http://{" + key + "}", "{" + key + "}")
             values[key] = value.rstrip("/")
-        try:
-            return template.format(**values).rstrip("/")
-        except (KeyError, IndexError):
-            return template
+        # Partial fill: a field nobody supplied stays as {field}, so the caller can see what is missing.
+        filled = re.sub(r"{([a-zA-Z_][a-zA-Z0-9_]*)}", lambda m: values.get(m.group(1), m.group(0)), template)
+        return filled.rstrip("/")
 
     def models_url_for(self, metadata: Mapping[str, Any] | None = None) -> str | None:
         """The list endpoint: a path under the base, or an absolute URL (some providers list elsewhere)."""

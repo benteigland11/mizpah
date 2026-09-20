@@ -101,6 +101,18 @@ def test_absolute_models_url_and_prefix() -> None:
         ProviderProfile("v", "V", ApiKeyAuth(), "https://x.example", "/c", models_path="ftp://x")
 
 
+def test_template_values_are_settings() -> None:
+    p = ProviderProfile("v", "V", ApiKeyAuth(), "https://{region}.example.org/v1/projects/{project}/endpoints/openapi", "/chat/completions",
+                        models_path="https://{base_host}/v1/publishers/models", template_values={"region": "eu"})
+    assert p.unfilled_fields() == ["project"]
+    assert p.base_url_for() == "https://eu.example.org/v1/projects/{project}/endpoints/openapi"
+    filled = profile_from_dict(dict(p.to_dict(), template_values={"region": "eu", "project": "p1"}))
+    assert filled.unfilled_fields() == []
+    assert filled.base_url_for() == "https://eu.example.org/v1/projects/p1/endpoints/openapi"
+    assert filled.models_url == "https://eu.example.org/v1/publishers/models"
+    assert filled.base_url_for({"project": "from-token"}) == "https://eu.example.org/v1/projects/from-token/endpoints/openapi"
+
+
 def test_validation() -> None:
     with pytest.raises(ValueError):
         ProviderProfile("n", "N", ApiKeyAuth(), "api.example.org", "/x")

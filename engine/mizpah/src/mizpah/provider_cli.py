@@ -33,11 +33,21 @@ def _emit(payload: dict[str, Any]) -> None:
     print(json.dumps(payload), flush=True)
 
 
+def _setting_names(profile: Any) -> list[str]:
+    """{field}s in the address that are settings (not credential facts), known or still needed."""
+    import re
+    names = re.findall(r'{([a-zA-Z_][a-zA-Z0-9_]*)}', profile.api_base_url)
+    return [n for i, n in enumerate(names) if n != 'base_host' and n not in profile.token_metadata_fields and n not in names[:i]]
+
+
 def _endpoint_view(config: dict[str, Any], session: Any) -> dict[str, Any]:
     """The editable shape of a provider's endpoint: profile fields plus the llama counting routes."""
     profile = session.profile
     override = ((config.get('mizpah') or {}).get('providers') or {}).get(profile.name) or {}
-    return dict(api_base_url=profile.api_base_url, completion_path=profile.completion_path, models_path=profile.models_path,
+    return dict(api_base_url=profile.base_url_for(), address_template=profile.api_base_url,
+                settings={name: profile.template_values.get(name, '') for name in _setting_names(profile)},
+                needs=profile.unfilled_fields(),
+                completion_path=profile.completion_path, models_path=profile.models_path,
                 wire=profile.wire, context_window=profile.context_window, timeout_seconds=profile.timeout_seconds,
                 static_headers=dict(profile.static_headers), tokenize_path=override.get('tokenize_path', '/tokenize'),
                 template_path=override.get('template_path', '/apply-template'), local_kind=override.get('local_kind'))
@@ -52,7 +62,8 @@ def cmd_list(args: argparse.Namespace) -> int:
         session = session_for(name, config)
         status = session.status()
         status['blocked'] = missing_client_id(session.profile)
-        status['api_base_url'] = session.profile.api_base_url
+        status['api_base_url'] = session.profile.base_url_for()
+        status['notes'] = session.profile.notes
         status['custom'] = name not in shipped
         status['endpoint'] = _endpoint_view(config, session)
         rows.append(status)
@@ -64,7 +75,8 @@ def cmd_status(args: argparse.Namespace) -> int:
     session = session_for(args.provider, _config(args.config))
     status = session.status()
     status['blocked'] = missing_client_id(session.profile)
-    status['api_base_url'] = session.profile.api_base_url
+    status['api_base_url'] = session.profile.base_url_for()
+    status['notes'] = session.profile.notes
     status['endpoint'] = _endpoint_view(_config(args.config), session)
     _emit(status)
     return 0
@@ -245,7 +257,7 @@ EDITABLE_FIELDS = {
     'context_window': int, 'timeout_seconds': float, 'static_headers': dict, 'credential_headers': dict,
     'reasoning_efforts': list, 'default_reasoning_effort': str, 'models': list, 'display_name': str,
     # the two llama.cpp counting routes; not profile fields, read by `use` for the native client
-    'tokenize_path': str, 'template_path': str,
+    'tokenize_path': str, 'template_path': str, 'template_values': dict,
     # dotted: auth.client_id, auth.scopes, ...
 }
 

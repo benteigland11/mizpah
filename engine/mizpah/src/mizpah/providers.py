@@ -160,16 +160,19 @@ def available_models(session: ProviderSession) -> tuple[list[dict[str, Any]], st
     return sorted(rows, key=lambda r: r['id'] != default), 'live'
 
 
+SETTING_LABELS = {'project': 'your Google Cloud project id', 'region': 'a region', 'resource': 'your resource name'}
+
+
 def missing_client_id(profile: ProviderProfile) -> str | None:
-    """A sentence for the user when a flow cannot start, else None."""
-    if 'YOUR-' in profile.api_base_url:
-        return (f'{profile.display_name} needs its address: run mizpah-provider configure {profile.name} '
-                f'--set api_base_url=... (or edit it on the sheet). {profile.notes}'.strip())
+    """One sentence for the user when a flow cannot start, else None."""
+    needed = profile.unfilled_fields()
+    if needed:
+        wants = ' and '.join(SETTING_LABELS.get(name, name) for name in needed)
+        return f'{profile.display_name} needs {wants}.'
     client_id = getattr(profile.auth, 'client_id', None)
     if profile.auth.kind in ('oauth_pkce', 'device_code') and not client_id:
         variable = CLIENT_ID_ENVIRONMENT.get(profile.name, '<none>')
-        return (f'{profile.display_name} needs an OAuth client id: set {variable}, or mizpah.providers.{profile.name}'
-                f'.auth.client_id in the engine config. {profile.notes}'.strip())
+        return f'{profile.display_name} needs an OAuth client id: set {variable} in the environment.'
     return None
 
 

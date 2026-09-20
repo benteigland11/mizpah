@@ -324,7 +324,8 @@ def test_configure_set_edits_any_endpoint_field(tmp_path: Path, capsys: pytest.C
         assert provider_cli.main(['--config', str(engine), 'status', 'box']) == 0
         status = json.loads(capsys.readouterr().out)
         assert status['display_name'] == 'Box 2' and status['endpoint'] == {
-            'api_base_url': base, 'completion_path': '/v2/chat', 'models_path': '/v2/models', 'wire': 'chat_completions',
+            'api_base_url': base, 'address_template': base, 'settings': {}, 'needs': [],
+            'completion_path': '/v2/chat', 'models_path': '/v2/models', 'wire': 'chat_completions',
             'context_window': 32768, 'timeout_seconds': 120, 'static_headers': {'X-Box': '1'}, 'tokenize_path': '/tok',
             'template_path': '/tpl', 'local_kind': 'llama'}
         assert provider_cli.main(['--config', str(engine), 'use', 'box', 'm']) == 0
@@ -350,11 +351,29 @@ def test_configure_set_edits_any_endpoint_field(tmp_path: Path, capsys: pytest.C
 
 def test_placeholder_addresses_block_and_new_kinds_load() -> None:
     reg = providers.registry({}, environ={})
-    assert 'needs its address' in (providers.missing_client_id(reg.get('vertex_ai')) or '')
-    assert 'needs its address' in (providers.missing_client_id(reg.get('azure_openai')) or '')
+    assert providers.missing_client_id(reg.get('vertex_ai')) == 'Google Vertex AI needs your Google Cloud project id.'
+    assert providers.missing_client_id(reg.get('azure_openai')) == 'Azure OpenAI needs your resource name.'
+    assert providers.missing_client_id(reg.get('bedrock_api')) is None  # region has a default
     qwen = reg.get('qwen_oauth')
     assert qwen.auth.kind == 'device_code' and qwen.auth.pkce and providers.missing_client_id(qwen) is None
     assert qwen.base_url_for({'resource_url': 'portal.qwen.ai'}) == 'https://portal.qwen.ai/v1'
     assert reg.get('bedrock_api').auth.environment_variable == 'AWS_BEARER_TOKEN_BEDROCK'
-    fixed = providers.registry({'mizpah': {'providers': {'vertex_ai': {'api_base_url': 'https://eu-aiplatform.googleapis.com/v1/projects/p/locations/eu/endpoints/openapi'}}}}, environ={})
-    assert providers.missing_client_id(fixed.get('vertex_ai')) is None
+    fixed = providers.registry({'mizpah': {'providers': {'vertex_ai': {'template_values': {'project': 'p1', 'region': 'eu'}}}}}, environ={})
+    vertex = fixed.get('vertex_ai')
+    assert providers.missing_client_id(vertex) is None
+    assert vertex.base_url_for() == 'https://eu-aiplatform.googleapis.com/v1/projects/p1/locations/eu/endpoints/openapi'
+    assert vertex.models_url == 'https://eu-aiplatform.googleapis.com/v1/publishers/google/models'
+
+
+def test_settings_are_set_one_at_a_time(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    engine = tmp_path / 'engine.json'
+    engine.write_text(json.dumps({'harness_config': 'harness.json'}))
+    assert provider_cli.main(['--config', str(engine), 'status', 'vertex_ai']) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out['endpoint']['settings'] == {'region': 'us-central1', 'project': ''} and out['endpoint']['needs'] == ['project']
+    assert provider_cli.main(['--config', str(engine), 'configure', 'vertex_ai', '--set', 'template_values.project=p1']) == 0
+    capsys.readouterr()
+    assert provider_cli.main(['--config', str(engine), 'status', 'vertex_ai']) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out['blocked'] is None and out['endpoint']['needs'] == [] and out['endpoint']['settings']['region'] == 'us-central1'
+    assert out['api_base_url'] == 'https://us-central1-aiplatform.googleapis.com/v1/projects/p1/locations/us-central1/endpoints/openapi'

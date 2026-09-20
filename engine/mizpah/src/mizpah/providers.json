@@ -431,7 +431,7 @@
         "kind": "api_key",
         "environment_variable": "AZURE_OPENAI_API_KEY"
       },
-      "api_base_url": "https://YOUR-RESOURCE.openai.azure.com/openai/v1",
+      "api_base_url": "https://{resource}.openai.azure.com/openai/v1",
       "completion_path": "/chat/completions",
       "wire": "chat_completions",
       "static_headers": {},
@@ -450,7 +450,7 @@
       "token_count": "usage_calibrated",
       "context_window": 128000,
       "timeout_seconds": 900,
-      "notes": "Set the address to your resource: configure azure_openai --set api_base_url=https://<resource>.openai.azure.com/openai/v1. The v1 endpoint is OpenAI-compatible and takes the key as api-key; deployments appear in /models."
+      "notes": "Your Azure OpenAI resource name is the subdomain of its endpoint; the key is from the resource's Keys page. Deployments appear as models."
     },
     {
       "name": "together_api",
@@ -810,12 +810,12 @@
     },
     {
       "name": "bedrock_api",
-      "display_name": "Amazon Bedrock (API key)",
+      "display_name": "Amazon Bedrock",
       "auth": {
         "kind": "api_key",
         "environment_variable": "AWS_BEARER_TOKEN_BEDROCK"
       },
-      "api_base_url": "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1",
+      "api_base_url": "https://bedrock-runtime.{region}.amazonaws.com/openai/v1",
       "completion_path": "/chat/completions",
       "wire": "chat_completions",
       "credential_headers": {
@@ -832,11 +832,14 @@
       "token_count": "usage_calibrated",
       "context_window": 128000,
       "timeout_seconds": 900,
-      "notes": "Bedrock API keys (console > Bedrock > API keys) as a bearer against the OpenAI-compatible endpoint; change the region in the address with configure. IAM SigV4 signing is not wired; use an API key. Models that only speak the Converse API are not reachable on this endpoint."
+      "notes": "A Bedrock API key (console > Bedrock > API keys) on the OpenAI-compatible endpoint. IAM/SigV4 signing is not wired, and models that only speak the Converse API are not reachable this way.",
+      "template_values": {
+        "region": "us-east-1"
+      }
     },
     {
       "name": "vertex_ai",
-      "display_name": "Google Vertex AI (gcloud login)",
+      "display_name": "Google Vertex AI",
       "auth": {
         "kind": "authorized_user_file",
         "path": "~/.config/gcloud/application_default_credentials.json",
@@ -844,7 +847,7 @@
         "expected_type": "authorized_user",
         "environment_variable": "GOOGLE_APPLICATION_CREDENTIALS"
       },
-      "api_base_url": "https://us-central1-aiplatform.googleapis.com/v1/projects/YOUR-PROJECT/locations/us-central1/endpoints/openapi",
+      "api_base_url": "https://{region}-aiplatform.googleapis.com/v1/projects/{project}/locations/{region}/endpoints/openapi",
       "completion_path": "/chat/completions",
       "wire": "chat_completions",
       "credential_headers": {
@@ -861,8 +864,11 @@
       "token_count": "usage_calibrated",
       "context_window": 1000000,
       "timeout_seconds": 900,
-      "notes": "Vertex's OpenAI-compatible endpoint with Application Default Credentials: run `gcloud auth application-default login`, then sign in here (the refresh token in that file is adopted). Set the project and region in the address (configure --set api_base_url=... or edit it on the sheet); the model list follows the address's host. Models are listed from the native publishers/google/models API and prefixed google/ as the endpoint wants. Service-account JSON keys are not supported (they need RSA signing); use a user login.",
-      "model_id_prefix": "google/"
+      "notes": "Uses the Google account you signed into gcloud with (`gcloud auth application-default login`); Vertex bills your own Google Cloud project, which needs the Vertex AI API enabled. Models are the ones Google publishes for the region. Service-account key files are not supported; sign in as a user.",
+      "model_id_prefix": "google/",
+      "template_values": {
+        "region": "us-central1"
+      }
     }
   ]
 }
