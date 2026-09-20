@@ -214,87 +214,11 @@ class FakeEngine implements Engine {
     );
   }
 
-  final Map<String, Map<String, dynamic>> _briefs = {
-    'mizpah': _brief(
-      title: 'Mizpah',
-      mission: 'A self-improving engineering loop over Terra, Cartograph and Playbook.',
-      needs: ['Controller mints unknowns and route tasks from brief vs map'],
-      deliverables: ['Flutter desktop app that holds the brief'],
-      enablers: [
-        {
-          'id': 'sidecar',
-          'title': 'Engine sidecar protocol',
-          'status': 'needed',
-        },
-        {
-          'id': 'inline_edit',
-          'title': 'Click-to-edit text line',
-          'status': 'graduated',
-          'path': 'app/lib/widgets/inline_text.dart',
-          'graduates_to': 'frontend-inline-editable-text-flutter',
-        },
-      ],
-      phases: [
-        {
-          'id': 'shell',
-          'title': 'Shell',
-          'description':
-              'App shell, brief editor and proposal queue on a fake engine.',
-          'status': 'open',
-        },
-        {
-          'id': 'loop',
-          'title': 'Loop',
-          'description':
-              'Controller and workers driving the route from the brief.',
-          'status': 'open',
-        },
-      ],
-      budgetPoints: 89,
-      proposals: [
-        {
-          'id': 'CR-002',
-          'summary':
-              'Workers need a sandbox before any probe can run; '
-              'this is an enabler, not a deliverable.',
-          'status': 'open',
-          'created_at': '2026-09-17T14:20:01Z',
-          'patch': {
-            'add_enabler': {
-              'id': 'sandbox',
-              'title': 'Sandboxed shell for worker probes',
-              'status': 'needed',
-            },
-          },
-        },
-        {
-          'id': 'CR-003',
-          'summary':
-              'Route tasks keep drifting into building an MCP '
-              'server. The README says the harness couples tools directly.',
-          'status': 'open',
-          'created_at': '2026-09-17T15:20:00Z',
-          'patch': {'add_non_goal': 'MCP servers or plugin manifests'},
-        },
-        {
-          'id': 'CR-001',
-          'summary': 'Initial budget felt low for three forked tools.',
-          'status': 'rejected',
-          'created_at': '2026-09-17T11:00:00Z',
-          'patch': {'note': 'Raise budget_points to 144'},
-        },
-      ],
-    ),
-    'scratch': _brief(
-      title: 'Scratch project',
-      mission: 'Throwaway brief for trying the editor.',
-    ),
-  };
+  /// Run projects found on disk; nothing is seeded — the console shows
+  /// only what the engine has actually run.
+  final Map<String, Map<String, dynamic>> _briefs = {};
 
-  final _routes = <String, FakeRoute>{
-    'mizpah': FakeRoute.mizpah(),
-    'scratch': FakeRoute([]),
-  };
+  final _routes = <String, FakeRoute>{};
 
   Map<String, dynamic> _status(String id) {
     final b = _briefs[id]!;
@@ -414,10 +338,7 @@ class FakeEngine implements Engine {
   Stream<List<Turn>> watchTranscript(String id, String session) =>
       (_loops[id] ??= FakeLoop()).transcript(session);
 
-  final _paths = <String, String>{
-    'mizpah': '/home/user/mizpah',
-    'scratch': '/home/user/scratch',
-  };
+  final _paths = <String, String>{};
 
   @override
   Future<List<BriefSummary>> listBriefs() async => [
@@ -476,33 +397,6 @@ class FakeEngine implements Engine {
     }
     _briefs[id] = stored;
   }
-
-  static Map<String, dynamic> _brief({
-    required String title,
-    required String mission,
-    List<String> needs = const [],
-    List<String> nonGoals = const [],
-    List<String> deliverables = const [],
-    List<Map<String, String>> enablers = const [],
-    List<Map<String, String>> phases = const [],
-    int? budgetPoints,
-    List<Map<String, Object>> proposals = const [],
-  }) => {
-    'schema_version': 1,
-    'id': 'brief',
-    'title': title,
-    'version': 1,
-    'status': 'draft',
-    'mission': mission,
-    'budget_points': budgetPoints,
-    'budget_notes': '',
-    'needs': needs,
-    'non_goals': nonGoals,
-    'deliverables': deliverables,
-    'enablers': enablers,
-    'phases': phases,
-    'proposals': proposals,
-  };
 
   /// JSON with keys sorted at every level, so order never reads as a change.
   static String _canonical(Object? v) => jsonEncode(_sorted(v));
