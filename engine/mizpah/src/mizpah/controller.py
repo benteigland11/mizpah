@@ -839,14 +839,26 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             if 'creates ' in notes or 'cites deliverable:' in notes:
                 return True
             text = str(u.get('claim') or '')
+            # The reading's source is the file it is about, whatever the claim's words (the nocturne gym's
+            # left_hand_wide_rolling_compound reads piece.mid and says "the left hand", 2026-09-20).
+            source = re.search(r'source ([\w./-]+)', notes)
+            if source:
+                text += ' '+source.group(1)
             for kind, index in re.findall(r'cites (need|deliverable):(\d+)', notes):
                 entries = brief_entries[kind]
                 text += ' '+(entries[int(index)-1] if 0 < int(index) <= len(entries) else '')
             return project is not None and any(source_exists(project, f) or any(True for _ in project.glob('**/'+f))
                                                for f in re.findall(r'[\w./-]+\.[A-Za-z0-9]+', text))
+        # A boolean that reads false about a file the project makes is a reading the file must be changed to pass,
+        # and a task on its own id is the repair: the reading is reopened and taken again after. (A false reading
+        # about given data is the brief being wrong — a proposal, not a task — and stays refused.)
         false_artifacts = {k['id'] for k in observation['knowns'] if k['type'] == 'boolean' and k.get('rate') is not None
                            and float(k['rate']) < 0.5 and about_a_file(k['id'])}
-        bad = [u for u in ids if u not in minted and u not in open_unknowns and u not in stale_ids and u not in false_artifacts
+        for u in ids:
+            if u in false_artifacts and u not in open_unknowns and u not in minted and u not in reopened:
+                reopened[u] = u
+                noted.append('unknown '+u+': reads false; reopened for the repair task '+tid+' to take again')
+        bad = [u for u in ids if u not in minted and u not in open_unknowns and u not in stale_ids
                and u not in reopened]
         if bad:
             kept = [u for u in ids if u not in bad]

@@ -140,3 +140,27 @@ def test_a_note_from_the_person_is_put_first_and_read_once(gym: Path, tmp_path: 
     controller.mark_notes_read(root, notes)
     assert controller.operator_notes(root) == []
     assert controller.operator_notes(root, unread_only=False)[0]['read'] is True
+
+
+def test_a_task_on_a_false_reading_reopens_it(gym: Path) -> None:
+    """The refusal text says 'route its own id again'; doing so was refused as 'neither minted nor open' and the
+    nocturne gym stalled. A task naming a resolved-false boolean reopens it."""
+    (gym/'piece.mid').write_bytes(b'MThd')
+    observation = controller.observe(CONFIG, gym)
+    first = dict(unknowns=[
+        dict(id='left_hand_rolls', cites='need:2', type='boolean', source='piece.mid',
+             claim='the left hand of piece.mid is a wide rolling figure', evidence_needed='read the bass pattern'),
+    ], tasks=[dict(id='validate_lh', unknowns=['left_hand_rolls'], bucket='low', title='validate')])
+    accepted, refusals = controller.guard(first, observation, gym)
+    assert not refusals, refusals
+    controller.apply(CONFIG, gym, accepted)
+    terra(gym, 'route', 'cancel', 'validate_lh', '--reason', 'done by hand in the test')
+    path = gym/'.terra'/'map'/'unknowns'/'left_hand_rolls.json'
+    doc = json.loads(path.read_text()); doc['status'] = 'resolved'; path.write_text(json.dumps(doc))
+    observation = controller.observe(CONFIG, gym)
+    # The known reads false (planted: observe() reads knowns from the map; a boolean with rate 0).
+    observation['knowns'].append(dict(id='left_hand_rolls', type='boolean', rate=0.0, stale=False))
+    again = dict(unknowns=[], tasks=[dict(id='repair_lh', unknowns=['left_hand_rolls'], bucket='medium', title='repair the left hand')])
+    accepted, refusals = controller.guard(again, observation, gym)
+    assert not refusals, refusals
+    assert accepted['reopen'] == ['left_hand_rolls'] and accepted['tasks'][0]['unknowns'] == ['left_hand_rolls']
