@@ -103,7 +103,7 @@ def melody_bass() -> Path:
             'The tune is louder than what is under it, and each phrase has a shape.',
         ],
         deliverables=['piece.mid', 'notes.md'],
-        budget=60, non_goals=NON_GOALS)
+        budget=120, non_goals=NON_GOALS)
 
 
 def voice_leading() -> Path:
@@ -116,7 +116,7 @@ def voice_leading() -> Path:
             'The top voice carries, and the pedal follows the chord changes.',
         ],
         deliverables=['piece.mid', 'notes.md'],
-        budget=60, non_goals=NON_GOALS)
+        budget=120, non_goals=NON_GOALS)
 
 
 def pedal_dynamics() -> Path:
@@ -134,7 +134,7 @@ def pedal_dynamics() -> Path:
             'Timing: bars 1-8 at a steady tempo within 2%; the final bar at least 20% slower.',
         ],
         deliverables=['piece.mid', 'notes.md: the velocity and pedal plan per bar'],
-        budget=50, non_goals=NON_GOALS)
+        budget=120, non_goals=NON_GOALS)
 
 
 def rubato_phrase() -> Path:
@@ -152,7 +152,7 @@ def rubato_phrase() -> Path:
             'The accompaniment never exceeds the melody in velocity in any bar.',
         ],
         deliverables=['piece.mid', 'notes.md: the timing map (bar, beat, stretch) and the velocity arc'],
-        budget=50, non_goals=NON_GOALS)
+        budget=120, non_goals=NON_GOALS)
 
 
 def nocturne_lh() -> Path:
@@ -165,7 +165,7 @@ def nocturne_lh() -> Path:
             'The accompaniment stays under the melody, and the pedal follows the harmony.',
         ],
         deliverables=['piece.mid', 'notes.md'],
-        budget=60, non_goals=NON_GOALS)
+        budget=120, non_goals=NON_GOALS)
 
 
 def voicing_touch() -> Path:
@@ -184,7 +184,7 @@ def voicing_touch() -> Path:
             'Pedal changes with every chord; the last bar has a ritardando of at least 15%.',
         ],
         deliverables=['piece.mid', 'notes.md: the voicings by chord and how the velocities were shaped'],
-        budget=50, non_goals=NON_GOALS)
+        budget=120, non_goals=NON_GOALS)
 
 
 MAKERS = dict(benchmark=benchmark, melody_bass=melody_bass, voice_leading=voice_leading,

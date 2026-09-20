@@ -102,7 +102,7 @@ def value_scale() -> Path:
             ORDER,
         ],
         deliverables=['sketch.svg', 'sketch.png', 'strokes.json', 'plan.md: stroke spacing and width per step'],
-        budget=40, non_goals=NON_GOALS)
+        budget=120, non_goals=NON_GOALS)
 
 
 def perspective_house() -> Path:
@@ -124,7 +124,7 @@ def perspective_house() -> Path:
             ORDER,
         ],
         deliverables=['sketch.svg', 'sketch.png', 'strokes.json', 'plan.md: the vanishing points and the house corner in sheet coordinates'],
-        budget=50, non_goals=NON_GOALS)
+        budget=120, non_goals=NON_GOALS)
 
 
 def composition() -> Path:
@@ -145,7 +145,7 @@ def composition() -> Path:
             ORDER,
         ],
         deliverables=['sketch.svg', 'sketch.png', 'strokes.json', 'plan.md: the four placements and the chosen one'],
-        budget=40, non_goals=NON_GOALS)
+        budget=120, non_goals=NON_GOALS)
 
 
 def texture() -> Path:
@@ -164,7 +164,7 @@ def texture() -> Path:
             LINE, ORDER,
         ],
         deliverables=['sketch.svg', 'sketch.png', 'strokes.json', 'plan.md: the stroke recipe per material'],
-        budget=40, non_goals=NON_GOALS)
+        budget=120, non_goals=NON_GOALS)
 
 
 MAKERS = dict(benchmark=benchmark, value_scale=value_scale, perspective_house=perspective_house,
