@@ -10,6 +10,7 @@ import fnmatch
 import hashlib
 import json
 import os
+from types import SimpleNamespace
 import shlex
 from pathlib import Path
 from typing import Any, Iterator
@@ -163,6 +164,32 @@ class ReviewLimitExceeded(RuntimeError):
 
 class ContextCapacityExceeded(ValueError):
     """The request cannot fit after preserving its fixed inputs and output headroom."""
+
+
+def expand_model_requests(events: list[Any]) -> list[Any]:
+    """The journal's model_request events with every body whole again: a `body_delta` is the shared prefix
+    of the request it names plus its own tail. Events are returned in order, payloads copied."""
+    texts: dict[str, str] = {}
+    out = []
+    for event in events:
+        if getattr(event, 'event_type', None) != 'model_request':
+            out.append(event)
+            continue
+        payload = dict(event.payload)
+        request_id = str(payload.get('request_id') or '')
+        delta = payload.pop('body_delta', None)
+        if delta is not None:
+            base = texts.get(str(delta.get('base')))
+            if base is None:
+                raise ValueError('model_request '+request_id+' is a delta of '+str(delta.get('base'))+', which the journal does not hold')
+            text = base[:int(delta['shared'])]+str(delta.get('tail') or '')
+            payload['body'] = json.loads(text)
+            texts[request_id] = text
+        elif isinstance(payload.get('body'), dict):
+            texts[request_id] = json.dumps(payload['body'], sort_keys=True, allow_nan=False)
+        out.append(SimpleNamespace(**{**vars(event), 'payload': payload}) if not isinstance(event, dict)
+                   else dict(event, payload=payload))
+    return out
 
 
 def _state_digest(state: dict[str, Any]) -> str:
@@ -386,6 +413,9 @@ class FocusedSession:
         self.journal = SessionEventLog(self.root/'events')
         self.revision = 0
         self.state: dict[str, Any] = {}
+        # The last model request journaled, for the next one's delta (in memory only: the first request
+        # after a restore is journaled whole).
+        self._last_request: dict[str, tuple[str, str]] = {}   # by purpose: worker and controller prompts are separate streams
 
     @classmethod
     def create(cls, root: str | Path, settings: SessionSettings, *, worker: ModelClient,
@@ -571,13 +601,36 @@ class FocusedSession:
         A subclass (a hosted provider with its own counting and capabilities) is kept: the copy is made
         through its class with the same attributes, not rebuilt as a plain ModelClient."""
         def observer(kind: str, payload: dict[str, Any]) -> None:
-            self._event(kind, payload)
+            self._event(kind, self._delta_request(payload) if kind == 'model_request' else payload)
             if original.observer:
                 original.observer(kind, payload)
         copy = object.__new__(type(original))
         copy.__dict__.update(original.__dict__)
         copy.observer = observer
         return copy
+
+    def _delta_request(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """A request body journaled as its difference from the previous request: the prompt is the same
+        prefix turn after turn (that is what the cache hit rate measures), so the journal keeps the shared
+        length and the new tail instead of the whole prompt again — 117 KB a turn on a long task, 90% of it
+        repeated. `expand_model_requests` reads it back verbatim."""
+        body = payload.get('body')
+        if not isinstance(body, dict):
+            return payload
+        text = json.dumps(body, sort_keys=True, allow_nan=False)
+        request_id = str(payload.get('request_id') or '')
+        purpose = str(payload.get('purpose') or '')
+        previous = self._last_request.get(purpose)
+        self._last_request[purpose] = (request_id, text)
+        if previous is None:
+            return payload
+        shared = len(os.path.commonprefix([previous[1], text]))
+        if shared < len(text)//4:
+            return payload
+        out = dict(payload)
+        del out['body']
+        out['body_delta'] = dict(base=previous[0], shared=shared, tail=text[shared:])
+        return out
 
     def _guidance_message(self) -> list[dict[str, Any]]:
         text = self.progress.applied_guidance() if self.settings.reference is not None else ''

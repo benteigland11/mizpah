@@ -1546,3 +1546,25 @@ def test_write_and_edit_refuse_protected_paths(tmp_path):
     outcomes = [json.loads(m['content']) for m in transport.requests[-1]['messages'] if m.get('role') == 'tool']
     assert [o['status'] for o in outcomes] == ['error', 'error', 'ok', 'error']
     assert all('a tool owns' in o['error'] for o in outcomes if o['status'] == 'error')
+
+
+def test_model_requests_are_journaled_as_deltas_and_read_back_whole(tmp_path):
+    from src.focused_agent_session import expand_model_requests
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, total=6)
+    captured = []
+    for client in (worker, controller):
+        client.observer = lambda kind, payload: captured.append(deepcopy(payload)) if kind == 'model_request' else None
+    session = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, controller=controller)
+    for _ in range(4):
+        session.step()
+    events = session.journal.read_strict('session')
+    journaled = [e for e in events if e.event_type == 'model_request']
+    assert 'body' in journaled[0].payload and 'body_delta' not in journaled[0].payload
+    assert any('body_delta' in e.payload for e in journaled[1:]), 'a repeated prompt is journaled as its difference'
+    expanded = [e.payload for e in expand_model_requests(events) if e.event_type == 'model_request']
+    captured = [c for c in captured if isinstance(c.get('body'), dict)]   # the capabilities probe is not a request body
+    expanded = [e for e in expanded if isinstance(e.get('body'), dict)]
+    assert len(expanded) == len(captured)
+    for got, sent in zip(expanded, captured):
+        assert 'body_delta' not in got
+        assert json.dumps(got['body'], sort_keys=True) == json.dumps(sent['body'], sort_keys=True)
