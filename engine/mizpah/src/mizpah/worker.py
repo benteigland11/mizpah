@@ -25,6 +25,8 @@ import tarfile
 import time
 from typing import Any
 
+from . import layout
+
 from cg.bp_focused_agent_session_python.src import (
     ControllerSettings, EndpointConfig, FocusedSession, ModelClient, ReviewPolicy, SandboxedShell, SessionPolicy,
     NetworkPolicy, ServiceLimits, SessionSettings, ShellConfig, ShellLimits, llama_model_client,
@@ -39,7 +41,13 @@ WRITEBACK_EXCLUDE = ('.tool-output/', '.session-history', PLAYBOOK_PREFIX+'/')
 PACK_EXCLUDE = ('.git', '.venv', '__pycache__')
 # Bind mode: the project directory is /work; these stay snapshot-managed (tmpfs over the bind, tar in, write-back
 # out with the map's entitlements), so a worker's reach into `.terra/` is exactly what it is in snapshot mode.
-STATE_DIRS = ('.terra', PLAYBOOK_PREFIX, '.svc', '.tool-output', '.session-history')
+STATE_DIRS = (PLAYBOOK_PREFIX, '.svc', '.tool-output', '.session-history')
+
+
+def state_dirs(project: Path) -> tuple[str, ...]:
+    """The project's state directory (its `.mizpah` or legacy `.terra`) and the worker's own: in bind mode
+    these stay snapshot-managed under a tmpfs over the bind."""
+    return (layout.dirname(project),)+STATE_DIRS
 
 
 def bind_mode(config: dict[str, Any]) -> bool:
@@ -99,7 +107,8 @@ def load_config(path: str | Path) -> dict[str, Any]:
 
 def terra(config: dict[str, Any], project: Path, *args: str) -> dict[str, Any]:
     """Run one JSON-printing terra command against the project and return its data."""
-    process = subprocess.run([config['mizpah']['terra'], *args], cwd=project, capture_output=True, text=True)
+    process = subprocess.run([config['mizpah']['terra'], *args], cwd=project, capture_output=True, text=True,
+                             env=dict(os.environ, **layout.terra_env(project)))
     text = process.stdout.strip()
     start = text.find('{')
     if start < 0:
@@ -146,12 +155,12 @@ def task_unknown_ids(task: dict[str, Any]) -> list[str]:
 
 
 def read_unknown(project: Path, unknown_id: str, map_id: str | None = None) -> dict[str, Any]:
-    base = project/'.terra'/'map' if map_id in (None, 'global') else project/'.terra'/'map'/'sessions'/map_id
+    base = project/layout.dirname(project)/'map' if map_id in (None, 'global') else project/layout.dirname(project)/'map'/'sessions'/map_id
     return json.loads((base/'unknowns'/(unknown_id+'.json')).read_text())
 
 
 def read_known(project: Path, known_id: str, map_id: str | None = None) -> dict[str, Any] | None:
-    base = project/'.terra'/'map' if map_id in (None, 'global') else project/'.terra'/'map'/'sessions'/map_id
+    base = project/layout.dirname(project)/'map' if map_id in (None, 'global') else project/layout.dirname(project)/'map'/'sessions'/map_id
     path = base/'knowns'/(known_id+'.json')
     return json.loads(path.read_text()) if path.exists() else None
 
@@ -159,11 +168,11 @@ def read_known(project: Path, known_id: str, map_id: str | None = None) -> dict[
 def open_task_map(config: dict[str, Any], project: Path, task: dict[str, Any]) -> str:
     """A session map for the task with a copy of its unknown; unknowns do not read through."""
     map_id = task_map_id(task)
-    if not (project/'.terra'/'map'/'sessions'/map_id).exists():
+    if not (project/layout.dirname(project)/'map'/'sessions'/map_id).exists():
         terra(config, project, 'map', 'create', map_id, '--purpose', 'route task '+task['id'], '--parent', 'global')
     for unknown_id in task_unknown_ids(task):
         unknown = read_unknown(project, unknown_id)
-        if (project/'.terra'/'map'/'sessions'/map_id/'unknowns'/(unknown['id']+'.json')).exists():
+        if (project/layout.dirname(project)/'map'/'sessions'/map_id/'unknowns'/(unknown['id']+'.json')).exists():
             continue
         args = ['--map', map_id, 'unknown', 'create', unknown['id'], '--claim', unknown['claim'],
                 '--evidence', unknown['evidence_needed'], '--type', unknown['type']]
@@ -184,7 +193,7 @@ def scaffold_probes(config: dict[str, Any], project: Path, task: dict[str, Any])
     made = []
     for unknown_id in task_unknown_ids(task):
         probe_id = unknown_id+'_probe'
-        if (project/'.terra'/'map'/'probes'/probe_id/'probe.json').exists():
+        if (project/layout.dirname(project)/'map'/'probes'/probe_id/'probe.json').exists():
             continue
         unknown = read_unknown(project, unknown_id)
         args = ['probe', 'create', probe_id, '--purpose', unknown['claim'][:200], '--kind', 'run', '--measure', unknown_id]
@@ -203,14 +212,14 @@ def protected_probes(project: Path, task: dict[str, Any]) -> tuple[str, ...]:
     """Probes that predate this task and are not its own: instruments other knowns cite, not this worker's to change.
     The task's scaffolded probes exist before the session starts, but they are exactly what the worker fills in."""
     own = {uid+'_probe' for uid in task_unknown_ids(task)}
-    return tuple(sorted(p.name for p in (project/'.terra'/'map'/'probes').iterdir() if p.is_dir() and p.name not in own))
+    return tuple(sorted(p.name for p in (project/layout.dirname(project)/'map'/'probes').iterdir() if p.is_dir() and p.name not in own))
 
 
 def probe_inputs(project: Path, task: dict[str, Any]) -> dict[str, list[str]]:
     """Unknown id → the knowns its scaffolded probe declares as inputs (only those that declare any)."""
     result = {}
     for uid in task_unknown_ids(task):
-        meta = project/'.terra'/'map'/'probes'/(uid+'_probe')/'probe.json'
+        meta = project/layout.dirname(project)/'map'/'probes'/(uid+'_probe')/'probe.json'
         if meta.exists():
             declared = json.loads(meta.read_text()).get('inputs') or {}
             if declared:
@@ -227,14 +236,14 @@ def known_ids_named(project: Path, unknown: dict[str, Any]) -> list[str]:
              if '_' in word and read_known(project, word) is not None]
     words = set(re.findall(r'[a-z][a-z0-9_]*', text.lower()))
     own = set(known_words(str(unknown.get('id') or '')))
-    loose = [path.stem for path in sorted((project/'.terra'/'map'/'knowns').glob('*.json'))
+    loose = [path.stem for path in sorted((project/layout.dirname(project)/'map'/'knowns').glob('*.json'))
              if path.stem not in exact and path.stem != unknown.get('id') and names_known(words, path.stem)
              and not set(known_words(path.stem)) <= own]
     return exact+loose
 
 
 def render_assignment(task: dict[str, Any], unknowns: list[dict[str, Any]], map_id: str,
-                      inputs: dict[str, list[str]] | None = None) -> str:
+                      inputs: dict[str, list[str]] | None = None, state_dirname: str = layout.STATE_DIRNAME) -> str:
     """The task, its unknowns and the map: nothing about method and nothing from the brief.
     `inputs` maps an unknown id to the knowns its probe declares; the worker reads them from ctx["inputs"]."""
     lines = ['Route task `'+task['id']+'` (bucket '+task['bucket']+': '+BUCKET_MODES.get(task['bucket'], '')+'): '+task['title'],
@@ -257,7 +266,7 @@ def render_assignment(task: dict[str, Any], unknowns: list[dict[str, Any]], map_
                  'the knowns you graduate live there.')
     ids = [u['id'] for u in unknowns]
     lines.append('Your probes already exist, one per unknown, each measuring only its own quantity: '+
-                 ', '.join('`.terra/map/probes/'+i+'_probe/`' for i in ids)+'. For each, write its `measure.py` '
+                 ', '.join('`'+state_dirname+'/map/probes/'+i+'_probe/`' for i in ids)+'. For each, write its `measure.py` '
                  '(a few lines returning {"<unknown id>": value}), validate, run. Do not create other probes. '
                  'A probe runs with the project root as its working directory: open files and run commands by '
                  'relative path; do not derive the root from `__file__` (measure.py is four levels down).')
@@ -297,7 +306,7 @@ def describe_unknown(unknown: dict[str, Any]) -> list[str]:
 
 def render_reference(project: Path, task: dict[str, Any], unknowns: list[dict[str, Any]]) -> str:
     """What the check-in controller holds: the brief entries cited, the task, the unknowns. Nothing else."""
-    brief = json.loads((project/'.terra'/'brief.json').read_text())
+    brief = json.loads((project/layout.dirname(project)/'brief.json').read_text())
     lines = []
     seen = set()
     for unknown in unknowns:
@@ -365,7 +374,7 @@ def writeback(snapshot: bytes, project: Path, task: dict[str, Any], map_id: str,
     working on the project meanwhile keeps its unknowns, tasks and proposals.
     """
     files = _members(snapshot)
-    terra_dir = '.terra/'
+    terra_dir = layout.dirname(project)+'/'
     written: list[str] = []
 
     def put(name: str) -> None:
@@ -481,7 +490,7 @@ def _harvest_playbook(snapshot: bytes, store: Path, config: dict[str, Any],
 
 def worker_blocked(project: Path, task: dict[str, Any]) -> str | None:
     """The reason if the worker itself blocked its task through Terra; None otherwise."""
-    route = json.loads((project/'.terra'/'route.json').read_text())
+    route = json.loads((project/layout.dirname(project)/'route.json').read_text())
     entry = next((t for t in route['tasks'] if t['id'] == task['id']), None)
     if entry and entry['status'] == 'blocked' and entry.get('blocked_reason'):
         return str(entry['blocked_reason'])
@@ -654,7 +663,7 @@ def task_gate(config: dict[str, Any], project: Path, task: dict[str, Any], map_i
     problems = []
     if root is not None:
         problems += widget_problems(config, project, root)
-    route = json.loads((project/'.terra'/'route.json').read_text())
+    route = json.loads((project/layout.dirname(project)/'route.json').read_text())
     entry = next((t for t in route['tasks'] if t['id'] == task['id']), None)
     if entry is None:
         return dict(ok=False, problems=['task vanished from the route'], knowns=[], runs=[])
@@ -732,10 +741,10 @@ def remeasure(config: dict[str, Any], project: Path, root: Path, known_ids: list
     scratch = root/'remeasure'
     scratch.mkdir(parents=True, exist_ok=True)
     network = NetworkPolicy(**sandbox['network']) if sandbox.get('network') else None
-    bound = dict(workspace_dir=str(project.resolve()), cache_dirs=cache_dirs(config), state_dirs=STATE_DIRS) if bind_mode(config) else {}
+    bound = dict(workspace_dir=str(project.resolve()), cache_dirs=cache_dirs(config), state_dirs=state_dirs(project)) if bind_mode(config) else {}
     shell = SandboxedShell(ShellConfig(**(config['shell'] | dict(
         scratch_root=str(scratch), limits=ShellLimits(**config['shell']['limits']),
-        read_only_binds=tuple(sandbox['read_only_binds']), environment=dict(sandbox['environment']),
+        read_only_binds=tuple(sandbox['read_only_binds']), environment=dict(sandbox['environment'], **layout.terra_env(project)),
         share_network=bool(sandbox.get('share_network', False)) and network is None, network=network,
         refused_paths=tuple(sandbox.get('refused_paths') or ()), refused_patterns=REFUSED_PATTERNS) | bound)))
     try:
@@ -751,7 +760,7 @@ def remeasure(config: dict[str, Any], project: Path, root: Path, known_ids: list
                 continue
             expected = extract_known_value(known)
             result = shell.run('terra probe run '+probe_id+' --to \'{"kind": "file"}\' --json 2>/dev/null; '
-                               'cat .terra/map/probes/'+probe_id+'/_last_reading.json 2>/dev/null', workspace,
+                               'cat '+layout.dirname(project)+'/map/probes/'+probe_id+'/_last_reading.json 2>/dev/null', workspace,
                                timeout_seconds=min(80, config['shell']['limits']['command_seconds']),
                                **(dict(detached=True) if bind_mode(config) else {}))
             reading = None
@@ -774,6 +783,89 @@ def remeasure(config: dict[str, Any], project: Path, root: Path, known_ids: list
         shell.close()
     (root/'remeasure.jsonl').open('a').write(json.dumps(dict(at=time.time(), knowns=known_ids, problems=problems))+'\n')
     return problems
+
+
+def refresh_stale(config: dict[str, Any], project: Path, root: Path) -> dict[str, list[str]]:
+    """The host re-takes every global known that went stale because its inputs moved — a file it depends on
+    was rewritten, a known its probe declared changed — and, when the fresh reading reproduces the value,
+    links the run so the known is live again with its dependencies restamped. A reading that no longer
+    agrees is left stale with the fresh value recorded for the eval: the artifact changed under it and the
+    reading is owed again. Clearing a cascade cost headline3 a whole worker session (29 turns, still red)
+    for what is a mechanical re-run; the worker never touches this path.
+
+    The probe runs in a fresh sandbox exactly as re-measurement does; its run directory is harvested from the
+    sandbox's tree into the project and linked by the host's own terra."""
+    out: dict[str, list[str]] = dict(refreshed=[], changed=[], failed=[])
+    listing = subprocess.run([config['mizpah']['terra'], 'known', 'list', '--json'], cwd=project, capture_output=True, text=True,
+                             env=dict(os.environ, **layout.terra_env(project)))
+    try:
+        rows = json.loads(listing.stdout[listing.stdout.find('['):])
+    except ValueError:
+        out['failed'].append('known list: '+(listing.stderr or listing.stdout)[:200])
+        return out
+    stale = [r for r in rows if r.get('stale') and any(('file dep changed' in str(x) or 'declared input' in str(x))
+                                                       for x in r.get('stale_reasons') or [])]
+    if not stale:
+        return out
+    sandbox = config['mizpah']['sandbox']
+    scratch = root/'refresh'
+    scratch.mkdir(parents=True, exist_ok=True)
+    network = NetworkPolicy(**sandbox['network']) if sandbox.get('network') else None
+    bound = dict(workspace_dir=str(project.resolve()), cache_dirs=cache_dirs(config), state_dirs=state_dirs(project)) if bind_mode(config) else {}
+    shell = SandboxedShell(ShellConfig(**(config['shell'] | dict(
+        scratch_root=str(scratch), limits=ShellLimits(**config['shell']['limits']),
+        read_only_binds=tuple(sandbox['read_only_binds']), environment=dict(sandbox['environment'], **layout.terra_env(project)),
+        share_network=bool(sandbox.get('share_network', False)) and network is None, network=network,
+        refused_paths=tuple(sandbox.get('refused_paths') or ()), refused_patterns=REFUSED_PATTERNS) | bound)))
+    state_dir = layout.dirname(project)
+    try:
+        workspace = pack_workspace(project, exclude=cache_dirs(config)) if bind_mode(config) else pack_workspace(project)
+        for row in stale:
+            known_id = str(row.get('id'))
+            record = row.get('record') or {}
+            probe_id = (record.get('probe_ids') or [None])[0]
+            if not probe_id:
+                out['failed'].append(known_id+': names no probe'); continue
+            expected = extract_known_value(record)
+            result = shell.run('terra probe run '+probe_id+' --to \'{"kind": "file"}\' --json 2>/dev/null; '
+                               'echo; cat '+state_dir+'/map/probes/'+probe_id+'/_last_reading.json 2>/dev/null', workspace,
+                               timeout_seconds=min(80, config['shell']['limits']['command_seconds']),
+                               **(dict(detached=True) if bind_mode(config) else {}))
+            text = result.stdout
+            run_id = None
+            m = re.search(r'"id": "(\d{8}T\d{6}Z_'+re.escape(probe_id)+r'_[0-9a-f]+)"', text)
+            if m:
+                run_id = m.group(1)
+            start = text.rfind('{"to"') if '{"to"' in text else text.rfind('{\n  "to"')
+            try:
+                reading = ((json.loads(text[start:]) if start >= 0 else {}).get('readings') or {}).get(record.get('quantity') or known_id)
+            except ValueError:
+                reading = None
+            if run_id is None or reading is None or not isinstance(result.workspace, (bytes, bytearray)):
+                out['failed'].append(known_id+': the probe produced no run when the host ran it alone (exit '+str(result.exit_code)+')')
+                continue
+            if not values_agree(record.get('type'), expected, reading):
+                out['changed'].append(known_id+' = '+str(expected)+' on the map, but its inputs moved and a fresh run reads '
+                                      +str(reading)+': the reading is owed again')
+                continue
+            # Harvest the run directory from the sandbox's tree, then link it with the host's terra.
+            prefix = state_dir+'/map/runs/'+run_id+'/'
+            members = {name: data for name, data in _members(result.workspace).items() if name.startswith(prefix)}
+            if not members:
+                out['failed'].append(known_id+': run '+run_id+' not found in the sandbox tree'); continue
+            for name, data in members.items():
+                target = project/name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+            try:
+                terra(config, project, 'known', 'link-run', known_id, run_id)
+                out['refreshed'].append(known_id)
+            except RuntimeError as error:
+                out['failed'].append(known_id+': link-run: '+str(error)[:200])
+    finally:
+        shell.close()
+    (root/'refresh.jsonl').open('a').write(json.dumps(dict(at=time.time(), **out))+'\n')
+    return out
 
 
 def extract_known_value(known: dict[str, Any]) -> Any:
@@ -811,7 +903,7 @@ def artifact_agreement_problems(project: Path, unknown_ids: list[str]) -> list[s
     discarded it. So the gate compares: the adopted value against every number known the unknown names, and
     disagreement with all of them is red, with both numbers in the message."""
     problems: list[str] = []
-    known_ids = {p.stem for p in (project/'.terra'/'map'/'knowns').glob('*.json')}
+    known_ids = {p.stem for p in (project/layout.dirname(project)/'map'/'knowns').glob('*.json')}
     for uid in unknown_ids:
         try:
             unknown = read_unknown(project, uid)
@@ -880,7 +972,7 @@ def run_inputs(project: Path, known: dict[str, Any]) -> dict[str, Any]:
     run_id = str(known.get('primary_run_id') or next(iter(known.get('run_ids') or []), ''))
     if not run_id:
         return {}
-    for base in [project/'.terra'/'map'/'runs']+sorted((project/'.terra'/'map'/'sessions').glob('*/runs')):
+    for base in [project/layout.dirname(project)/'map'/'runs']+sorted((project/layout.dirname(project)/'map'/'sessions').glob('*/runs')):
         meta = base/run_id/'meta.json'
         if meta.exists():
             try:
@@ -942,7 +1034,7 @@ def readopt_retaken(config: dict[str, Any], project: Path, map_id: str, unknown_
 
 
 def run_meta(project: Path, run_id: str) -> dict[str, Any]:
-    for base in (project/'.terra'/'map'/'runs', *(project/'.terra'/'map'/'sessions').glob('*/runs')):
+    for base in (project/layout.dirname(project)/'map'/'runs', *(project/layout.dirname(project)/'map'/'sessions').glob('*/runs')):
         path = base/run_id/'meta.json'
         if path.exists():
             try:
@@ -978,7 +1070,7 @@ def unread_input_problems(project: Path, unknown_ids: list[str]) -> list[str]:
     min_parallel_count was 2, and every phase-2 number followed. Red, with the fix spelled out."""
     problems: list[str] = []
     knowns: dict[str, dict[str, Any]] = {}
-    for path in (project/'.terra'/'map'/'knowns').glob('*.json'):
+    for path in (project/layout.dirname(project)/'map'/'knowns').glob('*.json'):
         try:
             knowns[path.stem] = json.loads(path.read_text())
         except ValueError:
@@ -1001,8 +1093,8 @@ def unread_input_problems(project: Path, unknown_ids: list[str]) -> list[str]:
         known = read_known(project, uid)
         if not known:
             continue
-        meta_path = project/'.terra'/'map'/'probes'/(uid+'_probe')/'probe.json'
-        measure_path = project/'.terra'/'map'/'probes'/(uid+'_probe')/'measure.py'
+        meta_path = project/layout.dirname(project)/'map'/'probes'/(uid+'_probe')/'probe.json'
+        measure_path = project/layout.dirname(project)/'map'/'probes'/(uid+'_probe')/'measure.py'
         if meta_path.exists() and measure_path.exists():
             try:
                 declared = json.loads(meta_path.read_text()).get('inputs') or {}
@@ -1313,10 +1405,10 @@ def bindings(config: dict[str, Any], root: Path, map_id: str, checkins: bool | N
     scratch = root/'scratch'
     scratch.mkdir(parents=True, exist_ok=True)
     sandbox = config['mizpah']['sandbox']
-    environment = dict(sandbox['environment'], TERRA_MAP=map_id, XDG_DATA_HOME='/work/'+PLAYBOOK_PREFIX)
+    environment = dict(sandbox['environment'], TERRA_MAP=map_id, XDG_DATA_HOME='/work/'+PLAYBOOK_PREFIX, **layout.terra_env(project))
     services = ServiceLimits(**sandbox['services']) if sandbox.get('services') else None
     network = NetworkPolicy(**sandbox['network']) if sandbox.get('network') else None
-    bound = dict(workspace_dir=str(project.resolve()), cache_dirs=cache_dirs(config), state_dirs=STATE_DIRS) \
+    bound = dict(workspace_dir=str(project.resolve()), cache_dirs=cache_dirs(config), state_dirs=state_dirs(project)) \
         if bind_mode(config) and project is not None else {}
     shell = ShellConfig(**(config['shell'] | dict(scratch_root=str(scratch), limits=ShellLimits(**config['shell']['limits']),
                                                  read_only_binds=tuple(sandbox['read_only_binds']), environment=environment,
@@ -1367,7 +1459,8 @@ def declare_artifact_deps(config: dict[str, Any], project: Path, unknowns: list[
 
 def focus_globs(unknowns: list[dict[str, Any]]) -> tuple[str, ...]:
     """Probes, widget sources, and every artifact this task's unknowns say it creates."""
-    globs = ['.terra/map/probes/*/probe.py', '.terra/map/probes/*/measure.py', 'cg/*/src/*.py']
+    globs = [d+'/map/probes/*/probe.py' for d in (layout.STATE_DIRNAME, layout.LEGACY_DIRNAME)] \
+        + [d+'/map/probes/*/measure.py' for d in (layout.STATE_DIRNAME, layout.LEGACY_DIRNAME)] + ['cg/*/src/*.py']
     for unknown in unknowns:
         creates = unknown_notes(unknown).get('creates')
         if creates:
@@ -1475,16 +1568,17 @@ COMMAND_TOOLS: tuple[dict[str, Any], ...] = (
 
 # Records only a tool may write. The writeback would drop hand edits anyway; refusing them at the tool saves the
 # turns spent making them and the turns spent wondering why they did not take.
-PROTECTED_PATHS = ('.terra/brief.json', '.terra/route.json', '.terra/map/knowns/*', '.terra/map/runs/*',
-                   '.terra/map/sessions/*/knowns/*', '.terra/map/sessions/*/runs/*', '.terra/map/unknowns/*',
-                   '.playbook/playbook/procedures/*')   # the checklist copy under .playbook/open/ is ticked by editing it
+PROTECTED_PATHS = tuple(d+'/'+rel for d in (layout.STATE_DIRNAME, layout.LEGACY_DIRNAME)
+                        for rel in ('brief.json', 'route.json', 'map/knowns/*', 'map/runs/*',
+                                    'map/sessions/*/knowns/*', 'map/sessions/*/runs/*', 'map/unknowns/*')) + (
+                   '.playbook/playbook/procedures/*',)   # the checklist copy under .playbook/open/ is ticked by editing it
 REFUSED_PATTERNS = (
     (r'--skip-gate\b', 'the gate is not yours to skip: a red gate says what is missing, and a block says why you cannot'),
     (r'--freehand\b', 'a claim-shaped task completes on map evidence (--run/--known), never on prose'),
     (r'\bcartograph\s+(checkin|publish)\b', 'widgets are checked in by the harness after green, never by the worker'),
     (r'\bplaybook\s+(remove-step|edit)\s+mizpah-', 'the bootstrap procedure is not yours to rewrite'),
-    (r'(>>?|\btee\b|-i)\s*[^|;&]*\.terra/(brief|route)\.json', 'the brief moves by proposal and the route by terra route; neither is a file to write'),
-    (r'(>>?|\btee\b|-i)\s*[^|;&]*\.terra/map/(knowns|runs|unknowns)/', 'knowns, runs and unknowns are born by terra commands, never by writing their files'),
+    (r'(>>?|\btee\b|-i)\s*[^|;&]*\.(terra|mizpah)/(brief|route)\.json', 'the brief moves by proposal and the route by terra route; neither is a file to write'),
+    (r'(>>?|\btee\b|-i)\s*[^|;&]*\.(terra|mizpah)/map/(knowns|runs|unknowns)/', 'knowns, runs and unknowns are born by terra commands, never by writing their files'),
     (r'(>>?|\btee\b|-i|\bmv\b|\bcp\b)\s*[^|;&]*\.playbook/playbook/procedures/', 'the store is not a file to write: improving a procedure is `playbook edit-step` / `add-step`'),
     (r'\bsystemctl\b|\bsystemd-run\b|\bloginctl\b', 'the host\'s service manager is outside the sandbox; services start with `svc start`'),
     (r'\bcurl\b[^|;&]*(/stop\b|/shutdown\b|/slots\b)', 'the model server is not yours to signal'),
@@ -1614,7 +1708,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         task = pick_task(config, project, task_id)
         map_id = open_task_map(config, project, task)
         unknowns = [read_unknown(project, uid, map_id) for uid in task_unknown_ids(task)]
-        assignment = render_assignment(task, unknowns, map_id, probe_inputs(project, task))
+        assignment = render_assignment(task, unknowns, map_id, probe_inputs(project, task), layout.dirname(project))
         parts = library_parts(config, project, unknowns)
         if parts:
             assignment += ('The library already has parts near this work; install and extend one where it nearly fits '
@@ -1628,7 +1722,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         holder['shell'] = shell
         reference = render_reference(project, task, unknowns)
         # Bind mode: only the state directories are packed in; the tree is the project directory itself.
-        initial = pack_workspace(project, store, only=STATE_DIRS) if bind_mode(config) else pack_workspace(project, store)
+        initial = pack_workspace(project, store, only=state_dirs(project)) if bind_mode(config) else pack_workspace(project, store)
         session = FocusedSession.create(root, build_settings(config, assignment, reference, unknowns), worker=worker_client,
                                         shell=shell, controller=checkin, initial_workspace=initial)
         probes_before = protected_probes(project, task)
@@ -1726,7 +1820,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, required=True)
-    parser.add_argument('--project', type=Path, required=True, help='A Terra project directory (.terra inside)')
+    parser.add_argument('--project', type=Path, required=True, help='A project directory (.mizpah or .terra inside)')
     parser.add_argument('--root', type=Path, required=True, help='New session directory')
     parser.add_argument('--task', help='Route task id; default is the next pickable task')
     args = parser.parse_args()

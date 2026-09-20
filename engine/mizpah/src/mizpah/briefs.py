@@ -18,6 +18,8 @@ import re
 import time
 from typing import Any
 
+from . import layout
+
 STOP = {'with', 'from', 'that', 'this', 'into', 'every', 'each', 'must', 'their', 'when', 'than', 'then', 'against',
         'know', 'known', 'unknown', 'whether', 'number', 'count', 'the', 'and', 'for', 'its', 'not', 'yet', 'has',
         'have', 'does', 'under', 'over', 'file', 'files', 'project', 'agree', 'agreeing', 'agrees', 'map'}
@@ -31,12 +33,12 @@ def store_dir(config: dict[str, Any]) -> Path:
 
 def record(config: dict[str, Any], project: Path, stop: str, cycles: list[dict[str, Any]]) -> Path | None:
     """Write this run's brief, unknowns and outcome to the store (one file per run)."""
-    brief_path = project/'.terra'/'brief.json'
+    brief_path = project/layout.dirname(project)/'brief.json'
     if not brief_path.exists():
         return None
     brief = json.loads(brief_path.read_text())
     unknowns = []
-    for path in sorted((project/'.terra'/'map'/'unknowns').glob('*.json')):
+    for path in sorted((project/layout.dirname(project)/'map'/'unknowns').glob('*.json')):
         u = json.loads(path.read_text())
         notes = str(u.get('notes') or '')
         cites = re.search(r'cites ((?:need|deliverable):\d+)', notes)

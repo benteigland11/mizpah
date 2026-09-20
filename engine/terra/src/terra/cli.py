@@ -33,6 +33,7 @@ from .calculations import (
 )
 from .paths import (
     GLOBAL_MAP_ID,
+    terra_root,
     create_session_map,
     ensure_map_store,
     ensure_project_root,
@@ -212,7 +213,7 @@ def cmd_map_create(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
     if created:
-        print(f"initialized {root / '.terra' / 'map'}")
+        print(f"initialized {terra_root(root) / 'map'}")
     parent = getattr(args, "parent", None) or "global"
     print(f"created map {args.id}  (session, parent={parent})")
     if parent != "global":
@@ -1361,7 +1362,7 @@ def cmd_assumption_create(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
     if created_store:
-        print(f"initialized {root / '.terra' / 'map'}")
+        print(f"initialized {terra_root(root) / 'map'}")
     return emit(success(read_assumption(root, args.id), meta={"surface": "terra.assumption.create", "path": str(path)}))
 
 
@@ -1769,7 +1770,7 @@ def cmd_known_set(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
     if created:
-        print(f"initialized {root / '.terra' / 'map'}")
+        print(f"initialized {terra_root(root) / 'map'}")
     from .paths import known_path as _known_path
 
     _print_known_summary(action, rec, _known_path(root, args.id))
@@ -2940,7 +2941,7 @@ def cmd_plan_create(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
     if created:
-        print(f"initialized {root / '.terra' / 'map'}")
+        print(f"initialized {terra_root(root) / 'map'}")
     rec = load_plan(root, args.id)
     print(f"created plan {args.id}  (above types; legs use number|boolean)")
     print(f"  status={rec.get('status')}  conf={rec.get('confidence')}")
@@ -3138,7 +3139,7 @@ def cmd_suite_create(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
     if created:
-        print(f"initialized {root / '.terra' / 'map'}")
+        print(f"initialized {terra_root(root) / 'map'}")
     print(f"created suite {args.id}")
     print(f"  probes: {', '.join(parse_probe_list(args.probes))}")
     print(f"  {path}")
@@ -3201,7 +3202,7 @@ def cmd_suite_run(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
     if created:
-        print(f"initialized {root / '.terra' / 'map'}")
+        print(f"initialized {terra_root(root) / 'map'}")
     if args.json:
         print(json.dumps(summary, indent=2, default=str))
         return 0 if summary.get("ok") else 1

@@ -9,6 +9,7 @@ proposals are only ever queued — the person accepts them.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -18,6 +19,7 @@ from cg.bp_focused_agent_session_python.src import EndpointConfig, ModelClient, 
 from cg.backend_persistent_model_session_python.src.persistent_model_session import parse_turn
 
 from . import briefs, capabilities, enablers, phases
+from . import layout
 from .worker import terra
 
 ID_PATTERN = re.compile(r'^[a-z][a-z0-9_]*$')
@@ -28,7 +30,7 @@ OPEN_TASK = ('ready', 'in_progress', 'blocked', 'pending')
 BUDGET_BLOCK = ('worker budget exhausted', 'gate rounds exhausted')
 
 
-DIGEST_SKIP = {'.terra', '.git', '.venv', '__pycache__', 'node_modules', '.playbook', '.tool-output', '.session-history', 'cg'}
+DIGEST_SKIP = {'.terra', '.mizpah', '.git', '.venv', '__pycache__', 'node_modules', '.playbook', '.tool-output', '.session-history', 'cg'}
 DIGEST_HEADS = ('README.md', 'CLAUDE.md', 'AGENTS.md', 'readme.md')
 
 
@@ -119,12 +121,12 @@ def observe(config: dict[str, Any], project: Path) -> dict[str, Any]:
     sitrep = terra(config, project, 'sitrep')
     # `known list --json` nests each known's fields under `record`.
     knowns = []
-    for row in json.loads(subprocess.run([config['mizpah']['terra'], 'known', 'list', '--json'], cwd=project,
+    for row in json.loads(subprocess.run([config['mizpah']['terra'], 'known', 'list', '--json'], cwd=project, env=dict(os.environ, **layout.terra_env(project)),
                                          capture_output=True, text=True).stdout or '[]'):
         record = dict(row.get('record') or row)
         record['stale'], record['stale_reasons'] = bool(row.get('stale')), list(row.get('stale_reasons') or [])
         knowns.append(record)
-    unknowns = [json.loads(path.read_text()) for path in sorted((project/'.terra'/'map'/'unknowns').glob('*.json'))]
+    unknowns = [json.loads(path.read_text()) for path in sorted((project/layout.dirname(project)/'map'/'unknowns').glob('*.json'))]
     route = terra(config, project, 'route', 'status')
     related_briefs = briefs.related(config, brief) if config['mizpah'].get('brief_library', True) else []
     registry = capabilities.render(config, brief)
@@ -133,9 +135,9 @@ def observe(config: dict[str, Any], project: Path) -> dict[str, Any]:
         repo=repo_digest(project),
         brief={key: brief.get(key) for key in ('title', 'version', 'status', 'mission', 'needs', 'deliverables',
                                                 'non_goals', 'enablers', 'budget_points', 'phases', 'open_proposals')}
-              | dict(proposals=[p for p in json.loads((project/'.terra'/'brief.json').read_text()).get('proposals') or []
+              | dict(proposals=[p for p in json.loads((project/layout.dirname(project)/'brief.json').read_text()).get('proposals') or []
                                 if p.get('status') in (None, 'open', 'pending')],
-                     decided=[p for p in json.loads((project/'.terra'/'brief.json').read_text()).get('proposals') or []
+                     decided=[p for p in json.loads((project/layout.dirname(project)/'brief.json').read_text()).get('proposals') or []
                               if p.get('status') in ('accepted', 'rejected')][-6:]),
         gate=sitrep.get('gate'), related_briefs=related_briefs, registry=registry,
         budget=(sitrep.get('route') or {}).get('budget'),
@@ -942,8 +944,8 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
         done['unknowns'].append(u['id'])
     now = phases.current(terra(config, project, 'brief', 'show')) if accepted['tasks'] else None
     sectors = set()
-    if now and (project/'.terra'/'route.json').exists():
-        sectors = {s.get('id') for s in json.loads((project/'.terra'/'route.json').read_text()).get('sectors') or []}
+    if now and (project/layout.dirname(project)/'route.json').exists():
+        sectors = {s.get('id') for s in json.loads((project/layout.dirname(project)/'route.json').read_text()).get('sectors') or []}
     ordered: list[dict[str, Any]] = []
     pending = list(accepted['tasks'])
     while pending:   # dependency order: a task follows the tasks it depends on within this reply
@@ -990,7 +992,7 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
         record_release(project, r['task'], r['after'])
         done.setdefault('unblock', []).append(r['task']+' after '+r['after'])
     for r in accepted.get('retype') or []:
-        path = project/'.terra'/'map'/'unknowns'/(r['unknown']+'.json')
+        path = project/layout.dirname(project)/'map'/'unknowns'/(r['unknown']+'.json')
         try:
             record = json.loads(path.read_text())
         except (OSError, ValueError):
@@ -1003,7 +1005,7 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
             args += ['--unit', str(record['unit'])]
         terra(config, project, *args)
         # The task that carries it, if its worker blocked on the wrong type, is released to try again.
-        route = json.loads((project/'.terra'/'route.json').read_text())
+        route = json.loads((project/layout.dirname(project)/'route.json').read_text())
         for t in route.get('tasks') or []:
             carried = [t.get('map_id')]+[a.removeprefix('unknown:') for a in t.get('acceptance') or [] if str(a).startswith('unknown:')]
             if r['unknown'] in carried and t.get('status') == 'blocked':
@@ -1019,7 +1021,7 @@ def released_before(project: Path | None) -> set[tuple[str, str]]:
     """(task, after) pairs the loop has already released, from the project's own record."""
     if project is None:
         return set()
-    path = project/'.terra'/'.mizpah-unblocks.json'
+    path = project/layout.dirname(project)/'.mizpah-unblocks.json'
     try:
         return {tuple(p) for p in json.loads(path.read_text())}
     except (OSError, ValueError):
@@ -1027,7 +1029,7 @@ def released_before(project: Path | None) -> set[tuple[str, str]]:
 
 
 def record_release(project: Path, task: str, after: str) -> None:
-    path = project/'.terra'/'.mizpah-unblocks.json'
+    path = project/layout.dirname(project)/'.mizpah-unblocks.json'
     pairs = released_before(project) | {(task, after)}
     path.write_text(json.dumps(sorted(pairs))+'\n')
 
@@ -1079,7 +1081,7 @@ def ready_order(project: Path, tasks: list[dict[str, Any]]) -> list[dict[str, An
 
     def builds(task: dict[str, Any]) -> bool:
         for uid in [task.get('map_id')]+[a.removeprefix('unknown:') for a in task.get('acceptance') or [] if str(a).startswith('unknown:')]:
-            path = project/'.terra'/'map'/'unknowns'/(str(uid)+'.json')
+            path = project/layout.dirname(project)/'map'/'unknowns'/(str(uid)+'.json')
             try:
                 if 'creates ' in str(json.loads(path.read_text()).get('notes') or ''):
                     return True

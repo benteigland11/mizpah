@@ -23,6 +23,8 @@ from typing import Any
 import urllib.error
 import urllib.request
 
+from . import layout
+
 
 def settings(config: dict[str, Any]) -> dict[str, Any]:
     return dict(model_unit=None, restart_after_seconds=60, restart_cooldown_seconds=600, disk_high_percent=92,
@@ -452,7 +454,7 @@ def _blocked(config: dict[str, Any], project: Path) -> list[dict[str, Any]]:
 
 
 def _proposals(project: Path) -> list[str]:
-    path = project/'.terra'/'brief.json'
+    path = project/layout.dirname(project)/'brief.json'
     if not path.exists():
         return []
     try:

@@ -22,7 +22,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-TERRA_DIRNAME = ".terra"
+# The state directory's name. Standalone Terra keeps `.terra`; a host that embeds Terra in someone's
+# repository beside its own state (Mizpah: brief, route, map and sessions under one `.mizpah/`) sets
+# TERRA_DIRNAME in the environment so every CLI call, probe and library read agrees on the same tree.
+TERRA_DIRNAME = os.environ.get("TERRA_DIRNAME") or ".terra"
 MAP_DIRNAME = "map"
 SESSIONS_DIRNAME = "sessions"
 PROBES_DIRNAME = "probes"

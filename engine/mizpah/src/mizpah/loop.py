@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import threading
 import json
 from pathlib import Path
 import time
@@ -17,7 +18,10 @@ import traceback
 from typing import Any
 
 from . import briefs, capabilities, controller, ops, worker
+from . import layout
 from .worker import terra
+from cg.infra_app_paths_python.src.app_paths import resolve_app_paths
+from cg.infra_atomic_file_write_python.src.atomic_file_write import atomic_write_text
 
 
 def pickable(config: dict[str, Any], project: Path, root: Path | None = None) -> list[dict[str, Any]]:
@@ -66,7 +70,8 @@ def settle_partial_block(config: dict[str, Any], project: Path, task_id: str, re
 def terra_list(config: dict[str, Any], project: Path, *args: str) -> list[dict[str, Any]]:
     """A terra verb that prints a JSON array (unknown list --json)."""
     import subprocess
-    process = subprocess.run([config['mizpah']['terra'], *args], cwd=project, capture_output=True, text=True)
+    process = subprocess.run([config['mizpah']['terra'], *args], cwd=project, capture_output=True, text=True,
+                             env=dict(os.environ, **layout.terra_env(project)))
     text = process.stdout.strip()
     start = text.find('[')
     return json.loads(text[start:]) if start >= 0 else []
@@ -91,9 +96,49 @@ def _crew(spec: dict[str, Any]) -> dict[str, Any]:
 
 
 def registry_path() -> Path:
-    """Every run this machine starts, one line each, wherever its root lives: how a front end finds them."""
-    base = Path(os.environ.get('XDG_STATE_HOME') or Path.home()/'.local'/'state')
-    return base/'mizpah'/'runs.jsonl'
+    """Every run this machine starts, one line each, wherever its root lives: how a front end finds them.
+
+    Lives in the per-user *state* directory of the platform (XDG on Linux, AppData\\Local on Windows,
+    Library/Application Support on macOS) — the same place the app's own path widget resolves to.
+    """
+    return resolve_app_paths('mizpah').state_dir/'runs.jsonl'
+
+
+HEARTBEAT_SECONDS = 10
+
+
+def _write_run_record(root: Path, record: dict[str, Any]) -> None:
+    """run.json is read by a front end while we write it: replace atomically, never leave it torn."""
+    atomic_write_text(root/'run.json', json.dumps(record, indent=1))
+
+
+class _Heartbeat:
+    """Stamps heartbeat_at into run.json every HEARTBEAT_SECONDS while the loop runs, so a reader on any
+    platform can tell a live loop from a dead one without asking the OS about our pid."""
+
+    def __init__(self, root: Path, record: dict[str, Any]) -> None:
+        self.root, self.record = root, record
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name='mizpah-heartbeat', daemon=True)
+
+    def start(self) -> '_Heartbeat':
+        self.beat()
+        self._thread.start()
+        return self
+
+    def beat(self) -> None:
+        self.record['heartbeat_at'] = time.time()
+        try:
+            _write_run_record(self.root, self.record)
+        except OSError:
+            pass  # a missed beat is tolerated by readers; the next one lands
+
+    def _run(self) -> None:
+        while not self._stop.wait(HEARTBEAT_SECONDS):
+            self.beat()
+
+    def stop(self) -> None:
+        self._stop.set()
 
 
 def _register(record: dict[str, Any]) -> None:
@@ -177,7 +222,7 @@ def advance_enabler(config: dict[str, Any], project: Path, task: dict[str, Any],
 
 def open_proposals(project: Path) -> list[dict[str, Any]]:
     try:
-        return [p for p in json.loads((project/'.terra'/'brief.json').read_text()).get('proposals') or []
+        return [p for p in json.loads((project/layout.dirname(project)/'brief.json').read_text()).get('proposals') or []
                 if p.get('status') in (None, 'open', 'pending')]
     except (OSError, ValueError):
         return []
@@ -243,7 +288,7 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                       # who is on the job: how a front end names the controller and the worker
                       crew=dict(controller=_crew(config.get('controller') or {}),
                                 worker=_crew(config.get('worker') or {})))
-    (root/'run.json').write_text(json.dumps(run_record, indent=1))
+    heartbeat = _Heartbeat(root, run_record).start()   # writes run.json now, then every HEARTBEAT_SECONDS
     _register(run_record)
     # A previous run of this root killed without its finally leaves services running; they are its, so reap them.
     orphans = ops.sweep_services(live_roots=[r for r in Path(root).parent.glob('*') if r.is_dir() and r != root
@@ -333,6 +378,16 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                 leaked = reap(task['id'])
                 if leaked:
                     record['tasks'][-1]['leaked'] = [dict(comm=l['comm'], rss_mb=l['rss_mb'], age_s=l['age_s']) for l in leaked]
+                # A task that rewrote a file the map depends on left knowns stale: the host re-takes them now,
+                # before the eval sees a red gate it would otherwise spend a worker session clearing.
+                try:
+                    refreshed = worker.refresh_stale(config, project, root)
+                except Exception as error:  # noqa: BLE001 — a refresh never ends the run
+                    refreshed = dict(refreshed=[], changed=[], failed=['refresh: '+str(error)[:200]])
+                    with log.open('a') as handle:
+                        handle.write(json.dumps(dict(at=time.time(), where='refresh', error=str(error)[:500]))+'\n')
+                if any(refreshed.values()):
+                    record['tasks'][-1]['refreshed'] = refreshed
                 if result['verdict'] == 'stopped':
                     stop = 'stopped_by_operator'
                     break
@@ -427,8 +482,9 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                   blocked=[dict(id=t['id'], reason=t.get('blocked_reason')) for t in blocked(config, project)],
                   open_proposals=terra(config, project, 'brief', 'show').get('open_proposals'))
     (root/'loop.json').write_text(json.dumps(result, indent=1))
+    heartbeat.stop()
     run_record.update(ended_at=time.time(), stop=stop)
-    (root/'run.json').write_text(json.dumps(run_record, indent=1))
+    _write_run_record(root, run_record)
     return result
 
 

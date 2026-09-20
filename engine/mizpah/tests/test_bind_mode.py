@@ -33,8 +33,8 @@ def test_bind_mode_binds_the_project_keeps_caches_and_writes_state_back(tmp_path
     root = tmp_path/'sess'
     root.mkdir()
     _, _, shell = worker.bindings(config, root, 'm1', checkins=False, project=project)
-    assert shell.config.workspace_dir == str(project.resolve()) and shell.config.state_dirs == worker.STATE_DIRS
-    initial = worker.pack_workspace(project, only=worker.STATE_DIRS)
+    assert shell.config.workspace_dir == str(project.resolve()) and shell.config.state_dirs == worker.state_dirs(project)
+    initial = worker.pack_workspace(project, only=worker.state_dirs(project))
     from cg.infra_sandboxed_shell_execution_python.src.sandboxed_shell_execution import workspace_files
     assert workspace_files(initial, byte_limit=10**8, file_limit=10**5) == ('.terra/brief.json',)
     try:
@@ -69,3 +69,53 @@ def test_open_walks_names_the_next_unticked_step() -> None:
         info = tarfile.TarInfo(worker.PLAYBOOK_PREFIX+'/open/build-page--x.md'); data = text.encode(); info.size = len(data)
         tar.addfile(info, io.BytesIO(data))
     assert worker.open_walks(buf.getvalue()) == [worker.PLAYBOOK_PREFIX+'/open/build-page--x.md: 1/3 ticked; next: Gutters: check the gutters.']
+
+
+def _terra(project: Path, *args: str) -> str:
+    return subprocess.run([str(ROOT.parent.parent/'.venv'/'bin'/'terra'), *args], cwd=project, capture_output=True, text=True).stdout
+
+
+def _first_json(text: str):
+    """The first JSON document in a CLI's stdout (some verbs print a note before or after it)."""
+    starts = [i for i in (text.find('{'), text.find('[')) if i >= 0]
+    return json.JSONDecoder().raw_decode(text[min(starts):])[0]
+
+
+def _known_of_file(project: Path, kid: str, path: str) -> None:
+    """A number known counting the lines of `path`, depending on the file."""
+    _terra(project, 'unknown', 'create', kid, '--claim', 'lines in '+path, '--evidence', 'count', '--type', 'number', '--quantity', kid)
+    _terra(project, 'probe', 'create', kid+'_probe', '--purpose', 'count lines of '+path, '--kind', 'run', '--measure', kid)
+    (project/'.terra'/'map'/'probes'/(kid+'_probe')/'measure.py').write_text(
+        'def measure(ctx):\n    return {"'+kid+'": sum(1 for _ in open("'+path+'"))}\n')
+    run_id = _first_json(_terra(project, 'probe', 'run', kid+'_probe', '--to', '{"kind":"file"}', '--json'))['id']
+    _terra(project, 'unknown', 'link-run', kid, run_id)
+    _terra(project, 'unknown', 'graduate', kid)
+    _terra(project, 'known', 'depend', kid, '--on', 'file:'+path)
+
+
+def test_the_host_refreshes_a_stale_known_whose_reading_reproduces_and_reports_one_that_moved(tmp_path: Path) -> None:
+    config = worker.load_config(ROOT/'config.luna.json')
+    config['mizpah']['sandbox'] = dict(config['mizpah']['sandbox'], workspace='bind', cache_dirs=[], services=None, network=None,
+                                       share_network=False)
+    config['shell']['limits'] = dict(config['shell']['limits'], workspace_bytes=4*1024**2, max_files=2000)
+    project = tmp_path/'proj'
+    project.mkdir()
+    _terra(project, 'init')
+    (project/'same.txt').write_text('a\nb\nc\n')
+    (project/'grew.txt').write_text('a\nb\nc\n')
+    _known_of_file(project, 'same_lines', 'same.txt')
+    _known_of_file(project, 'grew_lines', 'grew.txt')
+    # The task rewrote both files: one keeps its line count, one does not.
+    (project/'same.txt').write_text('x\ny\nz\n')
+    (project/'grew.txt').write_text('a\nb\nc\nd\n')
+    rows = {r['id']: r for r in _first_json(_terra(project, 'known', 'list', '--json'))}
+    assert rows['same_lines']['stale'] and rows['grew_lines']['stale']
+    root = tmp_path/'sess'
+    root.mkdir()
+    out = worker.refresh_stale(config, project, root)
+    assert out['refreshed'] == ['same_lines'], out
+    assert len(out['changed']) == 1 and out['changed'][0].startswith('grew_lines = 3') and 'reads 4' in out['changed'][0]
+    rows = {r['id']: r for r in _first_json(_terra(project, 'known', 'list', '--json'))}
+    assert not rows['same_lines']['stale'] and rows['same_lines']['record']['stats']['n'] == 2
+    assert rows['grew_lines']['stale']
+    assert (root/'refresh.jsonl').exists()
