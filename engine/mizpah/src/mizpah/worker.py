@@ -1857,12 +1857,28 @@ def run_through_outages(session: FocusedSession, config: dict[str, Any], root: P
             ops.record_outage(root, 'worker', config['worker'], error, outages)
             if outages > 5:
                 raise
-            checker = health or ops.Health(config, root)
-            if not checker.wait_for_model((config['worker'].get('endpoint') or {}).get('base_url'), wait_seconds=wait_seconds):
-                raise
+            too_big = 'exceeded the configured byte limit' in str(error)
+            if not too_big:
+                # A server that went away is waited for; a reply that was too big is the worker's own doing and
+                # the server is fine.
+                checker = health or ops.Health(config, root)
+                if not checker.wait_for_model((config['worker'].get('endpoint') or {}).get('base_url'), wait_seconds=wait_seconds):
+                    raise
             discarded = session.discard_pending()
             if discarded:
                 (root/'discarded.jsonl').open('a').write(json.dumps(discarded)+'\n')
+            if too_big:
+                # The warning rides on the failure, to the one worker that needs it, when it can act (a sketch gym
+                # streamed a four-thumbnail SVG as a write argument five times over, 2026-09-20). Not a standing
+                # instruction: the delta, once.
+                status = session.status()
+                if status['phase'] == 'worker' and status['pending_io'] is None:
+                    session.interject('Your last reply was larger than the transport allows and was discarded; nothing in it '
+                                      'was applied. A reply is a plan and a tool call, never the artifact: when the thing you '
+                                      'are making is big (an SVG of strokes, a long data file), a widget under cg/ writes it '
+                                      'from a short plan you give it (regions, directions, spacing, widths, a seed), and you '
+                                      'look at the result by reading its render, not its source. Continue from the unchanged '
+                                      'conversation with a smaller reply.')
 
 
 def run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | None = None) -> dict[str, Any]:
