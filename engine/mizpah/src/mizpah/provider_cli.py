@@ -33,6 +33,16 @@ def _emit(payload: dict[str, Any]) -> None:
     print(json.dumps(payload), flush=True)
 
 
+def _endpoint_view(config: dict[str, Any], session: Any) -> dict[str, Any]:
+    """The editable shape of a provider's endpoint: profile fields plus the llama counting routes."""
+    profile = session.profile
+    override = ((config.get('mizpah') or {}).get('providers') or {}).get(profile.name) or {}
+    return dict(api_base_url=profile.api_base_url, completion_path=profile.completion_path, models_path=profile.models_path,
+                wire=profile.wire, context_window=profile.context_window, timeout_seconds=profile.timeout_seconds,
+                static_headers=dict(profile.static_headers), tokenize_path=override.get('tokenize_path', '/tokenize'),
+                template_path=override.get('template_path', '/apply-template'), local_kind=override.get('local_kind'))
+
+
 def cmd_list(args: argparse.Namespace) -> int:
     config = _config(args.config)
     store_path = credential_path(config)
@@ -44,6 +54,7 @@ def cmd_list(args: argparse.Namespace) -> int:
         status['blocked'] = missing_client_id(session.profile)
         status['api_base_url'] = session.profile.api_base_url
         status['custom'] = name not in shipped
+        status['endpoint'] = _endpoint_view(config, session)
         rows.append(status)
     _emit(dict(credentials_file=str(store_path), providers=rows))
     return 0
@@ -54,6 +65,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     status = session.status()
     status['blocked'] = missing_client_id(session.profile)
     status['api_base_url'] = session.profile.api_base_url
+    status['endpoint'] = _endpoint_view(_config(args.config), session)
     _emit(status)
     return 0
 
@@ -142,14 +154,16 @@ def cmd_use(args: argparse.Namespace) -> int:
     harness = json.loads(harness_path.read_text())
     roles = ('worker', 'controller') if args.role == 'both' else (args.role,)
     native = profile.auth.kind == 'none' and profile.token_count == 'tokenize_endpoint'
+    override = ((config.get('mizpah') or {}).get('providers') or {}).get(profile.name) or {}
     for role in roles:
         spec = harness.setdefault(role, {})
         endpoint = spec.setdefault('endpoint', {})
         endpoint.update(base_url=profile.api_base_url, completion_path=profile.completion_path,
-                        timeout_seconds=profile.timeout_seconds)
-        for key, value in dict(maximum_response_bytes=16000000, headers={'Content-Type': 'application/json'},
-                               template_path='/apply-template', tokenize_path='/tokenize',
-                               tokenizer_add_special=True, tokenizer_parse_special=True).items():
+                        timeout_seconds=profile.timeout_seconds,
+                        template_path=override.get('template_path', '/apply-template'),
+                        tokenize_path=override.get('tokenize_path', '/tokenize'),
+                        headers={'Content-Type': 'application/json', **profile.static_headers})
+        for key, value in dict(maximum_response_bytes=16000000, tokenizer_add_special=True, tokenizer_parse_special=True).items():
             endpoint.setdefault(key, value)
         generation = spec.setdefault('generation', {})
         if native:
@@ -223,25 +237,79 @@ def cmd_remove(args: argparse.Namespace) -> int:
     return 0
 
 
+EDITABLE_FIELDS = {
+    # profile fields a person may set on any provider; the value's JSON type is checked by the profile itself
+    'api_base_url': str, 'completion_path': str, 'models_path': str, 'wire': str, 'default_model': str,
+    'context_window': int, 'timeout_seconds': float, 'static_headers': dict, 'credential_headers': dict,
+    'reasoning_efforts': list, 'default_reasoning_effort': str, 'models': list, 'display_name': str,
+    # the two llama.cpp counting routes; not profile fields, read by `use` for the native client
+    'tokenize_path': str, 'template_path': str,
+    # dotted: auth.client_id, auth.scopes, ...
+}
+
+
+def _parse_value(text: str) -> Any:
+    try:
+        return json.loads(text)
+    except ValueError:
+        return text
+
+
+def _apply_set(override: dict[str, Any], key: str, value: Any) -> None:
+    head, _, rest = key.partition('.')
+    if rest:
+        _apply_set(override.setdefault(head, {}), rest, value)
+        return
+    if value is None or value == '':
+        override.pop(head, None)
+    else:
+        override[head] = value
+
+
 def cmd_configure(args: argparse.Namespace) -> int:
-    """Override a profile field in the engine config (mizpah.providers.<name>), e.g. a local server's address."""
+    """Override profile fields in the engine config (mizpah.providers.<name>).
+
+    ``--set key=value`` takes any profile field (dotted for auth.*); the value is JSON when it parses,
+    else a string; an empty value removes the override. The result must still be a valid profile, or
+    nothing is written.
+    """
     if args.config is None:
         _emit(dict(event='error', error='configure needs --config (the engine config to write the override into)'))
         return 2
     raw = json.loads(args.config.read_text())
     target = raw['mizpah'] if 'mizpah' in raw else raw
-    override = target.setdefault('providers', {}).setdefault(args.provider, {})
+    override = json.loads(json.dumps(target.setdefault('providers', {}).setdefault(args.provider, {})))
     if args.base_url:
-        if not args.base_url.startswith(('http://', 'https://')):
-            _emit(dict(event='error', provider=args.provider, error='base url must start with http:// or https://'))
-            return 2
-        override['api_base_url'] = args.base_url.rstrip('/')
+        args.set = [f'api_base_url={args.base_url}'] + (args.set or [])
     if args.default_model:
-        override['default_model'] = args.default_model
+        args.set = [f'default_model={args.default_model}'] + (args.set or [])
     if args.client_id:
-        override.setdefault('auth', {})['client_id'] = args.client_id
+        args.set = [f'auth.client_id={args.client_id}'] + (args.set or [])
+    for item in args.set or []:
+        key, sep, value = item.partition('=')
+        if not sep or not key:
+            _emit(dict(event='error', provider=args.provider, error=f'--set wants key=value, got {item!r}'))
+            return 2
+        parsed = _parse_value(value)
+        head = key.split('.', 1)[0]
+        if head not in EDITABLE_FIELDS and head != 'auth':
+            _emit(dict(event='error', provider=args.provider, error=f'{key!r} is not a field you can set; one of {sorted(EDITABLE_FIELDS)} or auth.*'))
+            return 2
+        if key == 'api_base_url' and isinstance(parsed, str):
+            if not parsed.startswith(('http://', 'https://')):
+                _emit(dict(event='error', provider=args.provider, error='base url must start with http:// or https://'))
+                return 2
+            parsed = parsed.rstrip('/')
+        if key in ('completion_path', 'models_path', 'tokenize_path', 'template_path') and isinstance(parsed, str) and parsed and not parsed.startswith('/'):
+            parsed = '/' + parsed
+        _apply_set(override, key, parsed)
+    target['providers'][args.provider] = override
+    try:
+        session = session_for(args.provider, {'mizpah': target})
+    except (ValueError, TypeError, KeyError) as error:
+        _emit(dict(event='error', provider=args.provider, error=f'that would not be a valid profile: {error}'))
+        return 2
     args.config.write_text(json.dumps(raw, indent=2)+'\n')
-    session = session_for(args.provider, _config(args.config))
     _emit(dict(event='configured', provider=args.provider, override=override, **{k: v for k, v in session.status().items()
                                                                                   if k in ('signed_in', 'reachable', 'reason')}))
     return 0
@@ -275,6 +343,8 @@ def main(argv: list[str] | None = None) -> int:
     configure.add_argument('provider')
     configure.add_argument('--base-url', default=None); configure.add_argument('--default-model', default=None)
     configure.add_argument('--client-id', default=None)
+    configure.add_argument('--set', action='append', default=None, metavar='KEY=VALUE',
+                           help='any profile field, dotted for auth.*; JSON value when it parses; empty removes')
     configure.set_defaults(run=cmd_configure)
     add_local = commands.add_parser('add-local', help='add a server on this machine as a provider')
     add_local.add_argument('name', help='short id, e.g. my_llama')

@@ -296,3 +296,45 @@ def test_use_writes_effort_when_the_model_takes_one(tmp_path: Path, capsys: pyte
     assert provider_cli.main(['use', 'openai_chatgpt', 'gpt-x', '--harness', str(harness), '--effort', 'ultra', '--role', 'controller']) == 0
     capsys.readouterr()
     assert json.loads(harness.read_text())['controller']['generation'] == {'model': 'gpt-x', 'reasoning_effort': 'ultra'}
+
+
+def test_configure_set_edits_any_endpoint_field(tmp_path: Path, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path))
+    engine = tmp_path / 'engine.json'
+    harness = tmp_path / 'harness.json'
+    harness.write_text(json.dumps({'worker': {}, 'controller': {}}))
+    engine.write_text(json.dumps({'harness_config': 'harness.json'}))
+    server, base = _serve(json.dumps({'data': [{'id': 'm'}]}).encode())
+    try:
+        assert provider_cli.main(['--config', str(engine), 'add-local', 'box', '--base-url', base, '--kind', 'llama']) == 0
+        capsys.readouterr()
+        assert provider_cli.main(['--config', str(engine), 'configure', 'box', '--set', 'completion_path=v2/chat', '--set', 'models_path=/v2/models',
+                                  '--set', 'tokenize_path=/tok', '--set', 'template_path=/tpl', '--set', 'context_window=32768',
+                                  '--set', 'timeout_seconds=120', '--set', 'static_headers={"X-Box": "1"}', '--set', 'display_name=Box 2']) == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out['override']['completion_path'] == '/v2/chat' and out['override']['context_window'] == 32768
+        assert provider_cli.main(['--config', str(engine), 'status', 'box']) == 0
+        status = json.loads(capsys.readouterr().out)
+        assert status['display_name'] == 'Box 2' and status['endpoint'] == {
+            'api_base_url': base, 'completion_path': '/v2/chat', 'models_path': '/v2/models', 'wire': 'chat_completions',
+            'context_window': 32768, 'timeout_seconds': 120, 'static_headers': {'X-Box': '1'}, 'tokenize_path': '/tok',
+            'template_path': '/tpl', 'local_kind': 'llama'}
+        assert provider_cli.main(['--config', str(engine), 'use', 'box', 'm']) == 0
+        capsys.readouterr()
+        worker = json.loads(harness.read_text())['worker']
+        assert worker['endpoint']['completion_path'] == '/v2/chat' and worker['endpoint']['tokenize_path'] == '/tok'
+        assert worker['endpoint']['template_path'] == '/tpl' and worker['endpoint']['headers'] == {'Content-Type': 'application/json', 'X-Box': '1'}
+        assert worker['endpoint']['timeout_seconds'] == 120
+        # invalid results are refused and nothing is written
+        assert provider_cli.main(['--config', str(engine), 'configure', 'box', '--set', 'wire=grpc']) == 2
+        assert 'valid profile' in json.loads(capsys.readouterr().out)['error']
+        assert json.loads(engine.read_text())['providers']['box']['wire'] == 'chat_completions'
+        assert provider_cli.main(['--config', str(engine), 'configure', 'box', '--set', 'colour=red']) == 2
+        capsys.readouterr()
+        assert provider_cli.main(['--config', str(engine), 'configure', 'box', '--set', 'tokenize_path=']) == 0
+        assert 'tokenize_path' not in json.loads(capsys.readouterr().out)['override']
+        assert provider_cli.main(['--config', str(engine), 'configure', 'openai_chatgpt', '--set', 'auth.client_id=app_test']) == 0
+        assert json.loads(capsys.readouterr().out)['override'] == {'auth': {'client_id': 'app_test'}}
+    finally:
+        server.shutdown()
+        server.server_close()
