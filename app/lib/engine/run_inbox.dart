@@ -389,6 +389,16 @@ class RunInbox {
         ),
         if (refused.isNotEmpty)
           DocSection('Declined', _grouped(refused), count: refused.length),
+        // The handoff: the eval closes and the loop takes the next ready work
+        // order — the first of these, the rest in order behind it.
+        if (!done && (e['up_next'] as List? ?? const []).isNotEmpty)
+          DocSection('Up next', [
+            DocLine(
+              (e['up_next'] as List).cast<String>().join(', '),
+              lead: (e['up_next'] as List).length == 1 ? 'work order' : 'work orders, in order',
+              mono: true,
+            ),
+          ]),
       ],
     );
   }

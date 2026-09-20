@@ -1071,6 +1071,24 @@ def decide_through_outages(client: Any, config: dict[str, Any], system: str, use
                 raise
 
 
+def ready_order(project: Path, tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The route's pickable tasks in the order the loop takes them: builders before readers, since a reading of
+    a file whose builder is also ready would only block (logo_mark3 measured contrast of marks nine build tasks
+    had not drawn yet)."""
+    ready = [t for t in tasks if t.get('pickable') and t.get('map_id')]
+
+    def builds(task: dict[str, Any]) -> bool:
+        for uid in [task.get('map_id')]+[a.removeprefix('unknown:') for a in task.get('acceptance') or [] if str(a).startswith('unknown:')]:
+            path = project/'.terra'/'map'/'unknowns'/(str(uid)+'.json')
+            try:
+                if 'creates ' in str(json.loads(path.read_text()).get('notes') or ''):
+                    return True
+            except (OSError, ValueError):
+                continue
+        return False
+    return sorted(ready, key=lambda t: not builds(t))
+
+
 def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dict[str, Any]:
     """One controller step: observe, decide, guard (one resubmission), apply, journal."""
     project = project.resolve()
@@ -1132,6 +1150,11 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
     record['refused'] = refusals
     record['why'] = accepted.get('why', '')
     record['done'] = accepted.get('done')
+    # What the loop takes next, in its order: the briefing's handoff line.
+    try:
+        record['up_next'] = [t['id'] for t in ready_order(project, terra(config, project, 'route', 'next')['tasks'])]
+    except Exception:  # noqa: BLE001 — a briefing detail never fails the step
+        record['up_next'] = []
     journal.parent.mkdir(parents=True, exist_ok=True)
     with journal.open('a') as handle:
         handle.write(json.dumps(record)+'\n')
