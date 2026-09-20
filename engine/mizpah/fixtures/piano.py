@@ -186,6 +186,20 @@ def nocturne_lh() -> Path:
 MAKERS = dict(benchmark=benchmark, melody_bass=melody_bass, voice_leading=voice_leading,
               pedal_dynamics=pedal_dynamics, rubato_phrase=rubato_phrase, nocturne_lh=nocturne_lh)
 
+PINNED = Path.home()/'mizpah-runs'/'piano'/'benchmark.brief.json'
+
+
+def benchmark_attempt(attempt: int) -> Path:
+    """The benchmark from its pinned brief — the file attempt 1 wrote, byte for byte — never from this
+    module's text again: an edit here must not move the ruler. The gym is named for the attempt."""
+    pinned = json.loads(PINNED.read_text())
+    folder = init_module.new_gym('Romantic piano piece, attempt '+str(attempt))
+    init_module.init(folder, title=pinned['title'], mission=pinned['mission'], terra=str(TERRA), base=BASE)
+    fresh = json.loads((folder/'.mizpah'/'brief.json').read_text())
+    keep = {k: pinned[k] for k in pinned if k not in ('created_at', 'updated_at', 'history', 'proposals')}
+    (folder/'.mizpah'/'brief.json').write_text(json.dumps(dict(fresh, **keep, proposals=[]), indent=1)+'\n')
+    return folder
+
 
 # ---------------------------------------------------------------- the ruler
 
@@ -226,7 +240,11 @@ def score(project: Path) -> dict:
 
 
 def main() -> None:
-    if len(sys.argv) >= 3 and sys.argv[1] == 'make':
+    if len(sys.argv) >= 3 and sys.argv[1] == 'make' and sys.argv[2] == 'benchmark' and PINNED.exists():
+        attempt = int(sys.argv[3]) if len(sys.argv) > 3 else 2
+        folder = benchmark_attempt(attempt)
+        print(json.dumps(dict(project=str(folder), base=BASE, attempt=attempt, pinned=str(PINNED)), indent=1))
+    elif len(sys.argv) >= 3 and sys.argv[1] == 'make':
         folder = MAKERS[sys.argv[2]]()
         print(json.dumps(dict(project=str(folder), base=BASE), indent=1))
     elif len(sys.argv) >= 3 and sys.argv[1] == 'score':
