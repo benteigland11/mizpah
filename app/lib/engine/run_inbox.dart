@@ -318,15 +318,25 @@ class RunInbox {
     final refused = (e['refused'] as List? ?? const []).cast<String>();
     final done = e['done'] == true;
     List<String> ids(String k) => (applied[k] as List? ?? const []).cast<String>();
+    // Everything the controller asked for, applied or not: a declined item
+    // is still an action it took, shown struck with its verdict beside it.
+    List<String> declinedOf(String kind) => [
+      for (final r in refused)
+        if (RegExp('^$kind (\\S+): ').firstMatch(r) case final m?) m.group(1)!,
+    ];
+    DocLine? attempted(String kind, String verb, String noun) {
+      final ok = ids(kind == 'unknown' ? 'unknowns' : 'tasks');
+      final no = declinedOf(kind).where((id) => !ok.contains(id)).toList();
+      if (ok.isEmpty && no.isEmpty) return null;
+      return DocLine(
+        [...ok, for (final id in no) '$id (declined)'].join(', '),
+        lead: '$verb ${ok.length + no.length} $noun${no.isEmpty ? '' : ' · ${no.length} declined'}',
+        mono: true,
+      );
+    }
     final acts = <DocLine>[
-      if (ids('unknowns').isNotEmpty)
-        DocLine(
-          ids('unknowns').join(', '),
-          lead: 'minted ${ids('unknowns').length} unknowns',
-          mono: true,
-        ),
-      if (ids('tasks').isNotEmpty)
-        DocLine(ids('tasks').join(', '), lead: 'routed work orders', mono: true),
+      ?attempted('unknown', 'minted', 'unknowns'),
+      ?attempted('task', 'routed', 'work orders'),
       if ((applied['proposals'] as List? ?? const []).isNotEmpty)
         DocLine(
           '${(applied['proposals'] as List).length} change request(s) filed',
