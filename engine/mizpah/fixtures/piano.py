@@ -105,7 +105,7 @@ def melody_bass() -> Path:
             RENDER,
         ],
         deliverables=['piece.mid', 'piece.mp3', 'piece.pdf', 'notes.md: the chord plan by bar and the phrase plan'],
-        budget=30, non_goals=NON_GOALS)
+        budget=60, non_goals=NON_GOALS)
 
 
 def voice_leading() -> Path:
@@ -125,7 +125,7 @@ def voice_leading() -> Path:
             RENDER,
         ],
         deliverables=['piece.mid', 'piece.mp3', 'piece.pdf', 'notes.md: the roman-numeral plan and how each rule was checked'],
-        budget=30, non_goals=NON_GOALS)
+        budget=60, non_goals=NON_GOALS)
 
 
 def pedal_dynamics() -> Path:
@@ -144,7 +144,7 @@ def pedal_dynamics() -> Path:
             RENDER,
         ],
         deliverables=['piece.mid', 'piece.mp3', 'notes.md: the velocity and pedal plan per bar'],
-        budget=20, non_goals=NON_GOALS)
+        budget=50, non_goals=NON_GOALS)
 
 
 def rubato_phrase() -> Path:
@@ -163,7 +163,7 @@ def rubato_phrase() -> Path:
             RENDER,
         ],
         deliverables=['piece.mid', 'piece.mp3', 'piece.pdf', 'notes.md: the timing map (bar, beat, stretch) and the velocity arc'],
-        budget=25, non_goals=NON_GOALS)
+        budget=50, non_goals=NON_GOALS)
 
 
 def nocturne_lh() -> Path:
@@ -181,7 +181,7 @@ def nocturne_lh() -> Path:
             PLAYABLE, RENDER,
         ],
         deliverables=['piece.mid', 'piece.mp3', 'piece.pdf', 'notes.md: the harmony by bar and the figure\'s voicing'],
-        budget=30, non_goals=NON_GOALS)
+        budget=60, non_goals=NON_GOALS)
 
 
 def voicing_touch() -> Path:
@@ -201,7 +201,7 @@ def voicing_touch() -> Path:
             RENDER,
         ],
         deliverables=['piece.mid', 'piece.mp3', 'notes.md: the voicings by chord and how the velocities were shaped'],
-        budget=20, non_goals=NON_GOALS)
+        budget=50, non_goals=NON_GOALS)
 
 
 MAKERS = dict(benchmark=benchmark, melody_bass=melody_bass, voice_leading=voice_leading,
