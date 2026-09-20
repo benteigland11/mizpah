@@ -407,14 +407,17 @@ class RunInbox {
       final key = reason.length > 90 ? reason.substring(0, 90) : reason;
       groups.putIfAbsent(key, () => []).add('${m.group(1)} ${m.group(2)}');
     }
+    // One line per reason, the count in front so five subjects under one
+    // reason read as one decline made five times, not five descriptions.
     final out = <DocLine>[];
     groups.forEach((reason, subjects) {
       final full = refused.firstWhere((r) => r.contains(reason));
       final text = full.contains(': ') ? full.split(': ').skip(1).join(': ') : full;
+      final named = subjects.where((s) => s.isNotEmpty).toList();
       out.add(
         DocLine(
-          text,
-          lead: subjects.where((s) => s.isNotEmpty).join(', '),
+          named.length > 1 ? '$text — ${named.length} of them: ${named.join(', ')}' : text,
+          lead: named.length == 1 ? named.single : (named.isEmpty ? '' : '×${named.length}'),
           mono: false,
         ),
       );
