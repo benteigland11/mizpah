@@ -403,9 +403,26 @@ def pack_workspace(project: Path, playbook_store: Path | None = None, *, only: t
             if path.is_symlink() or path.is_file() or path.is_dir():
                 archive.add(path, arcname=relative.as_posix(), recursive=False)
         if playbook_store is not None and playbook_store.is_dir():
+            # Retired procedures (use it or lose it) do not travel: a worker cannot find what it does not have.
+            # The ledger itself does, so touches made in the sandbox are stamped on the same clock.
+            retired = retired_procedures(playbook_store)
             for path in sorted(playbook_store.glob('*.json')):
+                if path.stem in retired:
+                    continue
                 archive.add(path, arcname=PLAYBOOK_PREFIX+'/playbook/procedures/'+path.name, recursive=False)
     return buffer.getvalue()
+
+
+LIBRARY_LEDGER = '.library.json'
+
+
+def retired_procedures(store: Path) -> set[str]:
+    """Ids the playbook's ledger has retired; empty when there is no ledger."""
+    try:
+        data = json.loads((store/LIBRARY_LEDGER).read_text())
+        return {i for i, e in (data.get('items') or {}).items() if isinstance(e, dict) and e.get('status') == 'retired'}
+    except (OSError, ValueError):
+        return set()
 
 
 def _members(snapshot: bytes) -> dict[str, bytes]:
@@ -517,6 +534,12 @@ def _harvest_playbook(snapshot: bytes, store: Path, config: dict[str, Any],
                 continue
             data = archive.extractfile(member).read()
             target = store/Path(member.name).name
+            if target.name == LIBRARY_LEDGER:
+                # The sandbox's ledger: fold its touches (searched, used) into the host's; never install it.
+                _merge_library(config, store, data)
+                continue
+            if target.name.startswith('.'):
+                continue
             if (target.stem in BOOTSTRAP_PROCEDURES or any(target.stem.startswith(b+'-') or target.stem.startswith(b+'_')
                                                             for b in BOOTSTRAP_PROCEDURES)
                     or (allowed is not None and target.stem not in allowed)):
@@ -578,30 +601,53 @@ def widgets_touched(root: Path) -> list[str]:
     return touched
 
 
-def harvest_widgets(snapshot: bytes, root: Path, config: dict[str, Any]) -> dict[str, list[str]]:
+def _merge_library(config: dict[str, Any], store: Path, data: bytes) -> None:
+    """`playbook library` owns the ledger's format; hand it the sandbox copy to merge."""
+    try:
+        travelled = json.loads(data)
+    except ValueError:
+        return
+    script = ('import json, sys\nfrom playbook import library\n'
+              'print(json.dumps(library.merge(json.loads(sys.stdin.read()))))')
+    python = str(Path(config['mizpah']['playbook']).parent/'python')
+    try:
+        subprocess.run([python, '-c', script], input=json.dumps(travelled), capture_output=True, text=True, timeout=30,
+                       env=dict(os.environ, XDG_DATA_HOME=str(store.parent.parent)))
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def harvest_widgets(snapshot: bytes, root: Path, config: dict[str, Any], project: Path | None = None) -> dict[str, list[Any]]:
     with _store_lock(Path(config['mizpah']['widget_library'])):
-        return _harvest_widgets(snapshot, root, config)
+        return _harvest_widgets(snapshot, root, config, project)
 
 
-def _harvest_widgets(snapshot: bytes, root: Path, config: dict[str, Any]) -> dict[str, list[str]]:
+UPSTREAM = '.upstream'   # where a merge round finds the library's current copy: cg/<dir>/.upstream/
+
+
+def _harvest_widgets(snapshot: bytes, root: Path, config: dict[str, Any], project: Path | None = None) -> dict[str, list[Any]]:
     """Widgets the session created or changed: validated and checked into the local library after green.
 
-    Never published. A widget the library already holds at identical source is left alone.
+    Never published. A widget the library already holds at identical source is left alone. A widget whose library
+    version moved while the session worked on it (another task checked in an improvement) is not checked in — that
+    would erase theirs; it is returned under `conflicts` with the library's copy staged at cg/<dir>/.upstream/ in the
+    project, for a merge round.
     """
     import shutil
     import subprocess as sp
     import tempfile
-    result: dict[str, list[str]] = dict(checked_in=[], rejected=[], unchanged=[])
+    result: dict[str, list[Any]] = dict(checked_in=[], rejected=[], unchanged=[], conflicts=[])
     files = _members(snapshot)
     library = Path(config['mizpah']['widget_library'])
     for directory in widgets_touched(root):
         prefix = 'cg/'+directory+'/'
         members = {name: data for name, data in files.items() if name.startswith(prefix)
-                   and '/.venv/' not in name and '__pycache__' not in name}
+                   and '/.venv/' not in name and '__pycache__' not in name and '/'+UPSTREAM+'/' not in name}
         if prefix+'widget.json' not in members:
             continue
         try:
-            widget_id = json.loads(members[prefix+'widget.json'])['meta']['id']
+            meta = json.loads(members[prefix+'widget.json'])['meta']
+            widget_id = meta['id']
         except (ValueError, KeyError, TypeError):
             result['rejected'].append(directory+': widget.json has no meta.id')
             continue
@@ -611,6 +657,23 @@ def _harvest_widgets(snapshot: bytes, root: Path, config: dict[str, Any]) -> dic
                        for name, data in members.items() if not name.endswith('changelog.json'))
             if same:
                 result['unchanged'].append(widget_id)
+                continue
+            try:
+                shipped_version = json.loads((shipped/'widget.json').read_text())['meta'].get('version')
+            except (OSError, ValueError, KeyError):
+                shipped_version = None
+            base_version = meta.get('version')
+            if shipped_version and base_version and shipped_version != base_version:
+                # The base moved under this session: someone else's improvement is in the library. Stage it for a
+                # merge instead of overwriting it.
+                conflict = dict(id=widget_id, dir=directory, base=base_version, library=shipped_version,
+                                changes=_library_changes(shipped, base_version), diff=_widget_diff(shipped, members, prefix))
+                if project is not None:
+                    staged = project/'cg'/directory/UPSTREAM
+                    if staged.exists():
+                        shutil.rmtree(staged)
+                    shutil.copytree(shipped, staged, ignore=shutil.ignore_patterns('history', '__pycache__', '.venv'))
+                result['conflicts'].append(conflict)
                 continue
         with tempfile.TemporaryDirectory(prefix='mizpah-widget-') as temp:
             target = Path(temp)/'cg'/directory
@@ -632,6 +695,57 @@ def _harvest_widgets(snapshot: bytes, root: Path, config: dict[str, Any]) -> dic
             else:
                 result['rejected'].append(widget_id+': checkin: '+(done.stdout or done.stderr).strip()[:300])
     return result
+
+
+def _library_changes(shipped: Path, since: str) -> list[str]:
+    """Changelog reasons the library gained after `since`, newest first."""
+    try:
+        log = json.loads((shipped/'changelog.json').read_text())
+    except (OSError, ValueError):
+        return []
+    out = []
+    for entry in log:
+        if entry.get('version') == since:
+            break
+        out.append(str(entry.get('version'))+': '+str(entry.get('reason') or '')[:120])
+    return out
+
+
+def _widget_diff(shipped: Path, members: dict[str, bytes], prefix: str, limit: int = 160) -> str:
+    """A unified diff, library copy → the session's copy, over src/ and tests/, capped."""
+    import difflib
+    lines: list[str] = []
+    names = sorted({n[len(prefix):] for n in members if n[len(prefix):].startswith(('src/', 'tests/'))}
+                   | {str(p.relative_to(shipped)) for sub in ('src', 'tests') for p in (shipped/sub).rglob('*') if p.is_file()})
+    for name in names:
+        theirs = (shipped/name).read_text(errors='replace').splitlines() if (shipped/name).exists() else []
+        mine = members[prefix+name].decode('utf-8', 'replace').splitlines() if prefix+name in members else []
+        if theirs == mine:
+            continue
+        lines += list(difflib.unified_diff(theirs, mine, 'library/'+name, 'yours/'+name, lineterm='', n=2))
+    if len(lines) > limit:
+        lines = lines[:limit]+['... ('+str(len(lines)-limit)+' more lines)']
+    return '\n'.join(lines)
+
+
+def merge_message(conflicts: list[dict[str, Any]]) -> str:
+    """The one chance to bring an improvement onto a base that moved: what moved, the diff, what to keep."""
+    lines = ['The gate is green and your work is done; one thing remains. A widget you improved was improved by another '
+             'task while you worked, and the library holds their version now. Checking yours in as it is would erase '
+             'theirs, so it was not. Merge yours onto theirs:']
+    for c in conflicts:
+        lines.append('- `'+c['id']+'` (cg/'+c['dir']+'): you started from '+str(c['base'])+', the library is at '+str(c['library'])
+                     +('; since then: '+'; '.join(c['changes']) if c['changes'] else '')+'.')
+        lines.append('  Their copy is at `cg/'+c['dir']+'/'+UPSTREAM+'/` (read it; it is the base you must land on). '
+                     'The diff from their copy to yours:')
+        lines.append('```\n'+(c['diff'] or '(no difference under src/ or tests/)')+'\n```')
+    lines.append('For each: start from their copy — copy `'+UPSTREAM+'/src`, `'+UPSTREAM+'/tests` and `'+UPSTREAM+'/widget.json` over '
+                 'yours — then re-apply your improvement on top: keep every function and test they added, keep every one you '
+                 'added, and where you both changed the same function, keep theirs and add what yours did as a parameter or a '
+                 'new function rather than replacing it. Set nothing about version (the check-in bumps it). Delete the `'
+                 +UPSTREAM+'/` directory, `cartograph validate cg/<dir>` (both sets of tests must pass), then reply that you '
+                 'are done; do not start other work.')
+    return '\n'.join(lines)
 
 
 def widget_problems(config: dict[str, Any], project: Path, root: Path) -> list[str]:
@@ -1897,7 +2011,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
                                             made=[unknown_notes(u)['creates'] for u in unknowns if unknown_notes(u).get('creates')]))
         status = run_through_outages(session, config, root, maximum_worker_turns=budget-status['completed_worker_turns'])
         session.prune_workspaces()
-        widgets = harvest_widgets(evidence(session), root, config)
+        widgets = harvest_widgets(evidence(session), root, config, project)
         playbook = harvest_playbook(evidence(session), store, config,
                                     allowed=tuple(procedures_used(root)+procedures_created(root)))
         deps = declare_artifact_deps(config, project, unknowns)
@@ -1910,11 +2024,13 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         # round that fixes nothing ends it — the same rule as red gate rounds. Fix one of two, and you get
         # another go at the other.
         refused = [('widget', r) for r in widgets['rejected']]+[('procedure', r) for r in playbook['rejected']]
-        while refused and status['status'] == 'complete' and budget-status['completed_worker_turns'] > 0:
-            session.continue_with(refusal_message(refused))
+        conflicts = list(widgets.get('conflicts') or [])
+        while (refused or conflicts) and status['status'] == 'complete' and budget-status['completed_worker_turns'] > 0:
+            # A moved base is merged first (the merge message); plain refusals get the validator's words.
+            session.continue_with(merge_message(conflicts) if conflicts else refusal_message(refused))
             status = run_through_outages(session, config, root, maximum_worker_turns=budget-status['completed_worker_turns'])
             session.prune_workspaces()
-            again_w = harvest_widgets(evidence(session), root, config)
+            again_w = harvest_widgets(evidence(session), root, config, project)
             again_p = harvest_playbook(evidence(session), store, config,
                                        allowed=tuple(procedures_used(root)+procedures_created(root)))
             for key in ('checked_in', 'unchanged'):
@@ -1926,9 +2042,10 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             rounds.append(dict(turns=status['completed_worker_turns'], session=status['status'], gate='library_repair',
                                final_text=status['final_text'], playbook=again_p, widgets=again_w))
             still = [('widget', r) for r in widgets['rejected']]+[('procedure', r) for r in playbook['rejected']]
-            if len(still) >= len(refused):
+            still_conflicts = list(again_w.get('conflicts') or [])
+            if len(still)+len(still_conflicts) >= len(refused)+len(conflicts):
                 break   # nothing fixed this round: the worker has had its say
-            refused = still
+            refused, conflicts = still, still_conflicts
     verdict = ('complete' if gate['ok'] else 'blocked_by_worker' if blocked_reason is not None
                else 'stopped' if status['status'] == 'stopped' else 'incomplete')
     result = dict(task=task['id'], unknown=task['map_id'], unknowns=task_unknown_ids(task), map=map_id, resumed=resuming,
