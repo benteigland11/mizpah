@@ -951,9 +951,18 @@ class FocusedSession:
                         raise ValueError(name+' requires an object of arguments')
                     args = dict(command=render_command_tool(spec, args))
                     self._event('command_tool', dict(call_id=call['id'], name=name, command=args['command']))
-                if (not isinstance(args, dict) or set(args) != {'command'}
-                        or not isinstance(args['command'], str) or not args['command'].strip()):
-                    raise ValueError('bash requires exactly one nonempty command string')
+                if isinstance(args, dict):
+                    # A timeout the model adds from habit is not an error: the harness bounds every command
+                    # itself. Any other extra key is named, so the retry drops it instead of rewording the command
+                    # (logo_mark8 retried fifteen variants against an error that never said "timeout").
+                    args = {k: v for k, v in args.items() if k not in ('timeout', 'timeout_ms', 'timeout_seconds')}
+                if not isinstance(args, dict) or 'command' not in args:
+                    raise ValueError('bash takes one argument, "command" (a string); got '
+                                     +(', '.join(sorted(map(str, args))) if isinstance(args, dict) else type(args).__name__))
+                if set(args) != {'command'}:
+                    raise ValueError('bash takes only "command"; drop '+', '.join(sorted(k for k in args if k != 'command')))
+                if not isinstance(args['command'], str) or not args['command'].strip():
+                    raise ValueError('bash requires a nonempty command string')
             except (ValueError, TypeError) as error:
                 output = dict(status='error', error=str(error))
             else:
