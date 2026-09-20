@@ -556,3 +556,24 @@ def test_a_proposal_can_rewrite_or_remove_an_entry(project: Path) -> None:
         controller.terra(CONFIG, project, 'brief', 'accept', p['id'])
     brief = json.loads((project/'.terra'/'brief.json').read_text())
     assert brief['needs'][1] == 'Know the branch count before, by ast' and len(brief['needs']) == len(needs)-1
+
+
+def test_sibling_readings_are_routed_as_one_task(project: Path) -> None:
+    """Ten unknowns that differ only by an index, each with its own task, become one task with all ten."""
+    (project/'content').mkdir(exist_ok=True)
+    (project/'content'/'rows.md').write_text('one\ntwo\n')
+    observation = controller.observe(CONFIG, project)
+    unknowns = [dict(id='row_'+str(i)+'_note', cites='deliverable:1', type='boolean', claim='report/survey.md row '+str(i)+' has its note, agreeing with report_exists',
+                     evidence_needed='read the row') for i in range(1, 6)]
+    unknowns.append(dict(id='report_exists', cites='deliverable:1', type='boolean', creates='report/survey.md',
+                         claim='report/survey.md exists with one row per line of content/rows.md', evidence_needed='ls'))
+    tasks = [dict(id='check_row_'+str(i), unknowns=['row_'+str(i)+'_note'], bucket='low', title='Check row '+str(i)+' note',
+                  deps=['write']) for i in range(1, 6)]
+    tasks.append(dict(id='write', unknowns=['report_exists'], bucket='low', title='write'))
+    accepted, refusals = controller.guard(dict(unknowns=unknowns, tasks=tasks), observation, project)
+    ids = {t['id']: t for t in accepted['tasks']}
+    assert set(ids) == {'check_row_1', 'write'}, refusals
+    assert ids['check_row_1']['unknowns'] == ['row_'+str(i)+'_note' for i in range(1, 6)]
+    assert ids['check_row_1']['deps'] == ['write'] and ids['check_row_1']['title'] == 'Check row every note'
+    assert len(accepted['unknowns']) == 6
+    assert any('one reading over the list' in r for r in refusals)

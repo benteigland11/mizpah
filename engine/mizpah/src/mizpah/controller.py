@@ -427,6 +427,40 @@ def stem(unknown_id: str) -> str:
     return RETRY_SUFFIX.sub('', unknown_id)
 
 
+def _family(unknown_id: str) -> str:
+    """Unknown ids that differ only by a number are one reading over a list: candidate_3_length → candidate_N_length."""
+    return re.sub(r'(?<![a-z])\d+(?![a-z])', 'N', unknown_id)
+
+
+def _merge_sibling_tasks(tasks: list[dict[str, Any]], refusals: list[str]) -> list[dict[str, Any]]:
+    """Ten tasks that each read one row of the same table are one task read ten times: a worker session per
+    row cost headline2 ten sessions of ~25 turns for "candidate N has its note". When three or more tasks
+    carry nothing but members of one family (ids equal after numbers are masked), they become the first task,
+    which takes every sibling and the union of their deps; the others are dropped and the merge is recorded."""
+    by_family: dict[str, list[dict[str, Any]]] = {}
+    for task in tasks:
+        families = {_family(u) for u in task['unknowns']}
+        if len(families) == 1 and any(ch.isdigit() for ch in ''.join(task['unknowns'])):
+            by_family.setdefault(next(iter(families)), []).append(task)
+    dropped: set[str] = set()
+    for family, members in by_family.items():
+        if len(members) < 3:
+            continue
+        head, rest = members[0], members[1:]
+        for task in rest:
+            head['unknowns'] = head['unknowns']+[u for u in task['unknowns'] if u not in head['unknowns']]
+            head['deps'] = head['deps']+[d for d in task['deps'] if d not in head['deps'] and d != head['id']]
+            dropped.add(task['id'])
+        head['deps'] = [d for d in head['deps'] if d not in dropped]
+        head['title'] = re.sub(r'\b\d+\b', 'every', head['title'], count=1) if re.search(r'\b\d+\b', head['title']) else head['title']
+        refusals.append('tasks '+', '.join(t['id'] for t in rest)+': readings that differ only by an index ('+family
+                        +') are one reading over the list; merged into '+head['id']+', which now resolves all '
+                        +str(len(head['unknowns']))+' of them in one session')
+    kept = [t for t in tasks if t['id'] not in dropped]
+    for task in kept:
+        task['deps'] = [d for d in task['deps'] if d not in dropped]
+    return kept
+
 def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path | None = None, *,
           require_deliverables: bool = False) -> tuple[dict[str, Any], list[str]]:
     """Structural floor: every unknown cites a brief entry and names a source that exists; every task
@@ -640,7 +674,10 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         if item.get('bucket') not in BUCKETS:
             refusals.append('task '+tid+': bucket must be one of '+', '.join(BUCKETS)); continue
         deps = [str(d) for d in item.get('deps') or []]
-        bad = [d for d in deps if d not in existing_tasks and not any(t['id'] == d for t in tasks)]
+        # A dependency may name a task later in the same reply; apply() adds tasks in dependency order. A task
+        # refused above is gone from `tasks` and is dropped below once the reply is done (see the covered check).
+        later = {str(ti.get('id')) for ti in (decision.get('tasks') or []) if isinstance(ti, dict)}
+        bad = [d for d in deps if d not in existing_tasks and not any(t['id'] == d for t in tasks) and d not in later]
         if bad:
             # A dependency on a task refused above (or never named) is dropped, not fatal: one bad task
             # otherwise sinks every task behind it and every unknown they carried (components, 2026-09-19).
@@ -728,6 +765,13 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             refusals.append('task '+tid+': one enabler per task ('+', '.join(sorted(carried))+')'); continue
         tasks.append(dict(id=tid, title=title, unknowns=ids, unknown=ids[0], bucket=item['bucket'], deps=deps,
                           enabler=next(iter(carried), '')))
+    accepted_ids = existing_tasks | {t['id'] for t in tasks}
+    for t in tasks:
+        gone = [d for d in t['deps'] if d not in accepted_ids]
+        if gone:
+            refusals.append('task '+t['id']+': dropped dependency '+', '.join(gone)+' (refused); kept the task')
+            t['deps'] = [d for d in t['deps'] if d in accepted_ids]
+    tasks = _merge_sibling_tasks(tasks, refusals)
     covered = {u for t in tasks for u in t['unknowns']}
     for uid in minted - covered:
         refusals.append('unknown '+uid+': minted without a task; every unknown is routed by exactly one task')
