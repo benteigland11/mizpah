@@ -229,9 +229,9 @@ class _ShellState extends State<Shell> {
       (Icons.home_outlined, 'Home'),
       (Icons.inbox_outlined, 'Daily work'),
       (Icons.description_outlined, 'Brief'),
+      (Icons.account_balance_outlined, 'Budget'),
       (Icons.assignment_outlined, 'Work orders'),
       (Icons.menu_book_outlined, 'Data book'),
-      (Icons.account_balance_outlined, 'Budget'),
     ];
     // In an office the Home tab goes; a Home button at the far left is
     // the way out (not styled as "back" — a real back may come later).
@@ -303,13 +303,13 @@ class _ShellState extends State<Shell> {
                         route: widget.route,
                         nav: widget.nav,
                       ),
+                      BudgetScreen(manager: widget.budget),
                       WorkOrdersScreen(
                         manager: widget.workOrders,
                         briefs: widget.manager,
                         nav: widget.nav,
                       ),
                       DataBookScreen(manager: widget.databook),
-                      BudgetScreen(manager: widget.budget),
                       LoopScreen(manager: widget.loop),
                       ProvidersScreen(manager: widget.providers),
                       const SizedBox.shrink(), // settings renders full-window above
@@ -376,7 +376,8 @@ class OpsTabs extends StatelessWidget {
   Widget _tab(BuildContext context, int i, IconData icon, String label) {
     final cs = Theme.of(context).colorScheme;
     final on = i == index;
-    final color = on ? cs.primary : cs.onSurfaceVariant;
+    // Selection is ink, not the red accent: red means stopped now.
+    final color = on ? AppTheme.ink(context) : cs.onSurfaceVariant;
     return InkWell(
       onTap: () => onSelect(i),
       child: Container(
