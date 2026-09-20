@@ -1,12 +1,13 @@
 """Piano: one benchmark brief and a ladder of practice gyms, all on the `piano` base.
 
-Usage: python -m fixtures.piano make benchmark|melody_bass|voice_leading|pedal_dynamics|rubato_phrase|nocturne_lh
+Usage: python -m fixtures.piano make benchmark [attempt]|melody_bass|voice_leading|pedal_dynamics|rubato_phrase|nocturne_lh|voicing_touch
        python -m fixtures.piano score <project_dir>            readings off the MIDI the gym produced
 
 The regime: the benchmark ("compose and perform a romantic piano piece, 90 s") runs cold, then again after each
-block of practice, its text never edited; the curve is turns, stops and the readings. The practice gyms each
-train one narrow skill — a melody over a left-hand figure, voice leading, pedal and dynamics, rubato, a
-nocturne left hand — and the procedures they mint are what the next benchmark run finds in `playbook search`.
+block of practice, its text never edited; the curve is turns, stops and the readings. Two blocks: the mechanics
+of playing (pedal and dynamics, rubato, voicing and touch), then composing (a melody over a left-hand figure,
+voice leading, a nocturne left hand). The procedures each gym mints are what the next benchmark finds in
+`playbook search`.
 
 Every gym is a `mizpah init --gym --base piano` project: the base (fluidsynth, the GM soundfont, LilyPond,
 a venv with mido/music21/pretty_midi) is bound read-only; everything the worker writes lands in the gym.
@@ -183,8 +184,29 @@ def nocturne_lh() -> Path:
         budget=30, non_goals=NON_GOALS)
 
 
+def voicing_touch() -> Path:
+    return gym(
+        'Voicing and touch',
+        'Perform a given 8-bar chord sequence so the top voice sings: the melody note of each chord louder than '
+        'the rest, the left hand under it, legato in the melody and a detached final bar, rendered.',
+        needs=[
+            '8 bars in 4/4 in a stated major key, the progression I V vi iii IV I IV V then I, two chords per bar '
+            'as four-note voicings (two notes per hand), `piece.mid` program 0, the top note of each chord forming '
+            'a stepwise melody.',
+            'Voicing: in every chord the top note is at least 12 velocity louder than each other note of the '
+            'chord, and the left-hand notes are at least 8 softer than the right-hand inner voice.',
+            'Touch: in bars 1-7 each melody note overlaps the next by 20-60 ms (legato); in bar 8 every note ends '
+            'at least 80 ms before the next begins (detached); the final chord is held for its full length.',
+            'Pedal changes with every chord; the last bar has a ritardando of at least 15%.',
+            RENDER,
+        ],
+        deliverables=['piece.mid', 'piece.mp3', 'notes.md: the voicings by chord and how the velocities were shaped'],
+        budget=20, non_goals=NON_GOALS)
+
+
 MAKERS = dict(benchmark=benchmark, melody_bass=melody_bass, voice_leading=voice_leading,
-              pedal_dynamics=pedal_dynamics, rubato_phrase=rubato_phrase, nocturne_lh=nocturne_lh)
+              pedal_dynamics=pedal_dynamics, rubato_phrase=rubato_phrase, nocturne_lh=nocturne_lh,
+              voicing_touch=voicing_touch)
 
 PINNED = Path.home()/'mizpah-runs'/'piano'/'benchmark.brief.json'
 
