@@ -70,6 +70,20 @@ def test_the_composition_is_minted_first_and_its_readers_depend_on_it(gym: Path)
     assert not any('it builds an artifact that must agree with the map' in r and 'compose' in r for r in refusals), refusals
 
 
+def test_the_model_need_not_send_creates(gym: Path) -> None:
+    """The controller derives `creates` from the deliverable's text; the source-artifact rule must see that,
+    not the raw decision (melody_bass stalled on the same refusal after the first fix, 2026-09-20)."""
+    observation = controller.observe(CONFIG, gym)
+    decision = dict(unknowns=[
+        dict(id='piece_mid_built', cites='deliverable:1', type='boolean',
+             claim='`piece.mid` exists as a parseable piano MIDI file implementing the piece',
+             evidence_needed='a MIDI inspection confirms piece.mid exists and uses program 0'),
+    ], tasks=[dict(id='build_piece', unknowns=['piece_mid_built'], bucket='medium', title='compose')])
+    accepted, refusals = controller.guard(decision, observation, gym)
+    assert [u['id'] for u in accepted['unknowns']] == ['piece_mid_built'], refusals
+    assert accepted['unknowns'][0]['creates'] == 'piece.mid'
+
+
 def test_a_report_with_no_anchor_is_still_refused(gym: Path) -> None:
     observation = controller.observe(CONFIG, gym)
     decision = dict(unknowns=[

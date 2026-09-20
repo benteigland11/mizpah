@@ -696,11 +696,11 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
     # with validators of a MIDI nothing was allowed to write, and the deps guard then made the builder wait on
     # its own readers (2026-09-20).
     source_artifacts: set[str] = set()
-    for item in decision.get('unknowns') or []:
-        made = str(item.get('creates') or '').lower() if isinstance(item, dict) else ''
+    for item in unknowns:   # the normalised list: `creates` is derived from the deliverable's text, the model rarely sends it
+        made = str(item.get('creates') or '').lower()
         if not made:
             continue
-        others = [u for u in (decision.get('unknowns') or []) if isinstance(u, dict) and u is not item]+list(observation['unknowns'])
+        others = [u for u in unknowns if u is not item]+list(observation['unknowns'])
         read_by_others = any(made in (str(u.get('source') or '')+' '+str(u.get('claim') or '')).lower() for u in others)
         named_by_needs = any(made in str(n).lower() for n in observation['brief'].get('needs') or [])
         if read_by_others or named_by_needs:
