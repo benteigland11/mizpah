@@ -62,6 +62,17 @@ def _stems(words: set[str]) -> set[str]:
     return {w[:5] for w in words}
 
 
+def stored(config: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every recorded run in the library, unreadable files skipped."""
+    out = []
+    for path in sorted(store_dir(config).glob('*.json')):
+        try:
+            out.append(json.loads(path.read_text()))
+        except (OSError, ValueError):
+            continue
+    return out
+
+
 def related(config: dict[str, Any], brief: dict[str, Any], *, limit: int = 2) -> list[dict[str, Any]]:
     """The stored briefs nearest this one: ranked by shared stems across mission, needs and deliverables,
     excluding the same project; each with the unknowns it minted."""

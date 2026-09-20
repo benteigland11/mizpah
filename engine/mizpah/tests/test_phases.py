@@ -55,7 +55,7 @@ def test_render_marks_current_and_later(project: Path) -> None:
     text = controller.render_observation(observation, 'route')
     assert 'survey [CURRENT]' in text and 'change [later]' in text
     assert 'need:3 Know the branch count after, against branch_count_before  (phase change, not open yet' in text
-    assert 'need:1 Know the number of lines\n' in text
+    assert 'need:1 Know the number of lines' in text
 
 
 def test_guard_refuses_a_later_phase_cite(project: Path) -> None:

@@ -20,6 +20,7 @@ from cg.backend_persistent_model_session_python.src.persistent_model_session imp
 
 from . import briefs, capabilities, enablers, phases
 from . import layout
+from . import priorart
 from .worker import terra
 
 ID_PATTERN = re.compile(r'^[a-z][a-z0-9_]*$')
@@ -134,7 +135,7 @@ def observe(config: dict[str, Any], project: Path) -> dict[str, Any]:
     route = terra(config, project, 'route', 'status')
     related_briefs = briefs.related(config, brief) if config['mizpah'].get('brief_library', True) else []
     registry = capabilities.render(config, brief)
-    return dict(
+    observation = dict(
         project_path=str(project),
         repo=repo_digest(project),
         brief={key: brief.get(key) for key in ('title', 'version', 'status', 'mission', 'needs', 'deliverables',
@@ -143,7 +144,7 @@ def observe(config: dict[str, Any], project: Path) -> dict[str, Any]:
                                 if p.get('status') in (None, 'open', 'pending')],
                      decided=[p for p in json.loads((project/layout.dirname(project)/'brief.json').read_text()).get('proposals') or []
                               if p.get('status') in ('accepted', 'rejected')][-6:]),
-        gate=sitrep.get('gate'), related_briefs=related_briefs, registry=registry,
+        gate=sitrep.get('gate'), related_briefs=related_briefs, registry=registry, prior_art=[],
         budget=(sitrep.get('route') or {}).get('budget'),
         knowns=[dict(id=k.get('id'), type=k.get('type'), status=k.get('status'), confidence=k.get('confidence'),
                      n=(k.get('stats') or {}).get('n'), mean=(k.get('stats') or {}).get('mean'),
@@ -157,6 +158,15 @@ def observe(config: dict[str, Any], project: Path) -> dict[str, Any]:
                     bucket=t.get('bucket'), title=t['title'], blocked_reason=t.get('blocked_reason'))
                for t in route.get('tasks') or []],
     )
+    # What the library holds for what is still owed, looked up per entry (no model): the controller's chance to
+    # route an install instead of a build, or mint a reading the way another project did.
+    if config['mizpah'].get('brief_library', True):
+        try:
+            _, owed = coverage(observation)
+            observation['prior_art'] = priorart.render(config, project, owed)
+        except Exception:  # noqa: BLE001 — a lookup never fails an observation
+            observation['prior_art'] = []
+    return observation
 
 
 def render_observation(observation: dict[str, Any], mode: str, refusals: list[str] = ()) -> str:
@@ -172,12 +182,14 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
         ref = notes.split('cites ', 1)[1].split(';')[0].strip() if 'cites ' in notes else ''
         if ref:
             cited.setdefault(ref, []).append(u['id']+' ['+str(u.get('status'))+']: '+str(u.get('claim')))
+    states, owed = coverage(observation)
     for key in ('needs', 'deliverables', 'non_goals'):
         entries = brief.get(key) or []
         lines.append(key.capitalize()+':'+('' if entries else ' (none)'))
         for i, entry in enumerate(entries):
             ref = key[:-1].replace('non_goal', 'non-goal')+':'+str(i+1)
-            lines.append('  '+ref+' '+str(entry)+((phases.tag(brief, ref)+enablers.tag(brief, ref)) if key != 'non_goals' else ''))
+            state = ('  ['+states[ref]+']') if ref in states else ''
+            lines.append('  '+ref+' '+str(entry)+((phases.tag(brief, ref)+enablers.tag(brief, ref)) if key != 'non_goals' else '')+state)
             if key == 'deliverables':
                 for line in cited.get(ref, []):
                     lines.append('      ↳ '+line[:160])
@@ -209,6 +221,13 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
         for p in decided:
             lines.append('  '+str(p.get('id'))+' '+str(p.get('status'))+': '+str(p.get('summary') or '').split(' \u2014 evidence:')[0][:120]
                          +(' — reason: '+str(p['decision_reason'])[:160] if p.get('decision_reason') else ''))
+    if states:
+        n_met = sum(1 for v in states.values() if v.startswith('MET') and 'FALSE' not in v)
+        lines.append('Coverage (computed): '+str(n_met)+' of '+str(len(states))+' entries met; owed or uncovered: '
+                     +(', '.join(ref for ref, _ in owed) if owed else 'none')+'. Route only for these'
+                     +(' — and in this reply only what can start now: builders of deliverable files, readings of sources '
+                       'that exist; readings of files to be built are minted once they exist.' if mode == 'route' else '.'))
+    lines += observation.get('prior_art') or []
     lines.append('')
     lines += briefs.render(observation.get('related_briefs') or [])
     lines.append('# Map (state)')
@@ -372,6 +391,51 @@ def source_exists(project: Path, source: str) -> bool:
     if any(ch in source for ch in '*?['):
         return any(True for _ in project.glob(source))
     return (project/source).exists()
+
+
+def coverage(observation: dict[str, Any]) -> tuple[dict[str, str], list[tuple[str, str]]]:
+    """Computed, not judged: for every brief entry, MET (a known at med or better answers it), OWED (an unknown is
+    open — routed in which task, or unrouted), or UNCOVERED (nothing cites it). Returns the state line per entry
+    ref and the owed/uncovered entries (ref, text) for the prior-art lookup. The controller reasoned this out from
+    the raw lists on every step; a third of its evals were spent restating it."""
+    brief = observation['brief']
+    knowns = {k['id']: k for k in observation['knowns']}
+    task_of: dict[str, str] = {}
+    for t in observation['tasks']:
+        for u in (t.get('unknowns') or [str(t.get('unknown'))]):
+            task_of.setdefault(u, t['id']+' ['+t['status']+']')
+    by_ref: dict[str, list[dict[str, Any]]] = {}
+    for u in observation['unknowns']:
+        notes = str(u.get('notes') or '')
+        for kind, index in re.findall(r'(need|deliverable):(\d+)', notes.split(';')[0]):
+            by_ref.setdefault(kind+':'+index, []).append(u)
+    order = {'high': 3, 'med': 2, 'low': 1}
+    states: dict[str, str] = {}
+    owed: list[tuple[str, str]] = []
+    for key in ('needs', 'deliverables'):
+        for i, text in enumerate(brief.get(key) or [], start=1):
+            ref = key[:-1]+':'+str(i)
+            us = by_ref.get(ref, [])
+            met, open_ = [], []
+            for u in us:
+                k = knowns.get(u['id'])
+                if u.get('status') == 'resolved' and k and order.get(str(k.get('confidence')), 0) >= 2 and not k.get('stale'):
+                    value = k.get('mean') if k.get('mean') is not None else (k.get('rate') if k.get('rate') is not None else k.get('mode'))
+                    bad = k.get('type') == 'boolean' and k.get('rate') is not None and float(k['rate']) < 0.5
+                    met.append(u['id']+'='+str(value)+(' FALSE' if bad else ''))
+                else:
+                    open_.append(u['id']+(' → '+task_of[u['id']] if u['id'] in task_of else ' (unrouted)'))
+            if not us:
+                states[ref] = 'UNCOVERED'
+                owed.append((ref, str(text)))
+            elif open_:
+                states[ref] = 'OWED: '+', '.join(open_)+((' | met: '+', '.join(met)) if met else '')
+                owed.append((ref, str(text)))
+            else:
+                states[ref] = 'MET: '+', '.join(met)
+                if any(m.endswith('FALSE') for m in met):
+                    owed.append((ref, str(text)))
+    return states, owed
 
 
 def deliverable_ledger(observation: dict[str, Any]) -> list[str]:
