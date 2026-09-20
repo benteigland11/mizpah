@@ -465,6 +465,7 @@ def harvest_playbook(snapshot: bytes, store: Path, config: dict[str, Any],
 def _harvest_playbook(snapshot: bytes, store: Path, config: dict[str, Any],
                       allowed: tuple[str, ...] | None = None) -> dict[str, list[str]]:
     installed, rejected, ignored = [], [], []
+    created, improved = [], []
     prefix = PLAYBOOK_PREFIX+'/playbook/procedures/'
     with tarfile.open(fileobj=io.BytesIO(snapshot), mode='r:') as archive:
         for member in archive:
@@ -489,13 +490,15 @@ def _harvest_playbook(snapshot: bytes, store: Path, config: dict[str, Any],
                                    env=dict(os.environ, XDG_DATA_HOME=str(store.parent.parent)))
             if check.returncode == 0:
                 installed.append(target.stem)
+                # New to the library, or an existing procedure improved: the notice tells them apart.
+                (improved if backup is not None else created).append(target.stem)
             else:
                 rejected.append(target.stem+': '+(check.stderr or check.stdout).strip()[:300])
                 if backup is None:
                     target.unlink()
                 else:
                     target.write_bytes(backup)
-    return dict(installed=installed, rejected=rejected, ignored=ignored)
+    return dict(installed=installed, rejected=rejected, ignored=ignored, created=created, improved=improved)
 
 
 def worker_blocked(project: Path, task: dict[str, Any]) -> str | None:
