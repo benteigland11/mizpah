@@ -260,7 +260,7 @@ def test_openai_local_kind_goes_through_the_session_transport(tmp_path: Path, ca
     engine.write_text(json.dumps({'harness_config': 'harness.json'}))
     server, base = _serve(json.dumps({'data': [{'id': 'm'}]}).encode())
     try:
-        assert provider_cli.main(['--config', str(engine), 'add-local', 'ollama', '--base-url', base]) == 0
+        assert provider_cli.main(['--config', str(engine), 'add-local', 'ollama', '--base-url', base, '--kind', 'openai']) == 0  # the stub answers everything, so say so
         capsys.readouterr()
         assert provider_cli.main(['--config', str(engine), 'use', 'ollama', 'm']) == 0
         assert json.loads(capsys.readouterr().out)['transport'] == 'subscription'
