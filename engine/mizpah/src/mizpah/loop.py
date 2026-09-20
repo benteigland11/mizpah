@@ -316,6 +316,17 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                   +', '.join(l['comm']+' pid '+str(l['pid'])+' '+str(l['rss_mb'])+' MB' for l in leaks[:6]), flush=True)
         return leaks
     reap('start')
+    # A task the previous run blocked on its own plumbing ("driver error: …") is ours to retry, not the
+    # worker's or the brief's: release it now that the engine has had its chance to be fixed.
+    for t in blocked(config, project):
+        if str(t.get('blocked_reason') or '').startswith(controller.DRIVER_BLOCK):
+            try:
+                terra(config, project, 'route', 'unblock', t['id'])
+                with log.open('a') as handle:
+                    handle.write(json.dumps(dict(at=time.time(), where='retry', task=t['id'], reason=t.get('blocked_reason')))+'\n')
+            except RuntimeError as error:
+                with log.open('a') as handle:
+                    handle.write(json.dumps(dict(at=time.time(), where='retry:'+t['id'], error=str(error)[:300]))+'\n')
     # SIGTERM (a plain `kill`) should still run the finally blocks that stop services and write the report.
     import signal
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))

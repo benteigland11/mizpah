@@ -28,6 +28,10 @@ BUCKETS = ('low', 'medium', 'high')
 OPEN_UNKNOWN = ('open', 'probing', 'blocked')
 OPEN_TASK = ('ready', 'in_progress', 'blocked', 'pending')
 BUDGET_BLOCK = ('worker budget exhausted', 'gate rounds exhausted')
+# A block the loop wrote when its own plumbing raised: not a worker's finding about the source, and not a
+# reason to rewrite the brief. A fresh run retries it. (The first embedded run's CR-001 proposed a need
+# rewording over "driver error: empty file", 2026-09-20.)
+DRIVER_BLOCK = 'driver error:'
 
 
 DIGEST_SKIP = {'.terra', '.mizpah', '.git', '.venv', '__pycache__', 'node_modules', '.playbook', '.tool-output', '.session-history', 'cg'}
@@ -266,13 +270,17 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
     for t in observation['tasks']:
         if t in finished:
             continue
+        reason = str(t.get('blocked_reason') or '')
         lines.append('  '+t['id']+' ['+t['status']+', '+str(t['bucket'])+'] → '+', '.join(t.get('unknowns') or [str(t['unknown'])])+': '+t['title']+
-                     (' (blocked: '+t['blocked_reason']+')' if t.get('blocked_reason') else ''))
+                     ((' (blocked by the harness, not the worker: '+reason+' — it is retried on the next run; nothing about the '
+                       'source or the brief follows from it)') if reason.startswith(DRIVER_BLOCK) else
+                      (' (blocked: '+reason+')' if reason else '')))
     if any(str(t.get('blocked_reason') or '').startswith(BUDGET_BLOCK) for t in observation['tasks']):
         lines.append('A task blocked on budget resumes from where it stopped if you re-bucket it.')
     if any(t['status'] == 'blocked' and not str(t.get('blocked_reason') or '').startswith(BUDGET_BLOCK)
            for t in observation['tasks']):
         unbuilt = [t for t in observation['tasks'] if t['status'] == 'blocked'
+                   and not str(t.get('blocked_reason') or '').startswith(DRIVER_BLOCK)
                    and re.search(r'does not exist|do not exist|not exist|missing|absent|no such|not present|only .* exist', str(t.get('blocked_reason') or ''), re.I)]
         if unbuilt:
             lines.append('Blocked on a source that does not exist yet ('+', '.join(t['id'] for t in unbuilt)+'): this is your '
