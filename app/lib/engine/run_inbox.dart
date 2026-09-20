@@ -43,8 +43,12 @@ class RunInbox {
     return m == null || m.isEmpty ? role : '$role · $m';
   }
 
+  /// Bump when the paperwork's shape or wording changes: every stored
+  /// inbox.json then rebuilds on its next read instead of by hand.
+  static const builderVersion = 4;
+
   String _fingerprint() {
-    final parts = <String>[];
+    final parts = <String>['v$builderVersion'];
     final results = <File>[];
     final tasks = Directory('${session.path}/tasks');
     if (tasks.existsSync()) {
@@ -322,6 +326,19 @@ class RunInbox {
         ),
       if ((applied['rebucket'] as List? ?? const []).isNotEmpty)
         DocLine('${applied['rebucket']}', lead: 're-classed'),
+      if ((applied['retype'] as List? ?? const []).isNotEmpty)
+        DocLine((applied['retype'] as List).join(', '), lead: 'retyped', mono: true),
+      if ((applied['unblock'] as List? ?? const []).isNotEmpty)
+        DocLine((applied['unblock'] as List).join(', '), lead: 'released', mono: true),
+    ];
+    // What the worker said when it blocked: the statement this eval is
+    // answering. Without it the briefing reads as if the block were ignored
+    // (logo_mark8 #007 split a contrast unknown five ways on the worker's
+    // word and showed only "minted 5 unknowns").
+    final blocked = <DocLine>[
+      for (final t in ((e['observation'] as Map?)?['tasks'] as List? ?? const []))
+        if ((t as Map)['status'] == 'blocked' && ((t['blocked_reason'] as String?) ?? '').isNotEmpty)
+          DocLine(_clip(t['blocked_reason'] as String, 400), lead: t['id'] as String, quote: true),
     ];
     // GO once the map answers the brief. Otherwise the work simply goes on
     // — IN WORK, a neutral stamp. Applying nothing is normal while routed
@@ -365,6 +382,7 @@ class RunInbox {
       ],
       sections: [
         DocSection('Situation', [DocLine(e['why'] as String? ?? '')]),
+        if (blocked.isNotEmpty) DocSection('Worker reports', blocked, count: blocked.length),
         DocSection(
           'Actions taken',
           acts.isEmpty ? const [DocLine('None — nothing new owed.')] : acts,
@@ -433,10 +451,14 @@ class RunInbox {
         : inProgress
         ? 'in_progress'
         : (res['verdict'] as String? ?? status);
+    // The worker's verdicts: complete (gate green) · blocked_by_worker ·
+    // stopped (from outside) · incomplete (finished with the gate red).
     final stamp = switch (verdict) {
-      'complete' || 'done' => 'CLOSED',
-      'blocked' => 'BLOCKED',
+      'complete' || 'done' => 'GATE GREEN',
+      'blocked' || 'blocked_by_worker' => 'BLOCKED',
       'error' => 'ABORTED',
+      'stopped' => 'STOPPED',
+      'incomplete' => 'GATE RED',
       'in_progress' => 'IN PROGRESS',
       'ready' => 'QUEUED',
       'cancelled' => 'CANCELLED',
@@ -498,6 +520,18 @@ class RunInbox {
     }
     final blocked = res['blocked_reason'] ?? rt['blocked_reason'];
     if (blocked != null) closeOut.add(DocLine('$blocked', lead: 'blocked', emphasis: true));
+    if (verdict == 'incomplete') {
+      final redRounds = (res['rounds'] as List? ?? const [])
+          .where((r) => (r as Map)['gate'] == false)
+          .length;
+      closeOut.add(DocLine(
+        'The worker finished but the gate refused its readings'
+        '${redRounds > 0 ? ' $redRounds time(s)' : ''}; it did not say it was stuck. '
+        'The refusals are under Anomalies; the next briefing routes what follows.',
+        lead: 'gate red at close',
+        emphasis: true,
+      ));
+    }
 
     final rounds = (res['rounds'] as List? ?? const []);
     final stamps = <DocLine>[];
