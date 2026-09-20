@@ -3,8 +3,10 @@
 Usage: python -m fixtures.piano make benchmark [attempt]|melody_bass|voice_leading|pedal_dynamics|rubato_phrase|nocturne_lh|voicing_touch
        python -m fixtures.piano score <project_dir>            readings off the MIDI the gym produced
 
-Practice gyms ask for piece.mid and notes.md only: the render pipeline (mp3, pdf) is a skill the library holds green,
-and re-drilling it cost a third to a half of every gym's turns (2026-09-20). The benchmark keeps the full set.
+Practice gyms are I/O contracts: a mission, piece.mid + notes.md out, three needs in a pianist's words, no
+thresholds and no commands. The controller decomposes them into readings and the worker picks the numbers; a
+need written as an acceptance test cost a task per clause and handed the worker numbers it never got to learn
+(Block A, 2026-09-20). The benchmark keeps its pinned text until its series ends.
 
 The regime: the benchmark ("compose and perform a romantic piano piece, 90 s") runs cold, then again after each
 block of practice, its text never edited; the curve is turns, stops and the readings. Two blocks: the mechanics
@@ -94,38 +96,26 @@ def benchmark() -> Path:
 def melody_bass() -> Path:
     return gym(
         'Melody over a broken-chord bass',
-        'Write and perform a 16-bar piano melody in a major key over a left-hand broken-chord figure, with phrase '
-        'shape and a proper cadence, rendered to audio.',
+        'Write and play a short tune for piano: the right hand singing over a left hand that keeps moving.',
         needs=[
-            '16 bars in 4/4 in one major key, four 4-bar phrases, `piece.mid` program 0; the melody sits in the '
-            'right hand between C4 and C6 and moves mostly by step (at least 60% of its intervals are seconds).',
-            'The left hand plays a broken-chord figure (Alberti or arpeggiated) that changes chord with the harmony '
-            'at least once per bar and never holds more than one chord per beat.',
-            'Harmony: I, IV, V and vi appear; the last two bars are a perfect authentic cadence (V then I, melody '
-            'ending on the tonic).',
-            'Performed: the melody is louder than the accompaniment by at least 15 velocity on average; each phrase '
-            'has a velocity arc (rises then falls); the final bar has a ritardando of at least 10%.',
+            'It has a tune: a line you could hum, in one major key, that ends properly.',
+            'The left hand moves under it in a broken-chord figure.',
+            'The tune is louder than what is under it, and each phrase has a shape.',
         ],
-        deliverables=['piece.mid', 'notes.md: the chord plan by bar and the phrase plan'],
+        deliverables=['piece.mid', 'notes.md'],
         budget=60, non_goals=NON_GOALS)
 
 
 def voice_leading() -> Path:
     return gym(
         'Four-voice chorale for piano',
-        'Write an 8-bar four-voice chorale for piano with clean voice leading, and perform it with pedal, rendered.',
+        'Write and play a short chorale for piano: four voices, in a minor key, with voice leading a teacher would pass.',
         needs=[
-            '8 bars, four voices throughout (two per hand), one chord per beat, `piece.mid` program 0, in a minor '
-            'key with a picardy or minor tonic ending after a cadence.',
-            'Voice leading: no parallel perfect fifths or octaves between any two voices; no voice leaps more than '
-            'an octave; common tones between adjacent chords are kept in the same voice at least 70% of the time; '
-            'voices never cross.',
-            'Spacing: adjacent upper voices within an octave; the bass may be wider; the whole chord within the '
-            'two-hand span rule ('+PLAYABLE.split(': ', 1)[1]+')',
-            'Performed: pedal changes on every chord change; the soprano is the loudest voice on average; the '
-            'final cadence has a ritardando of at least 15%.',
+            'Four voices throughout, two to a hand, in a minor key with a proper ending.',
+            'The voices lead well: no parallel fifths or octaves, common tones kept, no voice crossing.',
+            'The top voice carries, and the pedal follows the chord changes.',
         ],
-        deliverables=['piece.mid', 'notes.md: the roman-numeral plan and how each rule was checked'],
+        deliverables=['piece.mid', 'notes.md'],
         budget=60, non_goals=NON_GOALS)
 
 
@@ -168,18 +158,13 @@ def rubato_phrase() -> Path:
 def nocturne_lh() -> Path:
     return gym(
         'Nocturne left hand',
-        'Write 16 bars in a nocturne texture: a wide-spaced left-hand figure (bass, then chord tones above) in 12/8 '
-        'under a right-hand melody, performed with pedal per harmony, rendered.',
+        'Write and play a short passage in a nocturne texture: a wide, rolling left hand under a singing right hand.',
         needs=[
-            '16 bars in 12/8, `piece.mid` program 0, minor key; the left hand plays a bass note on beat 1 and 7 of '
-            'each bar with chord tones above it on the other eighths, spanning at least a tenth per bar.',
-            'The right-hand melody has at least two ornamental runs (four or more notes within a beat) and '
-            'otherwise moves in longer values; it stays above the left hand at every onset.',
-            'Pedal changes with each harmony (at least twice per bar); the left-hand figure is at least 10 velocity '
-            'softer than the melody on average.',
-            PLAYABLE,
+            'The left hand is wide and rolls: bass low, chord tones above it, in compound time.',
+            'The melody floats above it, with a couple of ornamental runs.',
+            'The accompaniment stays under the melody, and the pedal follows the harmony.',
         ],
-        deliverables=['piece.mid', 'notes.md: the harmony by bar and the figure\'s voicing'],
+        deliverables=['piece.mid', 'notes.md'],
         budget=60, non_goals=NON_GOALS)
 
 
