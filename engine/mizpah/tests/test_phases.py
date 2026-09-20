@@ -473,3 +473,20 @@ def test_a_builder_naming_a_deliverable_file_gets_its_cite_inferred(project: Pat
                dict(id='write', unknowns=['survey_md_built'], bucket='low', title='write', deps=['count'])]), observation, project)
     built = next(u for u in accepted['unknowns'] if u['id'] == 'survey_md_built')
     assert built['cites'] == 'deliverable:1', refusals
+
+
+def test_a_false_artifact_reading_is_routed_again_by_id(project: Path) -> None:
+    observation = controller.observe(CONFIG, project)
+    accepted, _ = controller.guard(dict(unknowns=[dict(id='survey_matches', cites='deliverable:1', type='boolean', creates='report/survey.md',
+                                                        claim='report/survey.md states line_count', evidence_needed='compare')],
+                                        tasks=[dict(id='write', unknowns=['survey_matches'], bucket='low', title='write')]), observation, project)
+    controller.apply(CONFIG, project, accepted)
+    terra(project, 'route', 'cancel', 'write', '--reason', 'test')
+    observation = controller.observe(CONFIG, project)
+    observation['unknowns'] = [dict(u, status='resolved') if u['id'] == 'survey_matches' else u for u in observation['unknowns']]
+    observation['knowns'].append(dict(id='survey_matches', type='boolean', status='resolved', confidence='med', n=3, mean=None, rate=0.0,
+                                      mode=None, claim='x', stale=False, stale_reasons=[]))
+    accepted, refusals = controller.guard(dict(tasks=[dict(id='fix', unknowns=['survey_matches'], bucket='low', title='fix the report')]),
+                                          observation, project)
+    assert [t['id'] for t in accepted['tasks']] == ['fix'], refusals
+    assert 'lists that same id' in controller.render_observation(observation, 'eval')

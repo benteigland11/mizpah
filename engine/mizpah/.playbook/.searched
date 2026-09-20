@@ -727,3 +727,113 @@ the largest candidate mark svg has a known file size in bytes
 every candidate has a mark mono svg variant using a single fill 
 every candidate has a wordmark svg that sets the name mizpah as paths or text with a named font 
 the deliverable s  rationale md  files exist for each of the three candidates and describe each mark s idea 
+Audit colour literal isolation and palette documentation completeness
+brand allowed appears backed claim colour dark documents files light literal numeric
+no colour literal appears outside brand tokens css in the project files 
+brand palette md documents every token with its role  light and dark values  allowed pairs  and every numeric claim is backed by a resolved map reading 
+Validate card source tokens, type, mark, dimensions, and verbatim content
+card brand html present social under content deliverable includes mark name product
+brand social card html uses the brand type when type is present under brand  
+brand social card html includes the brand mark when one is present under brand  
+the card deliverable states the product name verbatim from the required content source 
+Validate every candidate artifact, SVG constraint, variant, wordmark, and distinct idea
+candidate marks brand exists file mark coin hand heap mono monochrome split
+brand marks split coin mark svg exists as the candidate s hand written mark file 
+brand marks split coin mark mono svg exists as the candidate s monochrome mark file 
+brand marks split coin wordmark svg exists as the candidate s wordmark file 
+brand marks witness heap mark svg exists as the candidate s hand written mark file 
+brand marks witness heap mark mono svg exists as the candidate s monochrome mark file 
+brand marks witness heap wordmark svg exists as the candidate s wordmark file 
+Validate monochrome and wordmark SVG sources
+brand external hand image marks raster reference written mark mono wordmark coin
+brand marks split coin mark mono svg is hand written svg with no raster image or external reference 
+brand marks split coin wordmark svg is hand written svg with no raster image or external reference 
+brand marks watchtower mark mono svg is hand written svg with no raster image or external reference 
+brand marks watchtower wordmark svg is hand written svg with no raster image or external reference 
+brand marks witness heap mark mono svg is hand written svg with no raster image or external reference 
+brand marks witness heap wordmark svg is hand written svg with no raster image or external reference 
+Render brand/social/card.png with headless Chromium at 1200 by 630
+brand card social 1200 artifact exactly exists pixels required
+brand social card png exists as the required card artifact 
+brand social card png is exactly 1200 by 630 pixels 
+Measure mark rendering, ink coverage, and contrast
+candidate mark among contrast fills lowest ratio black inked least near percent
+every candidate mark renders at 16 by 16 pixels with at least 20 percent of pixels inked 
+the lowest contrast ratio among candidate mark fills against white is known 
+the lowest contrast ratio among candidate mark fills against near black   111  is known 
+Compare card HTML text directly with content/product.md for the required name and one-line description
+card content description line name product states verbatim
+the card states the name and one line description from  content product md  verbatim 
+Write the candidate readings report
+above brand candidate grounded marks rationale readings report states
+ brand marks report md  states  per candidate  the readings above and the rationale  with every number grounded in a map reading 
+Measure the rendered title and background colors from the card PNG and compute their contrast ratio without the page-widget import
+background card contrast ratio text title
+the contrast ratio of the card title text against its background is known 
+Measure each candidate's 16px ink coverage and both contrast ratios
+contrast fill mark ratio black near white coin heap split watchtower witness
+the split coin mark fill s contrast ratio against white is known 
+the witness heap mark fill s contrast ratio against white is known 
+the watchtower mark fill s contrast ratio against white is known 
+the split coin mark fill s contrast ratio against near black  111 is known 
+the witness heap mark fill s contrast ratio against near black  111 is known 
+the watchtower mark fill s contrast ratio against near black  111 is known 
+Regenerate the card PNG and validate HTML and PNG dimensions
+card 1200 brand deliverable exactly graph open pixels social exists html rendered
+the card html renders at exactly 1200 by 630 pixels for the open graph deliverable 
+brand social card png exists as the rendered open graph card deliverable 
+brand social card png is exactly 1200 by 630 pixels 
+Validate every candidate section, rationale, reading and closing table in report.md
+brand marks report states mark coin heap split watchtower witness consistently fill
+brand marks report md states the split coin candidate count agrees with candidate mark count 
+brand marks report md states whether the split coin mark svgs are valid with a viewbox  no raster image  no external reference and no script 
+brand marks report md states the largest mark svg file size consistently with largest mark svg bytes 
+brand marks report md states whether the split coin mark renders at 16 by 16 pixels with at least 20 percent ink coverage 
+brand marks report md states the split coin fill contrast against white and  111 and the lowest contrast consistently with the measured readings 
+brand marks report md states whether split coin has a single fill mark mono svg variant 
+Build the colour token stylesheet
+brand built colour constraints content defines deliverable required system tokens visual voice
+ brand tokens css  is built from the visual constraints in  content voice md  and defines the colour system required by deliverable 1 
+Install and validate the graduated page readings instrument
+exists graduated instrument page path readings specified validates
+the graduated page readings instrument exists at its specified path and validates for use 
+Validate token and pair documentation
+both brand documents pairs palette role scheme token used values which
+it is not known whether  brand palette md  documents every token with its role  both scheme values  and the pairs in which it may be used 
+Read token counts, scheme ratios, and distinct hues from brand/tokens.css
+contrast dark scheme tokens background body colour light page ratio text accent
+brand tokens css declares this number of colour tokens as custom properties on  root 
+this number of declared tokens have a value in the prefers color scheme  dark block 
+the light scheme body text against page background contrast ratio is this value 
+the dark scheme body text against page background contrast ratio is this value 
+the accent contrast ratios against the light and dark backgrounds  and their lowest value  are these values 
+the non neutral colour tokens use this number of distinct hues when rounded to 15 degrees 
+Write the ten headline and subhead candidates
+banned candidate checked contains content copy headline headlines json leads name objects
+ copy headlines json  contains ten candidate objects with  headline    subhead   and  leads with   sourced from  content product md  and  content name md  and checked against  content banned json  
+Render every candidate mark at the required small size
+candidate inked least mark percent pixels renders
+every candidate mark renders at 16 by 16 pixels with at least 20 percent of pixels inked 
+Inspect candidate files and compute static mark readings
+candidate mark fill among candidates contrast distinct including lowest ratio under wordmark
+the number of candidate mark directories under brand marks is not known 
+it is not known whether every candidate mark svg is valid svg with a viewbox  no raster image  no external reference  and no script 
+the byte size of the largest candidate mark svg is not known 
+the contrast ratio of every candidate mark fill against white  including the lowest ratio  is not known 
+the contrast ratio of every candidate mark fill against near black  111  including the lowest ratio  is not known 
+it is not known whether every candidate has a mark mono svg using a single fill 
+Build the allowed colour-pair manifest
+allowed background brand colour dark exists json light pairs ratio ratios readings
+brand pairs json exists and records the allowed text background pairs with light  and dark scheme ratios agreeing with the colour values and ratio readings from brand tokens css 
+Measure candidate counts, lengths, bans, facts, numbers, and product naming
+json copy headlines headline subhead candidate candidates character content length longest across
+the number of headline and subhead candidates in  copy headlines json  is not known 
+the character length of the longest headline in  copy headlines json  is not known 
+the character length of the longest subhead in  copy headlines json  is not known 
+the total number of occurrences of banned words or marks across all candidates in  copy headlines json  is not known 
+the number of facts from  content facts json  carried by each candidate s headline plus subhead is not known 
+the highest fact coverage count among candidates in  copy headlines json  is not known 
+Compute mean price and high-qty row count from orders.csv
+orders column greater have many mean price rows
+the mean of the price column in orders csv is not known 
+how many rows of orders csv have qty greater than 10 is not known 

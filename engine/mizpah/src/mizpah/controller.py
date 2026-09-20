@@ -225,8 +225,8 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
                        and float(k['rate']) < 0.5 and not k.get('stale')]
     if false_artifacts:
         lines.append('A boolean that reads false about an artifact ('+', '.join(k['id'] for k in false_artifacts[:4])+') is '
-                     'answered by changing the artifact, after which the known goes STALE and its id is routed again — not '
-                     'by a new unknown with a new probe.')
+                     'answered by a task that lists that same id: the worker changes the artifact and re-takes the reading '
+                     '(voiding the false runs). Not a new unknown, not a new probe.')
     open_unknowns = [u for u in observation['unknowns'] if u['status'] in OPEN_UNKNOWN]
     resolved = len(observation['unknowns'])-len(open_unknowns)
     lines.append('Open unknowns:'+('' if open_unknowns else ' (none)')+(' — '+str(resolved)+' resolved' if resolved else ''))
@@ -598,7 +598,14 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         if not ids or len(set(ids)) != len(ids):
             refusals.append('task '+tid+': list the unknowns it resolves (one or more, no repeats)'); continue
         stale_ids = {k['id'] for k in observation['knowns'] if k.get('stale')}
-        bad = [u for u in ids if u not in minted and u not in open_unknowns and u not in stale_ids]
+        # A false reading about an artifact is routed again under its own id: the task changes the artifact and
+        # re-takes the reading. Without this the false could neither be re-minted (one claim, one reading) nor
+        # routed (only stale ids were), and social_card's controller could only propose (2026-09-19).
+        artifact_unknowns = {u['id'] for u in observation['unknowns']
+                             if 'creates ' in str(u.get('notes') or '') or 'cites deliverable:' in str(u.get('notes') or '')}
+        false_artifacts = {k['id'] for k in observation['knowns'] if k['type'] == 'boolean' and k.get('rate') is not None
+                           and float(k['rate']) < 0.5 and k['id'] in artifact_unknowns}
+        bad = [u for u in ids if u not in minted and u not in open_unknowns and u not in stale_ids and u not in false_artifacts]
         if bad:
             kept = [u for u in ids if u not in bad]
             if not kept:
