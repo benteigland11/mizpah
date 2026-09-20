@@ -1041,6 +1041,19 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         if not str(item.get('evidence') or '').strip():
             refusals.append(label+': evidence is required'); continue
         fields = {k: str(item[k]).strip() for k in ('need', 'deliverable', 'non_goal', 'mission') if str(item.get(k) or '').strip()}
+        # A budget ask is its own patch — the points, nothing else. Every budget CR today was smuggled into a
+        # need ("provide five more points"), which an acceptance then wrote into the brief as a requirement
+        # while the budget stayed where it was (attempt 3, 2026-09-20).
+        if item.get('budget_points') is not None:
+            try:
+                points = int(item['budget_points'])
+            except (TypeError, ValueError):
+                refusals.append(label+': budget_points is a whole number of points'); continue
+            if points < 0:
+                refusals.append(label+': budget_points is a whole number of points'); continue
+            fields['budget_points'] = str(points)
+        if fields.get('budget_points') and any(re.search(r'\b(points?|budget)\b', v, re.I) for k, v in fields.items() if k != 'budget_points'):
+            refusals.append(label+': a budget change is budget_points alone; do not also add a need or deliverable about points'); continue
         if any(re.fullmatch(r'(need|deliverable):?\s*\d+', v) for v in fields.values()):
             refusals.append(label+': "need"/"deliverable" add an entry and carry its new text; to change or drop an '
                             'existing one use "edit": {"need": N, "text": "..."} or "remove": {"need": N}'); continue
@@ -1071,7 +1084,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         if bad:
             refusals.append(bad); continue
         if not fields:
-            refusals.append(label+': changes nothing (need, deliverable, non_goal, mission, edit or remove)'); continue
+            refusals.append(label+': changes nothing (need, deliverable, non_goal, mission, edit, remove or budget_points)'); continue
         if str(item['summary']).strip().lower() in open_summaries:
             refusals.append(label+': an open proposal already says this; wait for the person to decide'); continue
         rejected = [p for p in observation['brief'].get('decided') or [] if p.get('status') == 'rejected'
@@ -1224,7 +1237,8 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
     for p in accepted['proposals']:
         args = ['brief', 'propose', '--summary', ('[blocking] ' if p.get('blocking') else '')+p['summary']+' — evidence: '+p['evidence']]
         for key in ('need', 'deliverable', 'non_goal', 'mission',
-                    'edit_need', 'edit_deliverable', 'edit_non_goal', 'remove_need', 'remove_deliverable', 'remove_non_goal'):
+                    'edit_need', 'edit_deliverable', 'edit_non_goal', 'remove_need', 'remove_deliverable', 'remove_non_goal',
+                    'budget_points'):
             if p.get(key):
                 args += ['--'+key.replace('_', '-'), p[key]]
         terra(config, project, *args)

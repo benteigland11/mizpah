@@ -402,6 +402,8 @@ def cmd_brief_set(args: argparse.Namespace) -> int:
             deliverables=args.deliverables,
             enablers=getattr(args, "enablers", None),
             replace_lists=bool(args.replace_lists),
+            signed_by=getattr(args, "signed_by", "") or "",
+            signature=getattr(args, "signature", "") or "",
         )
     except (FileNotFoundError, ValueError, OSError) as e:
         return emit(error(str(e), code="brief_set"))
@@ -445,6 +447,7 @@ def cmd_brief_propose(args: argparse.Namespace) -> int:
             remove_need=args.remove_need,
             remove_deliverable=args.remove_deliverable,
             remove_non_goal=args.remove_non_goal,
+            budget_points=getattr(args, "budget_points", None),
         )
     except (FileNotFoundError, ValueError, OSError) as e:
         return emit(error(str(e), code="brief_propose"))
@@ -457,7 +460,10 @@ def cmd_brief_accept(args: argparse.Namespace) -> int:
 
     try:
         root = require_project_root()
-        rec = accept_proposal(root, args.id, reason=getattr(args, "reason", "") or "")
+        rec = accept_proposal(
+            root, args.id, reason=getattr(args, "reason", "") or "",
+            signed_by=getattr(args, "signed_by", "") or "", signature=getattr(args, "signature", "") or "",
+        )
     except (FileNotFoundError, ValueError, OSError) as e:
         return emit(error(str(e), code="brief_accept"))
     return emit(success(brief_summary(rec), meta={"surface": "terra.brief.accept"}))
@@ -469,7 +475,10 @@ def cmd_brief_reject(args: argparse.Namespace) -> int:
 
     try:
         root = require_project_root()
-        rec = reject_proposal(root, args.id, reason=getattr(args, "reason", "") or "")
+        rec = reject_proposal(
+            root, args.id, reason=getattr(args, "reason", "") or "",
+            signed_by=getattr(args, "signed_by", "") or "", signature=getattr(args, "signature", "") or "",
+        )
     except (FileNotFoundError, ValueError, OSError) as e:
         return emit(error(str(e), code="brief_reject"))
     return emit(success(brief_summary(rec), meta={"surface": "terra.brief.reject"}))
@@ -4871,6 +4880,8 @@ def build_parser() -> argparse.ArgumentParser:
         dest="budget_notes",
         help="Human note for budget (horizon, team size, …)",
     )
+    p_bset.add_argument("--signed-by", default="", dest="signed_by", help="Who signed the issue (status active); kept on the document")
+    p_bset.add_argument("--signature", default="", help="Where the signer's mark was filed (a path under the state dir); kept beside --signed-by")
     p_bset.set_defaults(func=cmd_brief_set)
 
     p_bph = br_sub.add_parser("phase", help="Add a phase name to the brief")
@@ -4918,16 +4929,22 @@ def build_parser() -> argparse.ArgumentParser:
             f"--remove-{kind}", default=None, type=int, dest=f"remove_{kind.replace('-', '_')}", metavar="N",
             help=f"Propose removing {kind} N; later entries renumber, phases and map cites follow",
         )
+    p_bp.add_argument("--budget-points", default=None, type=int, dest="budget_points", metavar="N",
+                      help="Propose a new effort budget (the ask for more or less, on its own; no need is added for it)")
     p_bp.set_defaults(func=cmd_brief_propose)
 
     p_ba = br_sub.add_parser("accept", help="Accept a proposal (bumps version)")
     p_ba.add_argument("id", help="Proposal id")
     p_ba.add_argument("--reason", default="", help="Why — kept on the proposal for whoever reads the brief next")
+    p_ba.add_argument("--signed-by", default="", dest="signed_by", help="Who signed this; kept on the document")
+    p_ba.add_argument("--signature", default="", help="Where the signer's mark was filed (a path under the state dir); kept beside --signed-by")
     p_ba.set_defaults(func=cmd_brief_accept)
 
     p_brj = br_sub.add_parser("reject", help="Reject a proposal")
     p_brj.add_argument("id", help="Proposal id")
     p_brj.add_argument("--reason", default="", help="Why — the controller reads it before proposing the same thing again")
+    p_brj.add_argument("--signed-by", default="", dest="signed_by", help="Who signed this; kept on the document")
+    p_brj.add_argument("--signature", default="", help="Where the signer's mark was filed (a path under the state dir); kept beside --signed-by")
     p_brj.set_defaults(func=cmd_brief_reject)
 
     p_ben = br_sub.add_parser(

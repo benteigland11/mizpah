@@ -256,8 +256,15 @@ def set_brief_fields(
     deliverables: list[str] | None = None,
     enablers: list[str] | list[dict[str, Any]] | None = None,
     replace_lists: bool = False,
+    signed_by: str = "",
+    signature: str = "",
 ) -> dict[str, Any]:
-    """Direct field updates (human / lead agent). Bumps version."""
+    """Direct field updates (human / lead agent). Bumps version.
+
+    ``signed_by`` is the person issuing the brief; it is recorded on the brief itself
+    (``issued_by`` / ``issued_at``) the moment the status becomes active, so the
+    document carries its own signature rather than whoever happens to be configured
+    when it is read later."""
     rec = load_brief(project_root)
     if title is not None:
         rec["title"] = title.strip()
@@ -266,6 +273,12 @@ def set_brief_fields(
     if status is not None:
         if status not in BRIEF_STATUSES:
             raise ValueError(f"status must be one of {sorted(BRIEF_STATUSES)}")
+        if status == "active" and rec.get("status") != "active":
+            rec["issued_at"] = _now()
+            if signed_by.strip():
+                rec["issued_by"] = signed_by.strip()
+            if signature.strip():
+                rec["issued_signature"] = signature.strip()
         rec["status"] = status
     if clear_budget_points:
         rec["budget_points"] = None
@@ -498,6 +511,7 @@ def propose_change(
     remove_need: int | None = None,
     remove_deliverable: int | None = None,
     remove_non_goal: int | None = None,
+    budget_points: int | None = None,
 ) -> dict[str, Any]:
     """Queue a change; does not apply until accept.
 
@@ -534,6 +548,12 @@ def propose_change(
     for key, index in (("remove_need", remove_need), ("remove_deliverable", remove_deliverable), ("remove_non_goal", remove_non_goal)):
         if index is not None:
             patch[key] = _check_index(rec, key[7:], int(index))
+    if budget_points is not None:
+        # A budget change is its own patch: the ask for more (or less) effort, with nothing smuggled into a need.
+        if isinstance(budget_points, bool) or int(budget_points) < 0:
+            raise ValueError("budget_points must be an int >= 0")
+        patch["budget_points"] = int(budget_points)
+        patch["was_budget_points"] = rec.get("budget_points")
     if not patch:
         patch["note"] = summary.strip()
     proposals.append(prop)
@@ -591,7 +611,9 @@ def _renumber_after_removal(project_root: Path, rec: dict[str, Any], kind: str, 
             path.write_text(json.dumps(doc, indent=2) + "\n")
 
 
-def accept_proposal(project_root: Path, proposal_id: str, *, reason: str = "") -> dict[str, Any]:
+def accept_proposal(
+    project_root: Path, proposal_id: str, *, reason: str = "", signed_by: str = "", signature: str = ""
+) -> dict[str, Any]:
     """A decision carries its reason: what the person saw, so the next reader of the brief (a controller
     deciding whether to propose the same thing) knows why it went the way it did."""
     rec = load_brief(project_root)
@@ -629,6 +651,8 @@ def accept_proposal(project_root: Path, proposal_id: str, *, reason: str = "") -
         rec["enablers"] = list(by_id.values())
     if "mission" in patch:
         rec["mission"] = patch["mission"]
+    if patch.get("budget_points") is not None:
+        rec["budget_points"] = int(patch["budget_points"])
     for kind in ("need", "deliverable", "non_goal"):
         edit = patch.get("edit_" + kind)
         if isinstance(edit, dict):
@@ -647,15 +671,22 @@ def accept_proposal(project_root: Path, proposal_id: str, *, reason: str = "") -
             _renumber_after_removal(project_root, rec, kind, int(index))
     found["status"] = "accepted"
     found["accepted_at"] = _now()
+    found["decided_at"] = found["accepted_at"]
     if reason.strip():
         found["decision_reason"] = reason.strip()
+    if signed_by.strip():
+        found["signed_by"] = signed_by.strip()
+    if signature.strip():
+        found["signature"] = signature.strip()
     rec["proposals"] = proposals
     rec["version"] = int(rec.get("version") or 1) + 1
     save_brief(project_root, rec)
     return load_brief(project_root)
 
 
-def reject_proposal(project_root: Path, proposal_id: str, *, reason: str = "") -> dict[str, Any]:
+def reject_proposal(
+    project_root: Path, proposal_id: str, *, reason: str = "", signed_by: str = "", signature: str = ""
+) -> dict[str, Any]:
     rec = load_brief(project_root)
     proposals = list(rec.get("proposals") or [])
     for p in proposals:
@@ -664,8 +695,13 @@ def reject_proposal(project_root: Path, proposal_id: str, *, reason: str = "") -
                 raise ValueError(f"proposal {proposal_id} is {p.get('status')}")
             p["status"] = "rejected"
             p["rejected_at"] = _now()
+            p["decided_at"] = p["rejected_at"]
             if reason.strip():
                 p["decision_reason"] = reason.strip()
+            if signed_by.strip():
+                p["signed_by"] = signed_by.strip()
+            if signature.strip():
+                p["signature"] = signature.strip()
             rec["proposals"] = proposals
             save_brief(project_root, rec)
             return load_brief(project_root)
