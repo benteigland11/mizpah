@@ -363,6 +363,8 @@ def pack_workspace(project: Path, playbook_store: Path | None = None, *, only: t
 
 
 def _members(snapshot: bytes) -> dict[str, bytes]:
+    if not snapshot:
+        return {}   # an empty state part is no members, not a torn archive (tarfile calls it "empty file")
     with tarfile.open(fileobj=io.BytesIO(snapshot), mode='r:') as archive:
         return {m.name: archive.extractfile(m).read() for m in archive if m.isfile()}
 
