@@ -20,6 +20,13 @@ Ids match ^[a-z][a-z0-9_]*$. Unknowns that already exist are not listed again; a
 
 When the observation lists related briefs, they are the controller's library: other projects with the same kinds of deliverables and the unknowns that were worth minting for them. A deliverable of this brief that the same kind of artifact was measured for elsewhere (a page's gutters, a list's markers, a button's box) deserves those unknowns here too, cited to this brief's deliverable; a need those briefs had and this one does not is not yours to add.
 
+## One value, one unknown
+
+An unknown is one quantity. "The contrast of every mark against white and the lowest of them" is four unknowns —
+three numbers and a minimum that is its own number — never one number typed to hold a list (the probe emits a
+structure, the ladder reads zero samples, the worker blocks). A universal ("every mark renders") is one boolean; the
+per-item numbers it summarises are their own unknowns when the brief asks for them.
+
 ## A block that names readings
 
 A worker that blocks saying its unknown needs readings A and B first (a procedure walk that went three deep) has

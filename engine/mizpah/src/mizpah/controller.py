@@ -312,6 +312,10 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
                      'should change, or nothing.')
     if refusals:
         lines.append('')
+        applied = observation.get('applied_so_far') or {}
+        if any(applied.values()):
+            lines.append('Applied from your previous reply (on the route now; do not send them again): '
+                         +'; '.join(k+' '+', '.join(v) for k, v in applied.items() if v))
         lines.append('Your previous reply had items refused by the guard; resubmit only corrected items, or fewer:')
         lines += ['  - '+r for r in refusals]
     return '\n'.join(lines)+'\n'
@@ -788,8 +792,10 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
                     deps.append(owner_task)
                     refusals.append('task '+tid+': reads '+made+', which '+owner_task+' builds — added that dependency')
             # A reading of a path a deliverable names that does not exist yet, with nothing routed to build it, is
-            # a task that can only block ("count the candidates under brand/marks/" before any were drawn).
-            if project is not None and not deps:
+            # a task that can only block ("count the candidates under brand/marks/" before any were drawn). Checked
+            # whatever the task already depends on: inspect_mark_files waited on the mark builder and still read
+            # mark-mono.svg and wordmark.svg, which nothing built (logo_mark8).
+            if project is not None:
                 named = {p.rstrip('/').lower() for text in (observation['brief'].get('deliverables') or [])
                          for p in re.findall(r'[\w./-]+/[\w./-]*|[\w./-]+\.[A-Za-z0-9]+', str(text))}
                 named = {p.split('<')[0].rstrip('/') for p in named if p.split('<')[0].rstrip('/')}
@@ -1192,6 +1198,7 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
             observation = observe(config, project)
             if looked:
                 observation['looked'] = looked
+            observation['applied_so_far'] = {k: [str(x) for x in v] for k, v in record['applied'].items() if k in ('unknowns', 'tasks')}
             accepted = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[], done=accepted.get('done'), why=accepted['why'])
     applied = apply(config, project, accepted)
     record.setdefault('applied', dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[]))

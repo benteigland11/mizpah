@@ -39,3 +39,8 @@ proposal pending. Only when the flaw makes the remaining work meaningless until 
 depends on the need that cannot be met as written) mark it `"blocking": true`, and the loop stops at once. A project is never judged met while a proposal is open, so "done": true with a proposal
 open is refused; the honest reply is the proposal and what can still be routed.
 
+## One value, one unknown
+
+An unknown is one quantity. A claim that asks for several values ("each candidate's ratio and the lowest") is
+several unknowns, the minimum its own number; a number typed to hold a list cannot graduate. A task may carry several
+readings of one file, but its budget grows with them — three to four readings is a low task, eight is not.

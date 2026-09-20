@@ -1732,7 +1732,10 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         probes_before = protected_probes(project, task)
         (root/'task.json').write_text(json.dumps(dict(task=task, unknowns=unknowns, map=map_id, assignment=assignment,
                                                       reference=reference, probes_before=probes_before), indent=1))
-    estimate = settings['turn_budget'][task['bucket']]   # the bucket's effort estimate, in turns: soft
+    # The bucket's effort estimate in turns, soft — plus an allowance per reading beyond the first: a probe is
+    # written, validated, run, laddered and adopted, five or so turns each, and a low task carrying eight of them
+    # met its 60-turn boundary twice and closed incomplete at 39 (measure_headline_candidates, inspect_mark_files).
+    estimate = settings['turn_budget'][task['bucket']]+settings.get('turns_per_extra_reading', 8)*max(0, len(unknowns)-1)
     cap = settings.get('turn_cap', 400)                  # safety only; not a bucket, not a judgment
     rounds: list[dict[str, Any]] = []
     gate: dict[str, Any] = dict(ok=False, problems=['not run'], knowns=[], runs=[])
