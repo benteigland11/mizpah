@@ -494,19 +494,17 @@ class FocusedSession:
         return self.root/'events'/'checkpoint.wal.json'
 
     def _save(self) -> None:
-        """Write-ahead, then commit, then a one-line journal record. The write-ahead copy is one rolling
-        file overwritten each save (atomic rename), not a journal entry: journalling the whole state every
-        turn cost 278 KB a turn (182 MB on one 172-turn task) and the store kept every revision besides
-        (176 MB more) — for a recovery that only ever needs the newest copy."""
+        """Commit, then a one-line journal record. The store's commit is atomic on its own (sqlite's
+        rollback journal), so the state is written once per save: journalling the whole state every turn
+        cost 278 KB a turn (182 MB on one 172-turn task), the store kept every revision besides (176 MB
+        more), and a write-ahead copy of each commit doubled the bytes again (1.3 MB written per 240 KB
+        checkpoint with the VACUUM the prune ran) — for a recovery that only ever needs the newest copy.
+        A save interrupted mid-commit resumes from the previous revision; a write-ahead file left by an
+        earlier harness is still honoured on restore."""
         self.state['session'] = self.session.export_state()
         self.state['controller_progress'] = self.progress.export_state()
         snapshot = deepcopy(self.state)
         digest = _state_digest(snapshot)
-        wal = dict(revision=self.revision+1, checkpoint=digest, state=snapshot)
-        self._wal.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self._wal.with_suffix('.tmp')
-        tmp.write_text(json.dumps(wal, allow_nan=False))
-        os.replace(tmp, self._wal)
         committed = self.store.commit(self.revision, lambda _: dict(checkpoint=digest, state=snapshot))
         self.revision = committed['revision']
         self.journal.append(session_id='session', event_type='checkpoint',
@@ -536,6 +534,7 @@ class FocusedSession:
         if wal is not None and wal.get('revision') == saved['revision']+1:
             # A complete write-ahead checkpoint finishes an interrupted commit.
             saved = self.store.commit(saved['revision'], lambda _: dict(checkpoint=wal['checkpoint'], state=wal['state']))
+            self._wal.unlink(missing_ok=True)
         if saved['revision'] > len(checkpoints)+1:
             raise ValueError('Revision store extends beyond its journal')
         if saved['revision'] == len(checkpoints)+1:

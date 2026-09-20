@@ -525,7 +525,9 @@ def test_stale_writer_and_changed_bindings_cannot_execute(tmp_path):
     assert wt.turns == 1
 
 
-def test_complete_journal_checkpoint_recovers_missing_database_commit(tmp_path, monkeypatch):
+def test_interrupted_commit_resumes_from_the_previous_revision(tmp_path, monkeypatch):
+    """The store's commit is the checkpoint; one that never landed is redone on resume, not recovered from
+    a write-ahead copy (the copy doubled every save's bytes for a window of milliseconds)."""
     settings, worker, shell, controller, wt, ct = setup(tmp_path, total=1)
     root = tmp_path/'session'
     session = FocusedSession.create(root, settings, worker=worker, shell=shell, controller=controller)
@@ -543,10 +545,15 @@ def test_complete_journal_checkpoint_recovers_missing_database_commit(tmp_path, 
     with pytest.raises(RuntimeError, match='Database commit interrupted'):
         session.step()
     reopened = FocusedSession.open(root, worker=worker, shell=shell, controller=controller)
-    assert reopened.state['phase'] == 'tools'
+    assert reopened.revision == session.revision   # the last commit that landed
+    assert reopened.state['phase'] != 'tools'
+    # The model call whose outcome never committed is pending; the operator discards it (as the mizpah
+    # worker does on every resume) and the session asks again rather than replaying.
+    with pytest.raises(UnresolvedOperation):
+        reopened.run()
+    assert reopened.discard_pending()['kind'] == 'model'
     assert reopened.run()['status'] == 'complete'
-    assert shell.calls == ['write-1']
-    assert wt.turns == 2
+    assert wt.turns > 1   # asked again, not replayed
 
 
 def test_controller_inspects_old_evidence_and_discards_check_writes_across_mid_review_restart(tmp_path):

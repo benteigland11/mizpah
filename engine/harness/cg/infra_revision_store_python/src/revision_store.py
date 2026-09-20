@@ -38,11 +38,15 @@ class RevisionStore:
             raise ValueError("Revision does not exist")
         return {"revision": row[0], "data": json.loads(row[1])}
 
-    def prune(self, keep: int = 1) -> int:
+    def prune(self, keep: int = 1, *, compact: bool = False) -> int:
         """Drop every revision but the newest ``keep``; returns how many rows went. Revisions are immutable
         while they exist, but a store whose history is never read (a session checkpoint, a workspace
         snapshot) need not keep every one: the harness's session store grew to 176 MB of identical
-        snapshots per long task before this."""
+        snapshots per long task before this.
+
+        Freed pages are reused by the next commit, so the file stays at about ``keep+1`` revisions on its
+        own; ``compact`` runs VACUUM as well, which rewrites the whole file and is for a store that is
+        being put away, not one saved every turn (that cost 0.8 MB of writes per 240 KB checkpoint)."""
         if type(keep) is not int or keep < 1:
             raise ValueError("keep must be a positive integer")
         if not self.path.exists():
@@ -53,7 +57,7 @@ class RevisionStore:
                 return 0
             cursor = db.execute("DELETE FROM revisions WHERE revision <= ?", (row[0] - keep,))
             db.commit()
-            if cursor.rowcount:
+            if cursor.rowcount and compact:
                 db.execute("VACUUM")
             return cursor.rowcount
 
