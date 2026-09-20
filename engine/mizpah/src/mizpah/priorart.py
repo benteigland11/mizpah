@@ -48,7 +48,7 @@ def _widget_hits(config: dict[str, Any], project: Path, query: str, stems: set[s
         return []
     env = dict(os.environ, WIDGET_LIBRARY_PATH=str(config['mizpah'].get('widget_library') or ''))
     try:
-        out = subprocess.run([tool, 'search', query, '--top-k', str(limit), '--local-only'], cwd=project,
+        out = subprocess.run([tool, 'search', query, '--language', 'python', '--top-k', str(limit), '--local-only'], cwd=project,
                              capture_output=True, text=True, timeout=60, env=env).stdout
         widgets = (json.loads(out).get('local') or {}).get('widgets') or []
     except (ValueError, OSError, subprocess.SubprocessError):
