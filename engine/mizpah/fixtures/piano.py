@@ -264,7 +264,12 @@ def score(project: Path) -> dict:
                 spans.append(max(hand)-min(hand))
     last = sorted(notes, key=lambda n: n.start)[-1]
     final = sorted({p % 12 for p in onsets[max(onsets)]}) if onsets else []
-    return dict(ok=True, file=str(mids[0].relative_to(project)), seconds=round(duration, 1), notes=len(notes),
+    # Texture, the part of "variety" a listener hears: how long notes are held and how many start per second
+    # (attempt 1 was busy and scattered, attempt 2 slower and chordal; the counts above said the opposite).
+    texture = dict(mean_note_seconds=round(sum(n.end-n.start for n in notes)/len(notes), 2), onsets_per_second=round(len(onsets)/max(duration, 0.1), 2),
+                   notes_at_once_mean=round(sum(len(v) for v in onsets.values())/max(len(onsets), 1), 1),
+                   pitch_range=[min(n.pitch for n in notes), max(n.pitch for n in notes)])
+    return dict(ok=True, file=str(mids[0].relative_to(project)), seconds=round(duration, 1), notes=len(notes), **texture,
                 velocity_min=min(velocities), velocity_max=max(velocities), velocity_span=max(velocities)-min(velocities),
                 pedal_changes=len(pedal), pedal_downs_per_bar=round(len(downs)/bars, 2), tempo_changes=len(tempi),
                 tempo_min=round(min(tempi), 1), tempo_max=round(max(tempi), 1),
