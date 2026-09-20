@@ -505,7 +505,9 @@ def propose_change(
     return prop
 
 
-def accept_proposal(project_root: Path, proposal_id: str) -> dict[str, Any]:
+def accept_proposal(project_root: Path, proposal_id: str, *, reason: str = "") -> dict[str, Any]:
+    """A decision carries its reason: what the person saw, so the next reader of the brief (a controller
+    deciding whether to propose the same thing) knows why it went the way it did."""
     rec = load_brief(project_root)
     proposals = list(rec.get("proposals") or [])
     found = None
@@ -543,13 +545,15 @@ def accept_proposal(project_root: Path, proposal_id: str) -> dict[str, Any]:
         rec["mission"] = patch["mission"]
     found["status"] = "accepted"
     found["accepted_at"] = _now()
+    if reason.strip():
+        found["decision_reason"] = reason.strip()
     rec["proposals"] = proposals
     rec["version"] = int(rec.get("version") or 1) + 1
     save_brief(project_root, rec)
     return load_brief(project_root)
 
 
-def reject_proposal(project_root: Path, proposal_id: str) -> dict[str, Any]:
+def reject_proposal(project_root: Path, proposal_id: str, *, reason: str = "") -> dict[str, Any]:
     rec = load_brief(project_root)
     proposals = list(rec.get("proposals") or [])
     for p in proposals:
@@ -558,6 +562,8 @@ def reject_proposal(project_root: Path, proposal_id: str) -> dict[str, Any]:
                 raise ValueError(f"proposal {proposal_id} is {p.get('status')}")
             p["status"] = "rejected"
             p["rejected_at"] = _now()
+            if reason.strip():
+                p["decision_reason"] = reason.strip()
             rec["proposals"] = proposals
             save_brief(project_root, rec)
             return load_brief(project_root)

@@ -134,7 +134,9 @@ def observe(config: dict[str, Any], project: Path) -> dict[str, Any]:
         brief={key: brief.get(key) for key in ('title', 'version', 'status', 'mission', 'needs', 'deliverables',
                                                 'non_goals', 'enablers', 'budget_points', 'phases', 'open_proposals')}
               | dict(proposals=[p for p in json.loads((project/'.terra'/'brief.json').read_text()).get('proposals') or []
-                                if p.get('status') in (None, 'open', 'pending')]),
+                                if p.get('status') in (None, 'open', 'pending')],
+                     decided=[p for p in json.loads((project/'.terra'/'brief.json').read_text()).get('proposals') or []
+                              if p.get('status') in ('accepted', 'rejected')][-6:]),
         gate=sitrep.get('gate'), related_briefs=related_briefs, registry=registry,
         budget=(sitrep.get('route') or {}).get('budget'),
         knowns=[dict(id=k.get('id'), type=k.get('type'), status=k.get('status'), confidence=k.get('confidence'),
@@ -194,6 +196,13 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
                      'the project cannot be judged met while one is open):')
         for p in proposals:
             lines.append('  '+str(p.get('id'))+' '+str(p.get('summary') or '').split(' \u2014 evidence:')[0][:200])
+    decided = brief.get('decided') or []
+    if decided:
+        # What the person decided and why: a rejected proposal is not re-proposed, an accepted one is now the brief.
+        lines.append('Decided proposals (the person\'s reasons; a rejected change is not proposed again in other words):')
+        for p in decided:
+            lines.append('  '+str(p.get('id'))+' '+str(p.get('status'))+': '+str(p.get('summary') or '').split(' \u2014 evidence:')[0][:120]
+                         +(' — reason: '+str(p['decision_reason'])[:160] if p.get('decision_reason') else ''))
     lines.append('')
     lines += briefs.render(observation.get('related_briefs') or [])
     lines.append('# Map (state)')
@@ -738,6 +747,12 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             refusals.append(label+': a proposal carries the new text of the need or deliverable, not its number'); continue
         if str(item['summary']).strip().lower() in open_summaries:
             refusals.append(label+': an open proposal already says this; wait for the person to decide'); continue
+        rejected = [p for p in observation['brief'].get('decided') or [] if p.get('status') == 'rejected'
+                    and _same_reading(str(p.get('summary') or '').split(' \u2014 evidence:')[0], str(item['summary']))]
+        if rejected:
+            refusals.append(label+': the person rejected this ('+str(rejected[0].get('id'))
+                            +(': '+str(rejected[0]['decision_reason'])[:120] if rejected[0].get('decision_reason') else '')
+                            +'); it is not proposed again — work within the brief as it stands'); continue
         # A proposal says whether the work can go on around it. Blocking: the brief's flaw makes the rest of the
         # work meaningless until a person decides, and the loop stops now. Otherwise the loop finishes what it
         # can and ends proposals_pending — a project never wraps up as met while a proposal is open.

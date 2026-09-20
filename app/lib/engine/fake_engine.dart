@@ -361,16 +361,34 @@ class FakeEngine implements Engine {
       return;
     }
     if (stop.existsSync()) stop.deleteSync();
+    await _resumeIfStopped(run);
+  }
+
+  /// The loop config a session was started with: recorded in run.json by
+  /// loops from 2026-09-20 on; for older sessions derived from the harness
+  /// config it names (…/harness/tools/config.X.json → engine/mizpah/config.X.json).
+  String? _loopConfig(Map<String, dynamic> rj) {
+    final direct = rj['mizpah_config'] as String?;
+    if (direct != null && direct.isNotEmpty && File(direct).existsSync()) return direct;
+    final harness = rj['config'] as String?;
+    if (harness == null || harness.isEmpty) return null;
+    final name = harness.split('/').last;
+    final guess = '${File(terraExecutable).parent.parent.parent.path}/engine/mizpah/$name';
+    return File(guess).existsSync() ? guess : null;
+  }
+
+  /// A run whose loop is not alive is relaunched on its own session root:
+  /// its tasks resume, and the brief it routes against is the one on disk
+  /// now (with the decision just made).
+  Future<void> _resumeIfStopped(RunProject run) async {
     if (run.running) return;
     final rf = File('${run.session}/run.json');
     final rj = rf.existsSync()
         ? jsonDecode(rf.readAsStringSync()) as Map<String, dynamic>
         : const <String, dynamic>{};
-    final config = rj['mizpah_config'] as String?;
-    if (config == null || config.isEmpty) {
-      throw StateError(
-        'run.json for ${run.id} names no mizpah_config; the loop that made it predates resume',
-      );
+    final config = _loopConfig(rj);
+    if (config == null) {
+      throw StateError('no loop config known for ${run.id}; cannot resume');
     }
     final engineDir = File(config).parent.path;
     await Process.start(_pythonExecutable, [
@@ -536,11 +554,12 @@ class FakeEngine implements Engine {
   /// disk changes; a running loop picks it up at its next step). A seeded
   /// demo brief: mirrors terra.brief.accept_proposal in memory.
   @override
-  Future<void> acceptProposal(String id, String proposalId) async {
+  Future<void> acceptProposal(String id, String proposalId, {String reason = ''}) async {
     final run = _runs[id];
     if (run != null) {
       _proposal(id, proposalId); // refuses an already-decided proposal
-      await _terraBrief(run, ['accept', proposalId]);
+      await _terraBrief(run, ['accept', proposalId, if (reason.trim().isNotEmpty) ...['--reason', reason.trim()]]);
+      await _resumeIfStopped(run);
       return;
     }
     final b = _briefs[id]!;
@@ -563,11 +582,12 @@ class FakeEngine implements Engine {
   }
 
   @override
-  Future<void> rejectProposal(String id, String proposalId) async {
+  Future<void> rejectProposal(String id, String proposalId, {String reason = ''}) async {
     final run = _runs[id];
     if (run != null) {
       _proposal(id, proposalId);
-      await _terraBrief(run, ['reject', proposalId]);
+      await _terraBrief(run, ['reject', proposalId, if (reason.trim().isNotEmpty) ...['--reason', reason.trim()]]);
+      await _resumeIfStopped(run);
       return;
     }
     _proposal(id, proposalId)['status'] = 'rejected';

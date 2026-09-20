@@ -450,7 +450,7 @@ def cmd_brief_accept(args: argparse.Namespace) -> int:
 
     try:
         root = require_project_root()
-        rec = accept_proposal(root, args.id)
+        rec = accept_proposal(root, args.id, reason=getattr(args, "reason", "") or "")
     except (FileNotFoundError, ValueError, OSError) as e:
         return emit(error(str(e), code="brief_accept"))
     return emit(success(brief_summary(rec), meta={"surface": "terra.brief.accept"}))
@@ -462,7 +462,7 @@ def cmd_brief_reject(args: argparse.Namespace) -> int:
 
     try:
         root = require_project_root()
-        rec = reject_proposal(root, args.id)
+        rec = reject_proposal(root, args.id, reason=getattr(args, "reason", "") or "")
     except (FileNotFoundError, ValueError, OSError) as e:
         return emit(error(str(e), code="brief_reject"))
     return emit(success(brief_summary(rec), meta={"surface": "terra.brief.reject"}))
@@ -4906,10 +4906,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_ba = br_sub.add_parser("accept", help="Accept a proposal (bumps version)")
     p_ba.add_argument("id", help="Proposal id")
+    p_ba.add_argument("--reason", default="", help="Why — kept on the proposal for whoever reads the brief next")
     p_ba.set_defaults(func=cmd_brief_accept)
 
     p_brj = br_sub.add_parser("reject", help="Reject a proposal")
     p_brj.add_argument("id", help="Proposal id")
+    p_brj.add_argument("--reason", default="", help="Why — the controller reads it before proposing the same thing again")
     p_brj.set_defaults(func=cmd_brief_reject)
 
     p_ben = br_sub.add_parser(
