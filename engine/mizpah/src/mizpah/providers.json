@@ -1,491 +1,844 @@
 {
- "_comment": "Provider profiles the engine ships. Every value here is public client configuration; credentials never live in this file. openai_chatgpt constants come from the Apache-2.0 openai/codex source (codex-rs/login). xai_grok endpoints come from the Apache-2.0 xai-org/grok-build source (crates/codegen/xai-grok-login); its public OIDC client id and subscription base URL were read from an installed Grok Build; GROK_OAUTH2_CLIENT_ID still overrides. Local servers are not shipped: `mizpah-provider add-local` writes one into the engine config. Static model lists are hints dated 2026-09-19; wherever a profile has models_path the live list replaces them once signed in.",
- "profiles": [
-  {
-   "name": "openai_chatgpt",
-   "display_name": "ChatGPT (Plus/Pro/Team subscription)",
-   "auth": {
-    "kind": "oauth_pkce",
-    "authorization_endpoint": "https://auth.openai.com/oauth/authorize",
-    "token_endpoint": "https://auth.openai.com/oauth/token",
-    "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
-    "redirect_host": "localhost",
-    "redirect_port": 1455,
-    "redirect_path": "/auth/callback",
-    "scopes": [
-     "openid",
-     "profile",
-     "email",
-     "offline_access"
-    ],
-    "extra_authorization_params": {
-     "id_token_add_organizations": "true",
-     "codex_cli_simplified_flow": "true",
-     "originator": "mizpah"
+  "_comment": "Provider profiles the engine ships. Every value here is public client configuration; credentials never live in this file. openai_chatgpt constants come from the Apache-2.0 openai/codex source (codex-rs/login). xai_grok endpoints come from the Apache-2.0 xai-org/grok-build source (crates/codegen/xai-grok-login); its public OIDC client id and subscription base URL were read from an installed Grok Build; GROK_OAUTH2_CLIENT_ID still overrides. Local servers are not shipped: `mizpah-provider add-local` writes one into the engine config. Static model lists are hints dated 2026-09-19; wherever a profile has models_path the live list replaces them once signed in.",
+  "profiles": [
+    {
+      "name": "openai_chatgpt",
+      "display_name": "ChatGPT (Plus/Pro/Team subscription)",
+      "auth": {
+        "kind": "oauth_pkce",
+        "authorization_endpoint": "https://auth.openai.com/oauth/authorize",
+        "token_endpoint": "https://auth.openai.com/oauth/token",
+        "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
+        "redirect_host": "localhost",
+        "redirect_port": 1455,
+        "redirect_path": "/auth/callback",
+        "scopes": [
+          "openid",
+          "profile",
+          "email",
+          "offline_access"
+        ],
+        "extra_authorization_params": {
+          "id_token_add_organizations": "true",
+          "codex_cli_simplified_flow": "true",
+          "originator": "mizpah"
+        },
+        "account_claim_namespace": "https://api.openai.com/auth",
+        "account_claim_key": "chatgpt_account_id"
+      },
+      "api_base_url": "https://chatgpt.com/backend-api/codex",
+      "completion_path": "/responses",
+      "wire": "responses",
+      "static_headers": {
+        "originator": "mizpah",
+        "OpenAI-Beta": "responses=experimental"
+      },
+      "credential_headers": {
+        "Authorization": "Bearer {token}",
+        "chatgpt-account-id": "{account_id}"
+      },
+      "models": [
+        "gpt-6-astra",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.5"
+      ],
+      "default_model": "gpt-6-astra",
+      "token_count": "usage_calibrated",
+      "context_window": 272000,
+      "timeout_seconds": 900,
+      "notes": "OpenAI lets ChatGPT plans back third-party OSS harnesses (Codex for Open Source). Static list is the Codex CLI's bundled catalogue (visible entries, Sept 2026); the live list is authoritative once signed in. Reasoning effort low..ultra per model.",
+      "models_path": "/models?client_version=1.0.0",
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "default_reasoning_effort": "medium",
+      "unsupported_fields": [
+        "max_output_tokens"
+      ]
     },
-    "account_claim_namespace": "https://api.openai.com/auth",
-    "account_claim_key": "chatgpt_account_id"
-   },
-   "api_base_url": "https://chatgpt.com/backend-api/codex",
-   "completion_path": "/responses",
-   "wire": "responses",
-   "static_headers": {
-    "originator": "mizpah",
-    "OpenAI-Beta": "responses=experimental"
-   },
-   "credential_headers": {
-    "Authorization": "Bearer {token}",
-    "chatgpt-account-id": "{account_id}"
-   },
-   "models": [
-    "gpt-6-astra",
-    "gpt-5.6-sol",
-    "gpt-5.6-terra",
-    "gpt-5.6-luna",
-    "gpt-5.5"
-   ],
-   "default_model": "gpt-6-astra",
-   "token_count": "usage_calibrated",
-   "context_window": 272000,
-   "timeout_seconds": 900,
-   "notes": "OpenAI lets ChatGPT plans back third-party OSS harnesses (Codex for Open Source). Static list is the Codex CLI's bundled catalogue (visible entries, Sept 2026); the live list is authoritative once signed in. Reasoning effort low..ultra per model.",
-   "models_path": "/models?client_version=1.0.0",
-   "reasoning_efforts": [
-    "low",
-    "medium",
-    "high",
-    "xhigh"
-   ],
-   "default_reasoning_effort": "medium",
-   "unsupported_fields": [
-    "max_output_tokens"
-   ]
-  },
-  {
-   "name": "xai_grok",
-   "display_name": "Grok (SuperGrok / X Premium+ subscription)",
-   "auth": {
-    "kind": "device_code",
-    "device_authorization_endpoint": "https://auth.x.ai/oauth2/device/code",
-    "token_endpoint": "https://auth.x.ai/oauth2/token",
-    "client_id": "b1a00492-073a-47ea-816f-4c329264a828",
-    "scopes": [
-     "openid",
-     "profile",
-     "email",
-     "offline_access",
-     "grok-cli:access",
-     "api:access"
-    ]
-   },
-   "api_base_url": "https://cli-chat-proxy.grok.com/v1",
-   "completion_path": "/responses",
-   "wire": "responses",
-   "credential_headers": {
-    "Authorization": "Bearer {token}"
-   },
-   "models": [
-    "grok-4.6",
-    "grok-4.5"
-   ],
-   "default_model": "grok-4.6",
-   "token_count": "usage_calibrated",
-   "context_window": 500000,
-   "timeout_seconds": 900,
-   "notes": "Device-code flow against auth.x.ai as Grok Build does; the public OIDC client id and the cli-chat-proxy.grok.com base URL are what an installed Grok Build (~/.grok/auth.json, models_cache.json) uses with a subscription session; api.x.ai/v1 is the API-key host. Both models take reasoning effort xhigh/high/medium/low. xAI may 403 some tiers. The proxy refuses requests without x-grok-client-version (HTTP 426, \"CLI version (none) is outdated\"); the value is the client protocol version an installed Grok Build carries (0.1.220 as of grok 1.0.34), overridable with `mizpah-provider configure xai_grok --header x-grok-client-version=...`.",
-   "models_path": "/models",
-   "reasoning_efforts": [
-    "low",
-    "medium",
-    "high",
-    "xhigh"
-   ],
-   "default_reasoning_effort": "high",
-   "static_headers": {
-    "x-grok-client-version": "0.1.220"
-   },
-   "unsupported_fields": [
-    "max_output_tokens"
-   ]
-  },
-  {
-   "name": "github_copilot",
-   "display_name": "GitHub Copilot (subscription)",
-   "auth": {
-    "kind": "device_code",
-    "device_authorization_endpoint": "https://github.com/login/device/code",
-    "token_endpoint": "https://github.com/login/oauth/access_token",
-    "client_id": "Ov23liK1lbaR3d1oNLPS",
-    "scopes": [
-     "read:user"
-    ]
-   },
-   "api_base_url": "https://api.githubcopilot.com",
-   "completion_path": "/chat/completions",
-   "wire": "chat_completions",
-   "static_headers": {
-    "User-Agent": "mizpah/0.1",
-    "X-GitHub-Api-Version": "2026-06-01",
-    "Openai-Intent": "conversation-edits",
-    "x-initiator": "agent"
-   },
-   "credential_headers": {
-    "Authorization": "Bearer {token}"
-   },
-   "models": [
-    "gpt-6-astra",
-    "gpt-5.5",
-    "claude-fable-5.1",
-    "claude-sonnet-5",
-    "gemini-3.8-flash"
-   ],
-   "default_model": "gpt-6-astra",
-   "models_path": "/models",
-   "token_count": "usage_calibrated",
-   "context_window": 128000,
-   "timeout_seconds": 900,
-   "notes": "GitHub's Copilot SDK route for third parties: the Mizpah GitHub OAuth App (device flow, no secret; MIZPAH_GITHUB_CLIENT_ID overrides). The device-flow token is sent as the bearer with X-GitHub-Api-Version, as OpenCode does. GitHub tokens do not expire; a 401 means sign in again. Models are listed live from /models once signed in.",
-   "reasoning_efforts": [
-    "low",
-    "medium",
-    "high"
-   ]
-  },
-  {
-   "name": "openai_api",
-   "display_name": "OpenAI API key",
-   "auth": {
-    "kind": "api_key",
-    "environment_variable": "OPENAI_API_KEY"
-   },
-   "api_base_url": "https://api.openai.com/v1",
-   "completion_path": "/chat/completions",
-   "wire": "chat_completions",
-   "credential_headers": {
-    "Authorization": "Bearer {token}"
-   },
-   "models": [
-    "gpt-6-astra",
-    "gpt-5.6-sol",
-    "gpt-5.5"
-   ],
-   "default_model": "gpt-6-astra",
-   "token_count": "usage_calibrated",
-   "context_window": 272000,
-   "timeout_seconds": 900,
-   "models_path": "/models",
-   "reasoning_efforts": [
-    "low",
-    "medium",
-    "high",
-    "xhigh"
-   ],
-   "default_reasoning_effort": "medium"
-  },
-  {
-   "name": "xai_api",
-   "display_name": "xAI API key",
-   "auth": {
-    "kind": "api_key",
-    "environment_variable": "XAI_API_KEY"
-   },
-   "api_base_url": "https://api.x.ai/v1",
-   "completion_path": "/chat/completions",
-   "wire": "chat_completions",
-   "credential_headers": {
-    "Authorization": "Bearer {token}"
-   },
-   "models": [
-    "grok-4.6",
-    "grok-4.5",
-    "grok-4.3"
-   ],
-   "default_model": "grok-4.6",
-   "token_count": "usage_calibrated",
-   "context_window": 256000,
-   "timeout_seconds": 900,
-   "models_path": "/models"
-  },
-  {
-   "name": "zai_coding",
-   "display_name": "Z.AI GLM Coding Plan",
-   "auth": {
-    "kind": "api_key",
-    "environment_variable": "ZAI_API_KEY"
-   },
-   "api_base_url": "https://api.z.ai/api/coding/paas/v4",
-   "completion_path": "/chat/completions",
-   "wire": "chat_completions",
-   "credential_headers": {
-    "Authorization": "Bearer {token}"
-   },
-   "models": [
-    "glm-5.2",
-    "glm-5.2-flash"
-   ],
-   "default_model": "glm-5.2",
-   "token_count": "usage_calibrated",
-   "context_window": 128000,
-   "timeout_seconds": 900,
-   "notes": "Coding-plan key: the /api/coding/paas/v4 endpoint, not the general /api/paas/v4. Explicitly allows third-party agents (Cline, OpenCode, ...).",
-   "models_path": "/models"
-  },
-  {
-   "name": "kimi_coding",
-   "display_name": "Kimi Code plan (Moonshot)",
-   "auth": {
-    "kind": "api_key",
-    "environment_variable": "KIMI_API_KEY"
-   },
-   "api_base_url": "https://api.kimi.com/coding/v1",
-   "completion_path": "/chat/completions",
-   "wire": "chat_completions",
-   "credential_headers": {
-    "Authorization": "Bearer {token}"
-   },
-   "models": [
-    "kimi-k3",
-    "kimi-k2.7-code"
-   ],
-   "default_model": "kimi-k3",
-   "token_count": "usage_calibrated",
-   "context_window": 256000,
-   "timeout_seconds": 900,
-   "notes": "Kimi Code subscription endpoint as documented for Kimi Code CLI providers. PAYG keys use https://api.moonshot.ai/v1 instead (override api_base_url).",
-   "models_path": "/models"
-  },
-  {
-   "name": "minimax_coding",
-   "display_name": "MiniMax Coding Plan",
-   "auth": {
-    "kind": "api_key",
-    "environment_variable": "MINIMAX_API_KEY"
-   },
-   "api_base_url": "https://api.minimax.io/v1",
-   "completion_path": "/chat/completions",
-   "wire": "chat_completions",
-   "credential_headers": {
-    "Authorization": "Bearer {token}"
-   },
-   "models": [
-    "MiniMax-M3",
-    "MiniMax-M2.7"
-   ],
-   "default_model": "MiniMax-M3",
-   "token_count": "usage_calibrated",
-   "context_window": 128000,
-   "timeout_seconds": 900,
-   "notes": "Flat-rate coding plan; third-party agents supported. Verify the base URL against the plan's docs if a call 404s.",
-   "models_path": "/models"
-  },
-  {
-   "name": "deepseek_api",
-   "display_name": "DeepSeek API key",
-   "auth": {
-    "kind": "api_key",
-    "environment_variable": "DEEPSEEK_API_KEY"
-   },
-   "api_base_url": "https://api.deepseek.com/v1",
-   "completion_path": "/chat/completions",
-   "wire": "chat_completions",
-   "credential_headers": {
-    "Authorization": "Bearer {token}"
-   },
-   "models": [
-    "deepseek-chat",
-    "deepseek-reasoner"
-   ],
-   "default_model": "deepseek-chat",
-   "token_count": "usage_calibrated",
-   "context_window": 128000,
-   "timeout_seconds": 900,
-   "notes": "Pay-as-you-go only; no coding plan. deepseek-chat / deepseek-reasoner are aliases for the current release (V4.1 as of Sept 2026).",
-   "models_path": "/models"
-  },
-  {
-   "name": "google_gemini",
-   "display_name": "Google Gemini API key",
-   "auth": {
-    "kind": "api_key",
-    "environment_variable": "GEMINI_API_KEY"
-   },
-   "api_base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
-   "completion_path": "/chat/completions",
-   "wire": "chat_completions",
-   "static_headers": {},
-   "credential_headers": {
-    "Authorization": "Bearer {token}"
-   },
-   "models": [
-    "gemini-3.8-flash",
-    "gemini-3.5-pro"
-   ],
-   "default_model": "gemini-3.8-flash",
-   "models_path": "/models",
-   "token_count": "usage_calibrated",
-   "context_window": 1000000,
-   "timeout_seconds": 900,
-   "notes": "Gemini's OpenAI-compatible endpoint (chat completions, tools, streaming). API only: Google does not allow Gemini plan OAuth in third-party clients.",
-   "reasoning_efforts": [
-    "low",
-    "medium",
-    "high"
-   ]
-  },
-  {
-   "name": "anthropic_api",
-   "display_name": "Anthropic API key",
-   "auth": {
-    "kind": "api_key",
-    "environment_variable": "ANTHROPIC_API_KEY"
-   },
-   "api_base_url": "https://api.anthropic.com/v1",
-   "completion_path": "/chat/completions",
-   "wire": "chat_completions",
-   "static_headers": {
-    "anthropic-version": "2023-06-01"
-   },
-   "credential_headers": {
-    "Authorization": "Bearer {token}",
-    "x-api-key": "{token}"
-   },
-   "models": [
-    "claude-fable-5-1",
-    "claude-opus-5",
-    "claude-sonnet-5",
-    "claude-haiku-4-5-20251001"
-   ],
-   "default_model": "claude-fable-5-1",
-   "models_path": "/models",
-   "token_count": "usage_calibrated",
-   "context_window": 200000,
-   "timeout_seconds": 900,
-   "notes": "Anthropic's OpenAI SDK compatibility layer (/v1/chat/completions); extended thinking and some features are Messages-API only. API only: Claude plan OAuth is prohibited in third-party tools since 2026-02-20. The registry's backend-anthropic-messages-codec widget is the upgrade path to the native API. reasoning_effort maps to an extended-thinking budget on the compatibility layer; unset means no thinking.",
-   "reasoning_efforts": [
-    "low",
-    "medium",
-    "high"
-   ]
-  },
-  {
-   "name": "mistral_api",
-   "display_name": "Mistral API key",
-   "auth": {
-    "kind": "api_key",
-    "environment_variable": "MISTRAL_API_KEY"
-   },
-   "api_base_url": "https://api.mistral.ai/v1",
-   "completion_path": "/chat/completions",
-   "wire": "chat_completions",
-   "static_headers": {},
-   "credential_headers": {
-    "Authorization": "Bearer {token}"
-   },
-   "models": [
-    "mistral-medium-latest",
-    "mistral-large-latest",
-    "devstral-latest",
-    "codestral-latest"
-   ],
-   "default_model": "mistral-medium-latest",
-   "models_path": "/models",
-   "token_count": "usage_calibrated",
-   "context_window": 128000,
-   "timeout_seconds": 900,
-   "notes": "OpenAI-compatible."
-  },
-  {
-   "name": "openrouter_api",
-   "display_name": "OpenRouter API key",
-   "auth": {
-    "kind": "api_key",
-    "environment_variable": "OPENROUTER_API_KEY"
-   },
-   "api_base_url": "https://openrouter.ai/api/v1",
-   "completion_path": "/chat/completions",
-   "wire": "chat_completions",
-   "static_headers": {
-    "HTTP-Referer": "https://github.com/mizpah",
-    "X-Title": "Mizpah"
-   },
-   "credential_headers": {
-    "Authorization": "Bearer {token}"
-   },
-   "models": [
-    "openai/gpt-6-astra",
-    "anthropic/claude-fable-5.1",
-    "google/gemini-3.8-flash"
-   ],
-   "default_model": "openai/gpt-6-astra",
-   "models_path": "/models",
-   "token_count": "usage_calibrated",
-   "context_window": 200000,
-   "timeout_seconds": 900,
-   "notes": "One key, many vendors; model ids are vendor/model.",
-   "reasoning_efforts": [
-    "low",
-    "medium",
-    "high"
-   ]
-  },
-  {
-   "name": "groq_api",
-   "display_name": "Groq API key",
-   "auth": {
-    "kind": "api_key",
-    "environment_variable": "GROQ_API_KEY"
-   },
-   "api_base_url": "https://api.groq.com/openai/v1",
-   "completion_path": "/chat/completions",
-   "wire": "chat_completions",
-   "static_headers": {},
-   "credential_headers": {
-    "Authorization": "Bearer {token}"
-   },
-   "models": [
-    "llama-3.3-70b-versatile",
-    "qwen-3-32b"
-   ],
-   "default_model": "llama-3.3-70b-versatile",
-   "models_path": "/models",
-   "token_count": "usage_calibrated",
-   "context_window": 128000,
-   "timeout_seconds": 900,
-   "notes": "OpenAI-compatible; fast open-weight models."
-  },
-  {
-   "name": "opencode_go",
-   "display_name": "OpenCode Go (subscription key)",
-   "auth": {
-    "kind": "api_key",
-    "environment_variable": "OPENCODE_API_KEY"
-   },
-   "api_base_url": "https://opencode.ai/zen/go/v1",
-   "completion_path": "/chat/completions",
-   "wire": "chat_completions",
-   "static_headers": {
-    "User-Agent": "mizpah/0.1"
-   },
-   "credential_headers": {
-    "Authorization": "Bearer {token}",
-    "x-opencode-session": "{session}"
-   },
-   "models": [
-    "gpt-5.6-luna",
-    "grok-4.6",
-    "kimi-k3",
-    "glm-5.3",
-    "deepseek-v4-flash",
-    "qwen3.8-max",
-    "minimax-m3"
-   ],
-   "default_model": "kimi-k3",
-   "models_path": "/models",
-   "reasoning_efforts": [],
-   "token_count": "usage_calibrated",
-   "context_window": 200000,
-   "timeout_seconds": 900,
-   "notes": "OpenCode's $10/mo plan: 'designed for OpenCode and other coding agents'; a client must send its own User-Agent and a stable x-opencode-session per conversation (the transport mints one per session). Monthly dollar limits per model. Model ids are hints until the live list confirms them."
-  }
- ]
+    {
+      "name": "xai_grok",
+      "display_name": "Grok (SuperGrok / X Premium+ subscription)",
+      "auth": {
+        "kind": "device_code",
+        "device_authorization_endpoint": "https://auth.x.ai/oauth2/device/code",
+        "token_endpoint": "https://auth.x.ai/oauth2/token",
+        "client_id": "b1a00492-073a-47ea-816f-4c329264a828",
+        "scopes": [
+          "openid",
+          "profile",
+          "email",
+          "offline_access",
+          "grok-cli:access",
+          "api:access"
+        ]
+      },
+      "api_base_url": "https://cli-chat-proxy.grok.com/v1",
+      "completion_path": "/responses",
+      "wire": "responses",
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [
+        "grok-4.6",
+        "grok-4.5"
+      ],
+      "default_model": "grok-4.6",
+      "token_count": "usage_calibrated",
+      "context_window": 500000,
+      "timeout_seconds": 900,
+      "notes": "Device-code flow against auth.x.ai as Grok Build does; the public OIDC client id and the cli-chat-proxy.grok.com base URL are what an installed Grok Build (~/.grok/auth.json, models_cache.json) uses with a subscription session; api.x.ai/v1 is the API-key host. Both models take reasoning effort xhigh/high/medium/low. xAI may 403 some tiers. The proxy refuses requests without x-grok-client-version (HTTP 426, \"CLI version (none) is outdated\"); the value is the client protocol version an installed Grok Build carries (0.1.220 as of grok 1.0.34), overridable with `mizpah-provider configure xai_grok --header x-grok-client-version=...`.",
+      "models_path": "/models",
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "default_reasoning_effort": "high",
+      "static_headers": {
+        "x-grok-client-version": "0.1.220"
+      },
+      "unsupported_fields": [
+        "max_output_tokens"
+      ]
+    },
+    {
+      "name": "github_copilot",
+      "display_name": "GitHub Copilot (subscription)",
+      "auth": {
+        "kind": "device_code",
+        "device_authorization_endpoint": "https://github.com/login/device/code",
+        "token_endpoint": "https://github.com/login/oauth/access_token",
+        "client_id": "Ov23liK1lbaR3d1oNLPS",
+        "scopes": [
+          "read:user"
+        ]
+      },
+      "api_base_url": "https://api.githubcopilot.com",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "static_headers": {
+        "User-Agent": "mizpah/0.1",
+        "X-GitHub-Api-Version": "2026-06-01",
+        "Openai-Intent": "conversation-edits",
+        "x-initiator": "agent"
+      },
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [
+        "gpt-6-astra",
+        "gpt-5.5",
+        "claude-fable-5.1",
+        "claude-sonnet-5",
+        "gemini-3.8-flash"
+      ],
+      "default_model": "gpt-6-astra",
+      "models_path": "/models",
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "GitHub's Copilot SDK route for third parties: the Mizpah GitHub OAuth App (device flow, no secret; MIZPAH_GITHUB_CLIENT_ID overrides). The device-flow token is sent as the bearer with X-GitHub-Api-Version, as OpenCode does. GitHub tokens do not expire; a 401 means sign in again. Models are listed live from /models once signed in.",
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    {
+      "name": "openai_api",
+      "display_name": "OpenAI API key",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "OPENAI_API_KEY"
+      },
+      "api_base_url": "https://api.openai.com/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [
+        "gpt-6-astra",
+        "gpt-5.6-sol",
+        "gpt-5.5"
+      ],
+      "default_model": "gpt-6-astra",
+      "token_count": "usage_calibrated",
+      "context_window": 272000,
+      "timeout_seconds": 900,
+      "models_path": "/models",
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "default_reasoning_effort": "medium"
+    },
+    {
+      "name": "xai_api",
+      "display_name": "xAI API key",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "XAI_API_KEY"
+      },
+      "api_base_url": "https://api.x.ai/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [
+        "grok-4.6",
+        "grok-4.5",
+        "grok-4.3"
+      ],
+      "default_model": "grok-4.6",
+      "token_count": "usage_calibrated",
+      "context_window": 256000,
+      "timeout_seconds": 900,
+      "models_path": "/models"
+    },
+    {
+      "name": "zai_coding",
+      "display_name": "Z.AI GLM Coding Plan",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "ZAI_API_KEY"
+      },
+      "api_base_url": "https://api.z.ai/api/coding/paas/v4",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [
+        "glm-5.2",
+        "glm-5.2-flash"
+      ],
+      "default_model": "glm-5.2",
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "Coding-plan key: the /api/coding/paas/v4 endpoint, not the general /api/paas/v4. Explicitly allows third-party agents (Cline, OpenCode, ...).",
+      "models_path": "/models"
+    },
+    {
+      "name": "kimi_coding",
+      "display_name": "Kimi Code plan (Moonshot)",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "KIMI_API_KEY"
+      },
+      "api_base_url": "https://api.kimi.com/coding/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [
+        "kimi-k3",
+        "kimi-k2.7-code"
+      ],
+      "default_model": "kimi-k3",
+      "token_count": "usage_calibrated",
+      "context_window": 256000,
+      "timeout_seconds": 900,
+      "notes": "Kimi Code subscription endpoint as documented for Kimi Code CLI providers. PAYG keys use https://api.moonshot.ai/v1 instead (override api_base_url).",
+      "models_path": "/models"
+    },
+    {
+      "name": "minimax_coding",
+      "display_name": "MiniMax Coding Plan",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "MINIMAX_API_KEY"
+      },
+      "api_base_url": "https://api.minimax.io/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [
+        "MiniMax-M3",
+        "MiniMax-M2.7"
+      ],
+      "default_model": "MiniMax-M3",
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "Flat-rate coding plan; third-party agents supported. Verify the base URL against the plan's docs if a call 404s.",
+      "models_path": "/models"
+    },
+    {
+      "name": "deepseek_api",
+      "display_name": "DeepSeek API key",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "DEEPSEEK_API_KEY"
+      },
+      "api_base_url": "https://api.deepseek.com/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [
+        "deepseek-chat",
+        "deepseek-reasoner"
+      ],
+      "default_model": "deepseek-chat",
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "Pay-as-you-go only; no coding plan. deepseek-chat / deepseek-reasoner are aliases for the current release (V4.1 as of Sept 2026).",
+      "models_path": "/models"
+    },
+    {
+      "name": "google_gemini",
+      "display_name": "Google Gemini API key",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "GEMINI_API_KEY"
+      },
+      "api_base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "static_headers": {},
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [
+        "gemini-3.8-flash",
+        "gemini-3.5-pro"
+      ],
+      "default_model": "gemini-3.8-flash",
+      "models_path": "/models",
+      "token_count": "usage_calibrated",
+      "context_window": 1000000,
+      "timeout_seconds": 900,
+      "notes": "Gemini's OpenAI-compatible endpoint (chat completions, tools, streaming). API only: Google does not allow Gemini plan OAuth in third-party clients.",
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    {
+      "name": "anthropic_api",
+      "display_name": "Anthropic API key",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "ANTHROPIC_API_KEY"
+      },
+      "api_base_url": "https://api.anthropic.com/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "static_headers": {
+        "anthropic-version": "2023-06-01"
+      },
+      "credential_headers": {
+        "Authorization": "Bearer {token}",
+        "x-api-key": "{token}"
+      },
+      "models": [
+        "claude-fable-5-1",
+        "claude-opus-5",
+        "claude-sonnet-5",
+        "claude-haiku-4-5-20251001"
+      ],
+      "default_model": "claude-fable-5-1",
+      "models_path": "/models",
+      "token_count": "usage_calibrated",
+      "context_window": 200000,
+      "timeout_seconds": 900,
+      "notes": "Anthropic's OpenAI SDK compatibility layer (/v1/chat/completions); extended thinking and some features are Messages-API only. API only: Claude plan OAuth is prohibited in third-party tools since 2026-02-20. The registry's backend-anthropic-messages-codec widget is the upgrade path to the native API. reasoning_effort maps to an extended-thinking budget on the compatibility layer; unset means no thinking.",
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    {
+      "name": "mistral_api",
+      "display_name": "Mistral API key",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "MISTRAL_API_KEY"
+      },
+      "api_base_url": "https://api.mistral.ai/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "static_headers": {},
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [
+        "mistral-medium-latest",
+        "mistral-large-latest",
+        "devstral-latest",
+        "codestral-latest"
+      ],
+      "default_model": "mistral-medium-latest",
+      "models_path": "/models",
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "OpenAI-compatible."
+    },
+    {
+      "name": "openrouter_api",
+      "display_name": "OpenRouter API key",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "OPENROUTER_API_KEY"
+      },
+      "api_base_url": "https://openrouter.ai/api/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "static_headers": {
+        "HTTP-Referer": "https://github.com/mizpah",
+        "X-Title": "Mizpah"
+      },
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [
+        "openai/gpt-6-astra",
+        "anthropic/claude-fable-5.1",
+        "google/gemini-3.8-flash"
+      ],
+      "default_model": "openai/gpt-6-astra",
+      "models_path": "/models",
+      "token_count": "usage_calibrated",
+      "context_window": 200000,
+      "timeout_seconds": 900,
+      "notes": "One key, many vendors; model ids are vendor/model.",
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    {
+      "name": "groq_api",
+      "display_name": "Groq API key",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "GROQ_API_KEY"
+      },
+      "api_base_url": "https://api.groq.com/openai/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "static_headers": {},
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [
+        "llama-3.3-70b-versatile",
+        "qwen-3-32b"
+      ],
+      "default_model": "llama-3.3-70b-versatile",
+      "models_path": "/models",
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "OpenAI-compatible; fast open-weight models."
+    },
+    {
+      "name": "opencode_go",
+      "display_name": "OpenCode Go (subscription key)",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "OPENCODE_API_KEY"
+      },
+      "api_base_url": "https://opencode.ai/zen/go/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "static_headers": {
+        "User-Agent": "mizpah/0.1"
+      },
+      "credential_headers": {
+        "Authorization": "Bearer {token}",
+        "x-opencode-session": "{session}"
+      },
+      "models": [
+        "gpt-5.6-luna",
+        "grok-4.6",
+        "kimi-k3",
+        "glm-5.3",
+        "deepseek-v4-flash",
+        "qwen3.8-max",
+        "minimax-m3"
+      ],
+      "default_model": "kimi-k3",
+      "models_path": "/models",
+      "reasoning_efforts": [],
+      "token_count": "usage_calibrated",
+      "context_window": 200000,
+      "timeout_seconds": 900,
+      "notes": "OpenCode's $10/mo plan: 'designed for OpenCode and other coding agents'; a client must send its own User-Agent and a stable x-opencode-session per conversation (the transport mints one per session). Monthly dollar limits per model. Model ids are hints until the live list confirms them."
+    },
+    {
+      "name": "azure_openai",
+      "display_name": "Azure OpenAI",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "AZURE_OPENAI_API_KEY"
+      },
+      "api_base_url": "https://YOUR-RESOURCE.openai.azure.com/openai/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "static_headers": {},
+      "credential_headers": {
+        "api-key": "{token}",
+        "Authorization": "Bearer {token}"
+      },
+      "models": [],
+      "default_model": null,
+      "models_path": "/models",
+      "reasoning_efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "Set the address to your resource: configure azure_openai --set api_base_url=https://<resource>.openai.azure.com/openai/v1. The v1 endpoint is OpenAI-compatible and takes the key as api-key; deployments appear in /models."
+    },
+    {
+      "name": "together_api",
+      "display_name": "Together AI",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "TOGETHER_API_KEY"
+      },
+      "api_base_url": "https://api.together.xyz/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "static_headers": {},
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [],
+      "default_model": null,
+      "models_path": "/models",
+      "reasoning_efforts": [],
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "Open-weight models, OpenAI-compatible; the live list is long."
+    },
+    {
+      "name": "fireworks_api",
+      "display_name": "Fireworks AI",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "FIREWORKS_API_KEY"
+      },
+      "api_base_url": "https://api.fireworks.ai/inference/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "static_headers": {},
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [],
+      "default_model": null,
+      "models_path": "/models",
+      "reasoning_efforts": [],
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "Open-weight models, OpenAI-compatible; ids are accounts/fireworks/models/..."
+    },
+    {
+      "name": "cerebras_api",
+      "display_name": "Cerebras",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "CEREBRAS_API_KEY"
+      },
+      "api_base_url": "https://api.cerebras.ai/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "static_headers": {},
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [],
+      "default_model": null,
+      "models_path": "/models",
+      "reasoning_efforts": [],
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "Very fast open-weight inference, OpenAI-compatible."
+    },
+    {
+      "name": "deepinfra_api",
+      "display_name": "DeepInfra",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "DEEPINFRA_API_KEY"
+      },
+      "api_base_url": "https://api.deepinfra.com/v1/openai",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "static_headers": {},
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [],
+      "default_model": null,
+      "models_path": "/models",
+      "reasoning_efforts": [],
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "Open-weight models, OpenAI-compatible."
+    },
+    {
+      "name": "perplexity_api",
+      "display_name": "Perplexity",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "PERPLEXITY_API_KEY"
+      },
+      "api_base_url": "https://api.perplexity.ai",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "static_headers": {},
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [
+        "sonar-pro",
+        "sonar"
+      ],
+      "default_model": "sonar-pro",
+      "models_path": null,
+      "reasoning_efforts": [],
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "Search-grounded models; OpenAI-compatible chat. No /models endpoint."
+    },
+    {
+      "name": "cohere_api",
+      "display_name": "Cohere",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "COHERE_API_KEY"
+      },
+      "api_base_url": "https://api.cohere.ai/compatibility/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "static_headers": {},
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [],
+      "default_model": null,
+      "models_path": "/models",
+      "reasoning_efforts": [],
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "Cohere's OpenAI compatibility endpoint."
+    },
+    {
+      "name": "alibaba_dashscope",
+      "display_name": "Alibaba Model Studio (Qwen, DashScope)",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "DASHSCOPE_API_KEY"
+      },
+      "api_base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "static_headers": {},
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [],
+      "default_model": null,
+      "models_path": "/models",
+      "reasoning_efforts": [],
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "Qwen and hosted GLM/Kimi/MiniMax through DashScope's OpenAI-compatible mode; the Coding Plan key works here too. Mainland endpoint: dashscope.aliyuncs.com."
+    },
+    {
+      "name": "huggingface_api",
+      "display_name": "Hugging Face Inference",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "HF_TOKEN"
+      },
+      "api_base_url": "https://router.huggingface.co/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "static_headers": {},
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [],
+      "default_model": null,
+      "models_path": "/models",
+      "reasoning_efforts": [],
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "The HF inference router; OpenAI-compatible, routes to partner providers."
+    },
+    {
+      "name": "nvidia_nim",
+      "display_name": "NVIDIA NIM",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "NVIDIA_API_KEY"
+      },
+      "api_base_url": "https://integrate.api.nvidia.com/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "static_headers": {},
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [],
+      "default_model": null,
+      "models_path": "/models",
+      "reasoning_efforts": [],
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "NVIDIA's hosted open models, OpenAI-compatible."
+    },
+    {
+      "name": "meta_llama_api",
+      "display_name": "Meta Llama API",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "LLAMA_API_KEY"
+      },
+      "api_base_url": "https://api.llama.com/compat/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "static_headers": {},
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [],
+      "default_model": null,
+      "models_path": "/models",
+      "reasoning_efforts": [],
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "Meta's hosted Llama, OpenAI-compatible mode."
+    },
+    {
+      "name": "sambanova_api",
+      "display_name": "SambaNova",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "SAMBANOVA_API_KEY"
+      },
+      "api_base_url": "https://api.sambanova.ai/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "static_headers": {},
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [],
+      "default_model": null,
+      "models_path": "/models",
+      "reasoning_efforts": [],
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "Fast open-weight inference, OpenAI-compatible."
+    },
+    {
+      "name": "volcengine_ark",
+      "display_name": "Volcengine Ark (Doubao, ByteDance)",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "ARK_API_KEY"
+      },
+      "api_base_url": "https://ark.cn-beijing.volces.com/api/v3",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "static_headers": {},
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [],
+      "default_model": null,
+      "models_path": "/models",
+      "reasoning_efforts": [],
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "ByteDance's Doubao and hosted DeepSeek; OpenAI-compatible. Model ids are endpoint ids from the console."
+    },
+    {
+      "name": "vercel_ai_gateway",
+      "display_name": "Vercel AI Gateway",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "AI_GATEWAY_API_KEY"
+      },
+      "api_base_url": "https://ai-gateway.vercel.sh/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "static_headers": {},
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [],
+      "default_model": null,
+      "models_path": "/models",
+      "reasoning_efforts": [],
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "One key across vendors; ids are vendor/model."
+    },
+    {
+      "name": "ollama_cloud",
+      "display_name": "Ollama Cloud",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "OLLAMA_API_KEY"
+      },
+      "api_base_url": "https://ollama.com/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "static_headers": {},
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [],
+      "default_model": null,
+      "models_path": "/models",
+      "reasoning_efforts": [],
+      "token_count": "usage_calibrated",
+      "context_window": 128000,
+      "timeout_seconds": 900,
+      "notes": "Ollama's hosted models with an ollama.com key; same shape as a local Ollama."
+    }
+  ]
 }
