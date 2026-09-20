@@ -577,3 +577,28 @@ def test_sibling_readings_are_routed_as_one_task(project: Path) -> None:
     assert ids['check_row_1']['deps'] == ['write'] and ids['check_row_1']['title'] == 'Check row every note'
     assert len(accepted['unknowns']) == 6
     assert any('one reading over the list' in r for r in refusals)
+
+
+def test_a_false_reading_about_a_project_file_cited_to_a_need_is_repairable(project: Path) -> None:
+    """logo_mark7: 'every candidate has mark-mono.svg using a single fill' cited need 6 (no deliverable, no creates),
+    read false, and the repair task was refused for nine evals. A false boolean whose subject is a file the project
+    has is routable under its own id whatever it cites; a false boolean about data is not."""
+    (project/'brand'/'marks'/'a').mkdir(parents=True)
+    (project/'brand'/'marks'/'a'/'mark-mono.svg').write_text('<svg/>')
+    observation = controller.observe(CONFIG, project)
+    accepted, refusals = controller.guard(dict(unknowns=[
+        dict(id='all_mono', cites='need:1', type='boolean', claim='every candidate has mark-mono.svg using a single fill', evidence_needed='read'),
+        dict(id='rows_valid', cites='need:1', type='boolean', claim='every row of the survey is valid', evidence_needed='read')],
+        tasks=[dict(id='t1', unknowns=['all_mono', 'rows_valid'], bucket='low', title='m')]), observation, project)
+    controller.apply(CONFIG, project, accepted)
+    terra(project, 'route', 'cancel', 't1', '--reason', 'test')
+    observation = controller.observe(CONFIG, project)
+    observation['unknowns'] = [dict(u, status='resolved') for u in observation['unknowns']]
+    for uid in ('all_mono', 'rows_valid'):
+        observation['knowns'].append(dict(id=uid, type='boolean', status='resolved', confidence='med', n=3, mean=None, rate=0.0,
+                                          mode=None, claim='x', stale=False, stale_reasons=[]))
+    accepted, refusals = controller.guard(dict(tasks=[dict(id='repair_mono', unknowns=['all_mono'], bucket='low', title='repair'),
+                                                     dict(id='repair_rows', unknowns=['rows_valid'], bucket='low', title='repair')]),
+                                          observation, project)
+    assert [t['id'] for t in accepted['tasks']] == ['repair_mono'], refusals
+    assert any('repair_rows' in r and 'neither minted here nor open' in r for r in refusals)

@@ -651,10 +651,25 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         # A false reading about an artifact is routed again under its own id: the task changes the artifact and
         # re-takes the reading. Without this the false could neither be re-minted (one claim, one reading) nor
         # routed (only stale ids were), and social_card's controller could only propose (2026-09-19).
-        artifact_unknowns = {u['id'] for u in observation['unknowns']
-                             if 'creates ' in str(u.get('notes') or '') or 'cites deliverable:' in str(u.get('notes') or '')}
+        # The rule covers every false reading whose subject is a project file, not only ones that cite a deliverable:
+        # logo_mark7's "every candidate has mark-mono.svg using a single fill" cited need 6, read false, and the
+        # controller was refused a repair task nine evals running until it stalled (2026-09-20).
+        by_unknown = {u['id']: u for u in observation['unknowns']}
+        brief_entries = {'need': observation['brief'].get('needs') or [], 'deliverable': observation['brief'].get('deliverables') or []}
+
+        def about_a_file(known_id: str) -> bool:
+            u = by_unknown.get(known_id) or {}
+            notes = str(u.get('notes') or '')
+            if 'creates ' in notes or 'cites deliverable:' in notes:
+                return True
+            text = str(u.get('claim') or '')
+            for kind, index in re.findall(r'cites (need|deliverable):(\d+)', notes):
+                entries = brief_entries[kind]
+                text += ' '+(entries[int(index)-1] if 0 < int(index) <= len(entries) else '')
+            return project is not None and any(source_exists(project, f) or any(True for _ in project.glob('**/'+f))
+                                               for f in re.findall(r'[\w./-]+\.[A-Za-z0-9]+', text))
         false_artifacts = {k['id'] for k in observation['knowns'] if k['type'] == 'boolean' and k.get('rate') is not None
-                           and float(k['rate']) < 0.5 and k['id'] in artifact_unknowns}
+                           and float(k['rate']) < 0.5 and about_a_file(k['id'])}
         bad = [u for u in ids if u not in minted and u not in open_unknowns and u not in stale_ids and u not in false_artifacts]
         if bad:
             kept = [u for u in ids if u not in bad]
