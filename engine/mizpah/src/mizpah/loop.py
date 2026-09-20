@@ -19,6 +19,7 @@ from typing import Any
 
 from . import briefs, capabilities, controller, ops, worker
 from . import layout
+from . import init as init_module
 from .worker import terra
 from cg.infra_app_paths_python.src.app_paths import resolve_app_paths
 from cg.infra_atomic_file_write_python.src.atomic_file_write import atomic_write_text
@@ -269,6 +270,8 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
     """Unattended-safe: one task's crash blocks that task; repeated crashes stop the run; a deadline ends it."""
     project, root = project.resolve(), root.resolve()
     root.mkdir(parents=True, exist_ok=True)
+    layout.bind(project)                       # this process's terra calls find the project's tree
+    init_module.apply_project_config(config, project)   # the project's own sandbox settings, if it has any
     journal = root/'controller.jsonl'
     log = root/'errors.jsonl'
     started = time.time()
@@ -492,12 +495,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--project', type=Path, required=True)
-    parser.add_argument('--root', type=Path, required=True)
+    parser.add_argument('--root', type=Path, default=None,
+                        help='session root (default: <project>/.mizpah/sessions/<timestamp>)')
     parser.add_argument('--max-cycles', type=int, default=3)
     parser.add_argument('--max-tasks', type=int, default=6, help='Safety cap; the brief budget is what bounds tasks')
     parser.add_argument('--deadline-hours', type=float, default=None)
     args = parser.parse_args()
-    result = run(worker.load_config(args.config), args.project, args.root, max_cycles=args.max_cycles,
+    root = args.root or layout.sessions(args.project)/time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
+    result = run(worker.load_config(args.config), args.project, root, max_cycles=args.max_cycles,
                  max_tasks=args.max_tasks, deadline_hours=args.deadline_hours)
     print(json.dumps(result, indent=2))
 

@@ -342,7 +342,9 @@ def pack_workspace(project: Path, playbook_store: Path | None = None, *, only: t
     `only`: pack just these top-level directories (bind mode packs the state directories, the tree is bound).
     `exclude`: relative directories left out (caches, in a re-measurement pack)."""
     buffer = io.BytesIO()
-    excluded = tuple(PurePosixPath(e).parts for e in exclude)
+    # The project's own sessions (loops, journals, tasks) never travel: they are the host's record, not the
+    # worker's workspace, and they are large.
+    excluded = tuple(PurePosixPath(e).parts for e in exclude)+((layout.dirname(project), layout.SESSIONS_DIRNAME),)
     with tarfile.open(fileobj=buffer, mode='w:') as archive:
         for path in sorted(project.rglob('*')):
             relative = path.relative_to(project)
