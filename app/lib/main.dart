@@ -292,7 +292,6 @@ class _ShellState extends State<Shell> {
                         manager: widget.home,
                         briefs: widget.manager,
                         nav: widget.nav,
-                        host: widget.host,
                       ),
                       InboxScreen(
                         manager: widget.inbox,

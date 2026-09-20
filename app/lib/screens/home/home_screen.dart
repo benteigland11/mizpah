@@ -1,14 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../../engine/engine.dart';
-import '../../engine/host_watch.dart';
 import '../../state/app_nav.dart';
 import '../../state/brief_manager.dart';
 import '../../state/home_manager.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/kit_styles.dart';
 import '../../widgets/document_sheet.dart';
-import '../../widgets/host_strip.dart';
 
 /// Home: the in-tray. Every document from every project that is waiting
 /// on a person — signatures first, then trouble, newest first. Each row
@@ -20,12 +18,10 @@ class HomeScreen extends StatelessWidget {
     required this.manager,
     required this.briefs,
     required this.nav,
-    required this.host,
   });
   final HomeManager manager;
   final BriefManager briefs;
   final AppNav nav;
-  final HostWatch host;
 
   @override
   Widget build(BuildContext context) {
@@ -35,30 +31,22 @@ class HomeScreen extends StatelessWidget {
       listenable: manager,
       builder: (context, _) {
         if (manager.loading || manager.items.isEmpty) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(32, 28, 32, 0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('HOME', style: opsHeadingStyle(context)),
-                      const SizedBox(height: Sp.m),
-                      Text(
-                        manager.loading
-                            ? 'Reading the in-tray…'
-                            : 'Nothing waits on you. Every change request is signed, '
-                                  'nothing is blocked, no run stopped short.',
-                        style: theme.textTheme.bodyLarge!.copyWith(color: cs.onSurfaceVariant),
-                      ),
-                    ],
-                  ),
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(32, 28, 32, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('HOME', style: opsHeadingStyle(context)),
+                const SizedBox(height: Sp.m),
+                Text(
+                  manager.loading
+                      ? 'Reading the in-tray…'
+                      : 'Nothing waits on you. Every change request is signed, '
+                            'nothing is blocked, no run stopped short.',
+                  style: theme.textTheme.bodyLarge!.copyWith(color: cs.onSurfaceVariant),
                 ),
-              ),
-              HostStrip(watch: host),
-            ],
+              ],
+            ),
           );
         }
         final items = manager.items;
@@ -98,7 +86,6 @@ class HomeScreen extends StatelessWidget {
                       ],
                     ),
                   ),
-                  HostStrip(watch: host),
                 ],
               ),
             ),
