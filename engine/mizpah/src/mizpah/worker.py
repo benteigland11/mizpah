@@ -1735,9 +1735,16 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         # another one (or forgetting the first — the gate would hold the task on it either way).
         left_open = open_walks(evidence(session))
         if left_open:
-            session.continue_with('Resuming this task after a pause. You left these procedure walks open; continue each '
-                                  'from its next step (tick `[x]` done or `[-]` not needed as you go) before anything else:\n'
-                                  +'\n'.join('  - '+w for w in left_open)+'\n')
+            note = ('Resuming this task after a pause. You left these procedure walks open; continue each '
+                    'from its next step (tick `[x]` done or `[-]` not needed as you go) before anything else:\n'
+                    +'\n'.join('  - '+w for w in left_open)+'\n')
+            status = session.status()
+            # A session that had finished takes the note as a continuation; one paused mid-work (killed between
+            # turns) takes it as an interjection; one mid-call or mid-review is left to finish its boundary.
+            if status['phase'] == 'complete':
+                session.continue_with(note)
+            elif status['phase'] == 'worker' and status['pending_io'] is None:
+                session.interject(note)
     else:
         task = pick_task(config, project, task_id)
         map_id = open_task_map(config, project, task)
