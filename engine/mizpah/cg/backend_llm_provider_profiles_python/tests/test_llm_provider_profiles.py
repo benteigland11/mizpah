@@ -88,6 +88,19 @@ def test_base_url_template_and_file_auth() -> None:
     assert profile_from_dict(dict(per_user.to_dict())) == per_user
 
 
+def test_absolute_models_url_and_prefix() -> None:
+    p = ProviderProfile("v", "V", ApiKeyAuth(), "https://{region}.example.org/v1/projects/p/endpoints/openapi", "/chat/completions",
+                        models_path="https://{region}.example.org/v1/publishers/models", model_id_prefix="vendor/")
+    assert p.models_url_for({"region": "eu"}) == "https://eu.example.org/v1/publishers/models"
+    assert p.base_url_for({"region": "eu"}) == "https://eu.example.org/v1/projects/p/endpoints/openapi"
+    assert p.model_id_prefix == "vendor/"
+    follows = ProviderProfile("w", "W", ApiKeyAuth(), "https://eu.example.org/v1/projects/p/endpoints/openapi", "/chat/completions",
+                              models_path="https://{base_host}/v1/publishers/models")
+    assert follows.models_url == "https://eu.example.org/v1/publishers/models"
+    with pytest.raises(ValueError):
+        ProviderProfile("v", "V", ApiKeyAuth(), "https://x.example", "/c", models_path="ftp://x")
+
+
 def test_validation() -> None:
     with pytest.raises(ValueError):
         ProviderProfile("n", "N", ApiKeyAuth(), "api.example.org", "/x")

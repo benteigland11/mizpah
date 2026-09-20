@@ -89,7 +89,7 @@ def test_cli_models_and_use(tmp_path: Path, capsys: pytest.CaptureFixture, monke
     monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path))
     assert provider_cli.main(['models', 'xai_grok']) == 0
     out = json.loads(capsys.readouterr().out)
-    assert out['default_model'] == 'grok-4.6' and out['models'] == [] and out['source'] == 'signed_out'
+    assert out['default_model'] is None and out['models'] == [] and out['source'] == 'signed_out'
 
     harness = tmp_path / 'harness.json'
     harness.write_text(json.dumps({'worker': {'provider': 'llama_client', 'known_issues': {'repetition': {}},
@@ -102,10 +102,11 @@ def test_cli_models_and_use(tmp_path: Path, capsys: pytest.CaptureFixture, monke
     assert 'sign in' in json.loads(capsys.readouterr().out)['error']
     keyed = providers.session_for('xai_api', {'mizpah': {'credentials_file': str(tmp_path / 'c.json')}})
     keyed.login(api_key='k')
-    monkeypatch.setattr(providers.ProviderSession, 'list_models', lambda self: ['grok-4.6', 'grok-4.5'])
+    from cg.bp_subscription_provider_session_python.src.subscription_provider_session import ModelInfo
+    monkeypatch.setattr(providers.ProviderSession, 'list_model_info', lambda self: [ModelInfo('grok-4.6'), ModelInfo('grok-4.5')])
     monkeypatch.setattr(providers, 'credential_path', lambda config=None: tmp_path / 'c.json')
     assert provider_cli.main(['--config', str(engine), 'use', 'xai_api', 'nope']) == 2
-    assert 'not one of' in json.loads(capsys.readouterr().out)['error']
+    assert 'listed' in json.loads(capsys.readouterr().out)['error']
     assert provider_cli.main(['--config', str(engine), 'use', 'xai_api', 'grok-4.5', '--role', 'worker']) == 0
     assert json.loads(capsys.readouterr().out)['roles'] == ['worker']
     written = json.loads(harness.read_text())
@@ -114,7 +115,7 @@ def test_cli_models_and_use(tmp_path: Path, capsys: pytest.CaptureFixture, monke
     assert worker['endpoint']['base_url'] == 'https://api.x.ai/v1' and worker['endpoint']['maximum_response_bytes'] == 5
     assert worker['generation'] == {'model': 'grok-4.5', 'temperature': 0.5}
     assert written['controller'] == {'generation': {'model': '/x.gguf'}}
-    monkeypatch.setattr(providers.ProviderSession, 'list_models', lambda self: ['gpt-6-astra'])
+    monkeypatch.setattr(providers.ProviderSession, 'list_model_info', lambda self: [ModelInfo('gpt-6-astra')])
     providers.session_for('openai_chatgpt', {}).store.put('openai_chatgpt', {'access_token': 't'}, {})
     assert provider_cli.main(['use', 'openai_chatgpt', '--harness', str(harness)]) == 0
     assert json.loads(harness.read_text())['controller']['generation']['model'] == 'gpt-6-astra'
@@ -124,6 +125,7 @@ def test_models_merge_live_list_when_signed_in(tmp_path: Path, capsys: pytest.Ca
     monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path))
     session = providers.session_for('mistral_api', {})
     assert providers.available_models(session) == ([], 'signed_out')
+    assert session.profile.models == ()
     session.login(api_key='sk-1')
 
     def fake_http(method, url, headers, body, timeout) -> HttpResponse:
@@ -132,14 +134,14 @@ def test_models_merge_live_list_when_signed_in(tmp_path: Path, capsys: pytest.Ca
 
     session.http = fake_http
     merged, source = providers.available_models(session)
-    assert source == 'live' and [r['id'] for r in merged] == ['brand-new', 'mistral-large-latest']  # default first when present
+    assert source == 'live' and [r['id'] for r in merged] == ['brand-new', 'mistral-large-latest']
 
     def broken(*args) -> HttpResponse:
         raise OSError('down')
 
     session.http = broken
     hints, source = providers.available_models(session)
-    assert hints[0]['id'] == 'mistral-medium-latest' and source.startswith('list_failed: OSError')
+    assert hints == [] and source.startswith('list_failed: OSError')  # nothing invented; the person types the id
 
 
 def _serve(handler_body: bytes, status: int = 200):
@@ -284,12 +286,18 @@ def test_use_writes_effort_when_the_model_takes_one(tmp_path: Path, capsys: pyte
     details = json.loads(capsys.readouterr().out)['details']
     assert details[0] == {'id': 'gpt-x', 'efforts': ['low', 'high', 'ultra'], 'default_effort': 'high', 'context_window': 272000}
     assert details[1]['efforts'] == ['low', 'medium', 'high', 'xhigh']  # inherits the profile ladder
+    assert json.loads(open(providers.SHIPPED_PROFILES).read())['profiles'] and all(
+        not p['models'] and p['default_model'] is None for p in json.loads(open(providers.SHIPPED_PROFILES).read())['profiles'])
 
     assert provider_cli.main(['use', 'openai_chatgpt', 'gpt-x', '--harness', str(harness), '--role', 'worker']) == 0
     assert json.loads(capsys.readouterr().out)['effort'] == 'high'  # the model's default
     assert json.loads(harness.read_text())['worker']['generation']['reasoning_effort'] == 'high'
     assert provider_cli.main(['use', 'openai_chatgpt', 'gpt-x', '--harness', str(harness), '--effort', 'max']) == 2
     assert 'not one of' in json.loads(capsys.readouterr().out)['error']
+    assert provider_cli.main(['use', 'openai_chatgpt', 'gpt-nope', '--harness', str(harness)]) == 2
+    assert 'listed' in json.loads(capsys.readouterr().out)['error']
+    assert provider_cli.main(['use', 'openai_chatgpt', '--harness', str(harness)]) == 0  # first listed
+    assert json.loads(capsys.readouterr().out)['model'] == 'gpt-x'
     assert provider_cli.main(['use', 'openai_chatgpt', 'gpt-x', '--harness', str(harness), '--effort', 'none']) == 0
     capsys.readouterr()
     assert 'reasoning_effort' not in json.loads(harness.read_text())['worker']['generation']

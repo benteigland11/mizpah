@@ -321,6 +321,19 @@ def test_model_info_carries_efforts() -> None:
     assert by_id["plain"].efforts == () and by_id["plain"].default_effort is None
     (openai,) = _model_infos({"data": [{"id": "m", "object": "model"}]})
     assert openai.efforts == () and openai.context_window is None
+    published = _model_infos({"publisherModels": [{"name": "publishers/vendor/models/big-1"}, {"name": "publishers/vendor/models/small-1"}]})
+    assert [i.id for i in published] == ["big-1", "small-1"]
+
+
+def test_model_id_prefix_is_applied(store: CredentialStore) -> None:
+    prefixed = ProviderProfile("v", "V", ApiKeyAuth(environment_variable="K"), "https://api.example.org/v1", "/chat/completions",
+                               credential_headers={"Authorization": "Bearer {token}"},
+                               models_path="https://list.example.org/publishers/models", model_id_prefix="vendor/")
+    http = FakeHttp()
+    session = _session(prefixed, store, http)
+    session.login(api_key="sk-1")
+    http.model_answers.append(HttpResponse(200, {}, json.dumps({"publisherModels": [{"name": "publishers/vendor/models/big-1"}]}).encode()))
+    assert session.list_models() == ["vendor/big-1"] and http.calls[-1]["url"] == "https://list.example.org/publishers/models"
 
 
 def test_no_auth_profile_is_signed_in_when_reachable(store: CredentialStore) -> None:

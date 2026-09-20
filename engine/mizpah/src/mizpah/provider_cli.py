@@ -128,11 +128,13 @@ def cmd_use(args: argparse.Namespace) -> int:
         _emit(dict(event='error', provider=args.provider, error=f'{profile.display_name} is not answering at {profile.api_base_url}'))
         return 2
     known = {r['id']: r for r in rows}
-    if known and model not in known:
-        _emit(dict(event='error', provider=args.provider, error=f'{model!r} is not one of {sorted(known)}'))
-        return 2
     if model is None:
-        _emit(dict(event='error', provider=args.provider, error='no model named and the profile has no default'))
+        model = rows[0]['id'] if rows else None
+    if model is None:
+        _emit(dict(event='error', provider=args.provider, error='name a model; the provider listed none'))
+        return 2
+    if source == 'live' and model not in known:
+        _emit(dict(event='error', provider=args.provider, error=f'{model!r} is not one the account listed: {sorted(known)}'))
         return 2
     efforts = known[model]['efforts'] if model in known else list(profile.reasoning_efforts)
     effort = args.effort

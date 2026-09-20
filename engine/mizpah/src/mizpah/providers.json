@@ -1,5 +1,5 @@
 {
-  "_comment": "Provider profiles the engine ships. Every value here is public client configuration; credentials never live in this file. openai_chatgpt constants come from the Apache-2.0 openai/codex source (codex-rs/login). xai_grok endpoints come from the Apache-2.0 xai-org/grok-build source (crates/codegen/xai-grok-login); its public OIDC client id and subscription base URL were read from an installed Grok Build; GROK_OAUTH2_CLIENT_ID still overrides. Local servers are not shipped: `mizpah-provider add-local` writes one into the engine config. Static model lists are hints dated 2026-09-19; wherever a profile has models_path the live list replaces them once signed in.",
+  "_comment": "Provider profiles the engine ships. Every value here is public client configuration; credentials never live in this file. openai_chatgpt constants come from the Apache-2.0 openai/codex source (codex-rs/login). xai_grok endpoints come from the Apache-2.0 xai-org/grok-build source (crates/codegen/xai-grok-login); its public OIDC client id and subscription base URL were read from an installed Grok Build; GROK_OAUTH2_CLIENT_ID still overrides. Local servers are not shipped: `mizpah-provider add-local` writes one into the engine config. No model names ship here: every model is discovered from the provider's list endpoint once credentialed, and typed by the person when a provider publishes no list.",
   "profiles": [
     {
       "name": "openai_chatgpt",
@@ -37,14 +37,8 @@
         "Authorization": "Bearer {token}",
         "chatgpt-account-id": "{account_id}"
       },
-      "models": [
-        "gpt-6-astra",
-        "gpt-5.6-sol",
-        "gpt-5.6-terra",
-        "gpt-5.6-luna",
-        "gpt-5.5"
-      ],
-      "default_model": "gpt-6-astra",
+      "models": [],
+      "default_model": null,
       "token_count": "usage_calibrated",
       "context_window": 272000,
       "timeout_seconds": 900,
@@ -84,11 +78,8 @@
       "credential_headers": {
         "Authorization": "Bearer {token}"
       },
-      "models": [
-        "grok-4.6",
-        "grok-4.5"
-      ],
-      "default_model": "grok-4.6",
+      "models": [],
+      "default_model": null,
       "token_count": "usage_calibrated",
       "context_window": 500000,
       "timeout_seconds": 900,
@@ -132,14 +123,8 @@
       "credential_headers": {
         "Authorization": "Bearer {token}"
       },
-      "models": [
-        "gpt-6-astra",
-        "gpt-5.5",
-        "claude-fable-5.1",
-        "claude-sonnet-5",
-        "gemini-3.8-flash"
-      ],
-      "default_model": "gpt-6-astra",
+      "models": [],
+      "default_model": null,
       "models_path": "/models",
       "token_count": "usage_calibrated",
       "context_window": 128000,
@@ -164,12 +149,8 @@
       "credential_headers": {
         "Authorization": "Bearer {token}"
       },
-      "models": [
-        "gpt-6-astra",
-        "gpt-5.6-sol",
-        "gpt-5.5"
-      ],
-      "default_model": "gpt-6-astra",
+      "models": [],
+      "default_model": null,
       "token_count": "usage_calibrated",
       "context_window": 272000,
       "timeout_seconds": 900,
@@ -195,12 +176,8 @@
       "credential_headers": {
         "Authorization": "Bearer {token}"
       },
-      "models": [
-        "grok-4.6",
-        "grok-4.5",
-        "grok-4.3"
-      ],
-      "default_model": "grok-4.6",
+      "models": [],
+      "default_model": null,
       "token_count": "usage_calibrated",
       "context_window": 256000,
       "timeout_seconds": 900,
@@ -219,11 +196,8 @@
       "credential_headers": {
         "Authorization": "Bearer {token}"
       },
-      "models": [
-        "glm-5.2",
-        "glm-5.2-flash"
-      ],
-      "default_model": "glm-5.2",
+      "models": [],
+      "default_model": null,
       "token_count": "usage_calibrated",
       "context_window": 128000,
       "timeout_seconds": 900,
@@ -243,11 +217,8 @@
       "credential_headers": {
         "Authorization": "Bearer {token}"
       },
-      "models": [
-        "kimi-k3",
-        "kimi-k2.7-code"
-      ],
-      "default_model": "kimi-k3",
+      "models": [],
+      "default_model": null,
       "token_count": "usage_calibrated",
       "context_window": 256000,
       "timeout_seconds": 900,
@@ -267,11 +238,8 @@
       "credential_headers": {
         "Authorization": "Bearer {token}"
       },
-      "models": [
-        "MiniMax-M3",
-        "MiniMax-M2.7"
-      ],
-      "default_model": "MiniMax-M3",
+      "models": [],
+      "default_model": null,
       "token_count": "usage_calibrated",
       "context_window": 128000,
       "timeout_seconds": 900,
@@ -291,11 +259,8 @@
       "credential_headers": {
         "Authorization": "Bearer {token}"
       },
-      "models": [
-        "deepseek-chat",
-        "deepseek-reasoner"
-      ],
-      "default_model": "deepseek-chat",
+      "models": [],
+      "default_model": null,
       "token_count": "usage_calibrated",
       "context_window": 128000,
       "timeout_seconds": 900,
@@ -316,11 +281,8 @@
       "credential_headers": {
         "Authorization": "Bearer {token}"
       },
-      "models": [
-        "gemini-3.8-flash",
-        "gemini-3.5-pro"
-      ],
-      "default_model": "gemini-3.8-flash",
+      "models": [],
+      "default_model": null,
       "models_path": "/models",
       "token_count": "usage_calibrated",
       "context_window": 1000000,
@@ -349,13 +311,8 @@
         "Authorization": "Bearer {token}",
         "x-api-key": "{token}"
       },
-      "models": [
-        "claude-fable-5-1",
-        "claude-opus-5",
-        "claude-sonnet-5",
-        "claude-haiku-4-5-20251001"
-      ],
-      "default_model": "claude-fable-5-1",
+      "models": [],
+      "default_model": null,
       "models_path": "/models",
       "token_count": "usage_calibrated",
       "context_window": 200000,
@@ -381,13 +338,8 @@
       "credential_headers": {
         "Authorization": "Bearer {token}"
       },
-      "models": [
-        "mistral-medium-latest",
-        "mistral-large-latest",
-        "devstral-latest",
-        "codestral-latest"
-      ],
-      "default_model": "mistral-medium-latest",
+      "models": [],
+      "default_model": null,
       "models_path": "/models",
       "token_count": "usage_calibrated",
       "context_window": 128000,
@@ -411,12 +363,8 @@
       "credential_headers": {
         "Authorization": "Bearer {token}"
       },
-      "models": [
-        "openai/gpt-6-astra",
-        "anthropic/claude-fable-5.1",
-        "google/gemini-3.8-flash"
-      ],
-      "default_model": "openai/gpt-6-astra",
+      "models": [],
+      "default_model": null,
       "models_path": "/models",
       "token_count": "usage_calibrated",
       "context_window": 200000,
@@ -442,11 +390,8 @@
       "credential_headers": {
         "Authorization": "Bearer {token}"
       },
-      "models": [
-        "llama-3.3-70b-versatile",
-        "qwen-3-32b"
-      ],
-      "default_model": "llama-3.3-70b-versatile",
+      "models": [],
+      "default_model": null,
       "models_path": "/models",
       "token_count": "usage_calibrated",
       "context_window": 128000,
@@ -470,16 +415,8 @@
         "Authorization": "Bearer {token}",
         "x-opencode-session": "{session}"
       },
-      "models": [
-        "gpt-5.6-luna",
-        "grok-4.6",
-        "kimi-k3",
-        "glm-5.3",
-        "deepseek-v4-flash",
-        "qwen3.8-max",
-        "minimax-m3"
-      ],
-      "default_model": "kimi-k3",
+      "models": [],
+      "default_model": null,
       "models_path": "/models",
       "reasoning_efforts": [],
       "token_count": "usage_calibrated",
@@ -621,17 +558,14 @@
       "credential_headers": {
         "Authorization": "Bearer {token}"
       },
-      "models": [
-        "sonar-pro",
-        "sonar"
-      ],
-      "default_model": "sonar-pro",
-      "models_path": null,
+      "models": [],
+      "default_model": null,
+      "models_path": "/models",
       "reasoning_efforts": [],
       "token_count": "usage_calibrated",
       "context_window": 128000,
       "timeout_seconds": 900,
-      "notes": "Search-grounded models; OpenAI-compatible chat. No /models endpoint."
+      "notes": "Search-grounded Sonar models; OpenAI-compatible chat. Perplexity publishes no model list, so the id is typed."
     },
     {
       "name": "cohere_api",
@@ -865,17 +799,14 @@
       "token_metadata_fields": [
         "resource_url"
       ],
-      "models": [
-        "coder-model",
-        "vision-model"
-      ],
-      "default_model": "coder-model",
-      "models_path": null,
+      "models": [],
+      "default_model": null,
+      "models_path": "/models",
       "reasoning_efforts": [],
       "token_count": "usage_calibrated",
       "context_window": 1000000,
       "timeout_seconds": 900,
-      "notes": "Qwen Code CLI's device flow (Apache-2.0 QwenLM/qwen-code: PKCE-bound device grant against chat.qwen.ai; the token response names the API host in resource_url, usually portal.qwen.ai). Aliases coder-model / vision-model track the current Qwen coder. Alibaba has not published a third-party policy; OSS forks ship this the same way."
+      "notes": "Qwen Code CLI's device flow (Apache-2.0 QwenLM/qwen-code: PKCE-bound device grant against chat.qwen.ai; the token response names the API host in resource_url, usually portal.qwen.ai). If the portal lists no models, type coder-model (the CLI's alias for the current Qwen coder). Alibaba has not published a third-party policy; OSS forks ship this the same way."
     },
     {
       "name": "bedrock_api",
@@ -919,12 +850,9 @@
       "credential_headers": {
         "Authorization": "Bearer {token}"
       },
-      "models": [
-        "google/gemini-3.8-flash",
-        "google/gemini-3.5-pro"
-      ],
-      "default_model": "google/gemini-3.8-flash",
-      "models_path": null,
+      "models": [],
+      "default_model": null,
+      "models_path": "https://{base_host}/v1/publishers/google/models",
       "reasoning_efforts": [
         "low",
         "medium",
@@ -933,7 +861,8 @@
       "token_count": "usage_calibrated",
       "context_window": 1000000,
       "timeout_seconds": 900,
-      "notes": "Vertex's OpenAI-compatible endpoint with Application Default Credentials: run `gcloud auth application-default login`, then sign in here (the refresh token in that file is adopted; access tokens are minted from it). Set the address to your project and region with configure. Service-account JSON keys are not supported (they need RSA signing); use a user login."
+      "notes": "Vertex's OpenAI-compatible endpoint with Application Default Credentials: run `gcloud auth application-default login`, then sign in here (the refresh token in that file is adopted). Set the project and region in the address (configure --set api_base_url=... or edit it on the sheet); the model list follows the address's host. Models are listed from the native publishers/google/models API and prefixed google/ as the endpoint wants. Service-account JSON keys are not supported (they need RSA signing); use a user login.",
+      "model_id_prefix": "google/"
     }
   ]
 }

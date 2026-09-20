@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any, Mapping
+from urllib.parse import urlsplit
 
 WIRE_DIALECTS = ("chat_completions", "responses")
 TOKEN_COUNT_STRATEGIES = ("tokenize_endpoint", "usage_calibrated")
@@ -98,6 +99,8 @@ class ProviderProfile:
     default_reasoning_effort: str | None = None
     # Token-response fields worth keeping beside the credential (an account id, a per-user API host).
     token_metadata_fields: tuple[str, ...] = ()
+    # Prepended to every listed model id when the completion endpoint wants a qualified name.
+    model_id_prefix: str = ""
     token_count: str = "usage_calibrated"
     context_window: int | None = None
     timeout_seconds: float = 600.0
@@ -115,8 +118,8 @@ class ProviderProfile:
             raise ValueError("api_base_url must be absolute")
         if not self.completion_path.startswith("/"):
             raise ValueError("completion_path must begin with a slash")
-        if self.models_path is not None and not self.models_path.startswith("/"):
-            raise ValueError("models_path must begin with a slash")
+        if self.models_path is not None and not self.models_path.startswith(("/", "http://", "https://")):
+            raise ValueError("models_path must begin with a slash, or be an absolute URL")
         if self.default_model is not None and self.models and self.default_model not in self.models:
             raise ValueError("default_model must be one of models")
         if self.default_reasoning_effort is not None and self.default_reasoning_effort not in self.reasoning_efforts:
@@ -128,10 +131,14 @@ class ProviderProfile:
         A provider that tells each user their own API host in the token response writes it as e.g.
         ``https://{resource_url}/v1``; a bare host value is accepted and given ``https://``.
         """
-        template = self.api_base_url
+        return self._fill(self.api_base_url, metadata)
+
+    def _fill(self, template: str, metadata: Mapping[str, Any] | None) -> str:
         if "{" not in template:
             return template
-        values = {key: str(value) for key, value in (metadata or {}).items()}
+        # {base_host} is always available: the host of api_base_url, so a list URL can follow the address.
+        values = {"base_host": urlsplit(self.api_base_url).netloc}
+        values.update({key: str(value) for key, value in (metadata or {}).items()})
         for key, value in values.items():
             if "{" + key + "}" not in template:
                 continue
@@ -144,7 +151,12 @@ class ProviderProfile:
             return template
 
     def models_url_for(self, metadata: Mapping[str, Any] | None = None) -> str | None:
-        return None if self.models_path is None else self.base_url_for(metadata).rstrip("/") + self.models_path
+        """The list endpoint: a path under the base, or an absolute URL (some providers list elsewhere)."""
+        if self.models_path is None:
+            return None
+        if self.models_path.startswith(("http://", "https://")):
+            return self._fill(self.models_path, metadata)
+        return self.base_url_for(metadata).rstrip("/") + self.models_path
 
     @property
     def models_url(self) -> str | None:

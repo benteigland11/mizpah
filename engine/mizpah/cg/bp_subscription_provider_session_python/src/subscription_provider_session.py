@@ -267,7 +267,8 @@ class ProviderSession:
 
         Accepts the OpenAI ``{"data": [{"id"}]}`` shape, a ``{"models": [{"slug"|"id", "visibility"?,
         "supported_reasoning_levels"?, "default_reasoning_level"?, "context_window"?}]}`` catalogue
-        (hidden entries dropped), or a ``{"models": {id: {"info": {...}}}}`` map. Empty when the profile
+        (hidden entries dropped), a ``{"models": {id: {"info": {...}}}}`` map, or a
+        ``{"publisherModels": [{"name": "publishers/x/models/<id>"}]}`` list. ``model_id_prefix`` is applied. Empty when the profile
         has no list endpoint; raises ``NotSignedIn`` / ``QuarantinedCredential`` without a usable
         credential and ``LookupError`` when the endpoint answers badly.
         """
@@ -284,7 +285,12 @@ class ProviderSession:
             payload = json.loads(response.body.decode("utf-8"))
         except ValueError as error:
             raise LookupError("model list is not JSON") from error
-        return _model_infos(payload)
+        infos = _model_infos(payload)
+        prefix = self.profile.model_id_prefix
+        if prefix:
+            infos = [ModelInfo(prefix + i.id if not i.id.startswith(prefix) else i.id, i.efforts, i.default_effort, i.context_window)
+                     for i in infos]
+        return infos
 
     def list_models(self) -> list[str]:
         """Just the ids of ``list_model_info``."""
@@ -561,6 +567,8 @@ def _model_infos(payload: Any) -> list[ModelInfo]:
         rows = payload.get("data")
         if rows is None:
             rows = payload.get("models")
+        if rows is None:
+            rows = payload.get("publisherModels")
         if isinstance(rows, dict):
             rows = [dict(value.get("info") or value, id=key) if isinstance(value, dict) else {"id": key}
                     for key, value in rows.items()]
@@ -572,11 +580,13 @@ def _model_infos(payload: Any) -> list[ModelInfo]:
             continue
         if row.get("visibility") in ("hide", "none") or row.get("hidden") is True:
             continue
-        identifier = row.get("id") or row.get("slug")
+        identifier = row.get("id") or row.get("slug") or row.get("name")
         if not identifier:
             continue
         identifier = str(identifier)
-        if identifier.startswith("models/"):
+        if "/models/" in identifier:
+            identifier = identifier.rsplit("/models/", 1)[1]   # publishers/x/models/<id>
+        elif identifier.startswith("models/"):
             identifier = identifier.split("/", 1)[1]
         efforts = _efforts(row.get("supported_reasoning_levels") or row.get("reasoning_efforts"))
         default = row.get("default_reasoning_level") or row.get("reasoning_effort")
