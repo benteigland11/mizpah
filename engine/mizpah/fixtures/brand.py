@@ -86,12 +86,15 @@ def logo_mark(project: Path) -> None:
         'Know the file size in bytes of the largest mark.svg',                                                                       # 3
         'Know whether every mark renders at 16 by 16 pixels with at least 20 percent of pixels inked (page_readings)',               # 4
         'Know the contrast ratio of every mark\'s fill against white and against near-black (#111), and the lowest of them',        # 5
-        'Know whether every candidate has a monochrome variant mark-mono.svg using a single fill',                                   # 6
-        'Know whether every candidate has a wordmark.svg that sets the name "Mizpah" as paths or text with a named font',            # 7
+        'Know whether every candidate has a monochrome variant mark-mono.svg drawn in one colour: every fill and stroke is that '
+        'colour or none, and it is the same drawing as mark.svg recoloured (same path data)',                                     # 6
+        'Know whether every candidate has a wordmark.svg that places its own mark.svg drawing beside the name "Mizpah" set as '
+        'paths (letter outlines, no <text> element), so the three wordmarks differ in mark and in letterform',                   # 7
         'Know whether brand/marks/report.md states, per candidate, the readings above and the rationale, every number a reading on the map',  # 8
         'Know the number of distinct mark.svg drawings among the candidates: two count as the same when their path data, '
         'normalised (whitespace and numeric precision), is identical or one is a scaled or recoloured copy of the other',       # 9
-        'Know the number of distinct wordmark.svg letterforms: a plain <text> element in a system font counts as the same as any other',  # 10
+        'Know the number of distinct wordmark.svg letterforms, three being the target: two count as the same when their letter '
+        'path data, normalised, is identical; a <text> element counts as no letterform at all',                                  # 10
     ]
     deliverables = [
         'brand/marks/<candidate>/`mark.svg`, `mark-mono.svg`, `wordmark.svg` and `rationale.md` for exactly three candidates, each a '
@@ -108,12 +111,13 @@ def logo_mark(project: Path) -> None:
           non_goals=['No `raster` source: marks are vector, exports are readings not deliverables',
                      'No `choice` between candidates: the report shows, a person chooses',
                      'No `stock` icon or copied glyph: the marks are drawn here',
-                     'No `copy` of one candidate into another: three candidates are three drawings (need 9 counts them)'],
+                     'No `copy` of one candidate into another: three candidates are three drawings (need 9 counts them)',
+                     'No shared `wordmark`: each candidate\'s wordmark carries its own mark and its own letterforms (need 10 counts them)'],
           enablers=[('page_readings', 'Headless page readings', 'cg/frontend_headless_page_cli_python',
                      'A command-line instrument over headless chromium: serve or open a page, read its text, element boxes, '
                      'computed styles and requests, take a screenshot at a viewport width.')])
-    key_path(project).write_text(json.dumps(dict(fixture='logo_mark', key=dict(by_need={1: 3, 2: True, 4: True, 6: True, 7: True, 8: True, 9: 3},
-                                                                              targets={3: '<=20000', 5: '>=4.5', 10: '>=2'})), indent=1)+'\n')
+    key_path(project).write_text(json.dumps(dict(fixture='logo_mark', key=dict(by_need={1: 3, 2: True, 4: True, 6: True, 7: True, 8: True, 9: 3, 10: 3},
+                                                                              targets={3: '<=20000', 5: '>=4.5'})), indent=1)+'\n')
 
 
 def palette(project: Path) -> None:
