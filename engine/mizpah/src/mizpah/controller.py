@@ -315,13 +315,20 @@ def model_client(config: dict[str, Any]) -> ModelClient:
     return ModelClient(endpoint)
 
 
+_last_reasoning: list[str] = ['']   # set by decide(); read by the journal writer right after
+
+
 def decide(client: ModelClient, config: dict[str, Any], system: str, user: str) -> tuple[dict[str, Any], str]:
     """One completion, parsed as the JSON object it was asked for; raw text kept for the journal."""
     payload = dict(config['controller']['generation'], messages=[dict(role='system', content=system),
                                                                    dict(role='user', content=user)],
                    max_tokens=config['mizpah'].get('controller_output_tokens', 8192))
     response = client.complete(payload, 'controller')
-    content = (parse_turn(response).message.get('content') or '').strip()
+    message = parse_turn(response).message
+    content = (message.get('content') or '').strip()
+    # The model's own account of why, when the provider returns one (a reasoning summary, or a local
+    # model's thinking). Kept beside the decision so a person can read the controller's mind.
+    _last_reasoning[0] = (message.get('reasoning_content') or '').strip()
     start, end = content.find('{'), content.rfind('}')
     if start < 0 or end < start:
         raise ValueError('Controller reply held no JSON object: '+content[:300])
@@ -468,6 +475,12 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
     """Structural floor: every unknown cites a brief entry and names a source that exists; every task
     resolves an open unknown. The quantity is the unknown id — the controller does not pick a second name."""
     refusals: list[str] = []
+    # Restatements: things the route already holds, listed again. Not refusals — nothing wrong was asked and
+    # nothing changes — so they neither count nor cost a resubmission; a third of all "refusals" were these.
+    noted: list[str] = []
+    # Refused unknowns by id → the index of their refusal line, so a task that only carried them is folded
+    # into that line instead of refused again ("neither minted here nor open" was a quarter of refusals).
+    refused_unknowns: dict[str, int] = {}
     brief = observation['brief']
     counts = dict(need=len(brief.get('needs') or []), deliverable=len(brief.get('deliverables') or []))
     existing_unknowns = {u['id']: u for u in observation['unknowns']}
@@ -496,7 +509,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         if not ID_PATTERN.match(uid):
             refusals.append('unknown '+repr(uid)+': id must match ^[a-z][a-z0-9_]*$'); continue
         if uid in existing_unknowns:
-            refusals.append('unknown '+uid+': already exists ('+str(existing_unknowns[uid]['status'])+')'); continue
+            noted.append('unknown '+uid+': already on the map ('+str(existing_unknowns[uid]['status'])+')'); continue
         # The same reading minted a third time under a new suffix is a loop, not a plan: two attempts that came
         # back false or blocked mean the source or the brief is wrong, and that is a proposal (docs_page minted
         # repair_docs_handwritten_compliance, _v2 and _current in a row, 2026-09-19).
@@ -635,6 +648,10 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
                             'measured properties are separate unknowns that depend on the build')
             unknowns.remove(item)
     minted = {u['id'] for u in unknowns}
+    for index, line in enumerate(refusals):
+        m = re.match(r'unknown ([a-z][a-z0-9_]*): ', line)
+        if m:
+            refused_unknowns.setdefault(m.group(1), index)
     for item in decision.get('tasks') or []:
         if not isinstance(item, dict):
             refusals.append('task entry is not an object'); continue
@@ -646,7 +663,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         if not ID_PATTERN.match(tid):
             refusals.append('task '+repr(tid)+': id must match ^[a-z][a-z0-9_]*$'); continue
         if tid in existing_tasks or any(t['id'] == tid for t in tasks):
-            refusals.append('task '+tid+': already exists'); continue
+            noted.append('task '+tid+': already on the route'); continue
         if not ids or len(set(ids)) != len(ids):
             refusals.append('task '+tid+': list the unknowns it resolves (one or more, no repeats)'); continue
         stale_ids = {k['id'] for k in observation['knowns'] if k.get('stale')}
@@ -676,6 +693,12 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         if bad:
             kept = [u for u in ids if u not in bad]
             if not kept:
+                roots = [refused_unknowns[u] for u in bad if u in refused_unknowns]
+                if len(roots) == len(bad):
+                    # Every unknown it carried was refused above: the task goes with them, said once.
+                    for index in sorted(set(roots)):
+                        refusals[index] += ' — task '+tid+' goes with it'
+                    continue
                 refusals.append('task '+tid+': unknown '+', '.join(repr(u) for u in bad)+' is neither minted here nor open'); continue
             # A task carrying several unknowns keeps the ones that passed; the refused ones were reported above.
             refusals.append('task '+tid+': dropped unknown '+', '.join(repr(u) for u in bad)+' (refused or absent); kept '+', '.join(kept))
@@ -790,7 +813,13 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             t['deps'] = [d for d in t['deps'] if d in accepted_ids]
     tasks = _merge_sibling_tasks(tasks, refusals)
     covered = {u for t in tasks for u in t['unknowns']}
+    listed_by_refused = {str(u) for ti in (decision.get('tasks') or []) if isinstance(ti, dict)
+                         and not any(t['id'] == str(ti.get('id')) for t in tasks)
+                         for u in (ti.get('unknowns') or ([ti['unknown']] if ti.get('unknown') else []))}
     for uid in minted - covered:
+        if uid in listed_by_refused:
+            # Its task was refused above and that line stands for both; the unknown is dropped with it.
+            continue
         refusals.append('unknown '+uid+': minted without a task; every unknown is routed by exactly one task')
     unknowns = [u for u in unknowns if u['id'] in covered]
     open_summaries = {str(p.get('summary') or '').split(' \u2014 evidence:')[0].strip().lower()
@@ -924,7 +953,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             done = False
             refusals.append('done refused: '+'; '.join(uncovered)+' — mint one unknown per named thing (with `creates`), '
                             'each claim naming it and the known it must agree with')
-    return dict(unknowns=unknowns, tasks=tasks, proposals=proposals, rebucket=rebucket, unblock=unblock, retype=retype,
+    return dict(unknowns=unknowns, tasks=tasks, proposals=proposals, rebucket=rebucket, unblock=unblock, retype=retype, noted=noted,
                 done=done, why=str(decision.get('why') or '')), refusals
 
 
@@ -1107,7 +1136,7 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
         try:
             decision, raw = decide_through_outages(client, config, system, user)
         except ValueError as error:
-            record['attempts'].append(dict(error=str(error)))
+            record['attempts'].append(dict(user=user, error=str(error)))
             refusals = ['reply was not one JSON object: '+str(error)[:200]]
             attempt += 1
             continue
@@ -1118,13 +1147,16 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
             looks += 1
             looked = observation.setdefault('looked', {})
             refused = read_looks(project, wants, looked)
-            record['attempts'].append(dict(raw=raw, look=[str(w) for w in wants][:LOOK_PATHS], why=str(decision.get('why') or '')[:300],
-                                           refused=refused))
+            record['attempts'].append(dict(user=user, raw=raw, reasoning=_last_reasoning[0], look=[str(w) for w in wants][:LOOK_PATHS],
+                                           why=str(decision.get('why') or '')[:300], refused=refused))
             refusals = refused
             continue
         attempt += 1
         accepted, refusals = guard(decision, observation, project, require_deliverables=(mode == 'route'))
-        record['attempts'].append(dict(raw=raw, accepted=accepted, refusals=refusals, observation_chars=len(user)))
+        # The message as sent, so a person can read the exchange the way the model saw it.
+        record['attempts'].append(dict(user=user, raw=raw, reasoning=_last_reasoning[0], accepted=accepted, refusals=refusals,
+                                       noted=accepted.get('noted') or [], observation_chars=len(user)))
+        record['noted'] = (record.get('noted') or [])+(accepted.get('noted') or [])
         minted_nothing = not any(accepted[k] for k in ('unknowns', 'tasks', 'proposals', 'rebucket', 'unblock', 'retype'))
         if minted_nothing and accepted.get('done') is not True and attempt == 1:
             # It described what is owed but routed nothing: ask once for the unknowns or an explicit done.

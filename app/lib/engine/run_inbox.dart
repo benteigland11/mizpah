@@ -407,6 +407,11 @@ class RunInbox {
         ),
         if (refused.isNotEmpty)
           DocSection('Declined', _grouped(refused), count: refused.length),
+        // Restatements: things the route already held, listed again. Not
+        // declines — nothing was asked wrongly — so they sit apart, quiet.
+        if ((e['noted'] as List? ?? const []).isNotEmpty)
+          DocSection('Already on the route', _grouped((e['noted'] as List).cast<String>()),
+              count: (e['noted'] as List).length),
         // The handoff: the eval closes and the loop takes the next ready work
         // order — the first of these, the rest in order behind it.
         if (!done && (e['up_next'] as List? ?? const []).isNotEmpty)

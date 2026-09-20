@@ -602,3 +602,29 @@ def test_a_false_reading_about_a_project_file_cited_to_a_need_is_repairable(proj
                                           observation, project)
     assert [t['id'] for t in accepted['tasks']] == ['repair_mono'], refusals
     assert any('repair_rows' in r and 'neither minted here nor open' in r for r in refusals)
+
+
+def test_restatements_are_noted_not_refused_and_cascades_fold_into_their_root(project: Path) -> None:
+    """A task or unknown the route already holds is a note, not a refusal (no resubmission); a task whose only
+    unknown was refused is folded into that unknown's line; an unknown whose task was refused is not refused
+    again as unrouted. 56% of refusals across the brand runs were these echoes."""
+    observation = controller.observe(CONFIG, project)
+    first = dict(unknowns=[dict(id='report_ok', cites='need:1', type='boolean', claim='ok', evidence_needed='read')],
+                 tasks=[dict(id='t1', unknowns=['report_ok'], bucket='low', title='a')])
+    accepted, _ = controller.guard(first, observation, project)
+    controller.apply(CONFIG, project, accepted)
+    observation = controller.observe(CONFIG, project)
+    accepted, refusals = controller.guard(dict(
+        unknowns=[dict(id='report_ok', cites='need:1', type='boolean', claim='ok', evidence_needed='read'),          # restated
+                  dict(id='bad_cite', cites='need:99', type='number', claim='x', evidence_needed='count')],           # refused
+        tasks=[dict(id='t1', unknowns=['report_ok'], bucket='low', title='a'),                                         # restated
+               dict(id='t2', unknowns=['bad_cite'], bucket='low', title='b')]),                                        # only carried the refused one
+        observation, project)
+    assert accepted['noted'] == ['unknown report_ok: already on the map (open)', 'task t1: already on the route']
+    assert len(refusals) == 1 and refusals[0].startswith('unknown bad_cite:') and refusals[0].endswith(' — task t2 goes with it'), refusals
+    accepted, refusals = controller.guard(dict(
+        unknowns=[dict(id='fine', cites='need:1', type='number', claim='y', evidence_needed='count')],
+        tasks=[dict(id='t3', unknowns=['fine'], bucket='low', title='c', deps=['nope'])]), observation, project)
+    # The task loses a bad dependency but stands; the unknown is routed, nothing cascades.
+    assert [u['id'] for u in accepted['unknowns']] == ['fine'] and [t['id'] for t in accepted['tasks']] == ['t3']
+    assert all('minted without a task' not in r for r in refusals)
