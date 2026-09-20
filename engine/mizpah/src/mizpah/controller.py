@@ -275,6 +275,11 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
                      ((' (blocked by the harness, not the worker: '+reason+' — it is retried on the next run; nothing about the '
                        'source or the brief follows from it)') if reason.startswith(DRIVER_BLOCK) else
                       (' (blocked: '+reason+')' if reason else '')))
+    waiting = [t for t in observation['tasks'] if t['status'] in ('ready', 'in_progress')]
+    if waiting and mode == 'eval':
+        lines.append('Already routed and waiting to run: '+', '.join(t['id'] for t in waiting)+' — they cover '
+                     +', '.join(sorted({u for t in waiting for u in (t.get('unknowns') or [str(t.get('unknown'))])}))
+                     +'. Route only what these leave uncovered; an empty reply is right when they cover everything still owed.')
     if any(str(t.get('blocked_reason') or '').startswith(BUDGET_BLOCK) for t in observation['tasks']):
         lines.append('A task blocked on budget resumes from where it stopped if you re-bucket it.')
     if any(t['status'] == 'blocked' and not str(t.get('blocked_reason') or '').startswith(BUDGET_BLOCK)
@@ -1166,8 +1171,11 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
                                        noted=accepted.get('noted') or [], observation_chars=len(user)))
         record['noted'] = (record.get('noted') or [])+(accepted.get('noted') or [])
         minted_nothing = not any(accepted[k] for k in ('unknowns', 'tasks', 'proposals', 'rebucket', 'unblock', 'retype'))
-        if minted_nothing and accepted.get('done') is not True and attempt == 1:
-            # It described what is owed but routed nothing: ask once for the unknowns or an explicit done.
+        work_routed = any(t['status'] in ('ready', 'in_progress') for t in observation['tasks'])
+        if minted_nothing and accepted.get('done') is not True and attempt == 1 and not work_routed:
+            # It described what is owed but routed nothing, and nothing is waiting to run: ask once for the
+            # unknowns or an explicit done. With work already routed, an empty reply is the right one — asking
+            # again only made the controller list the waiting tasks a second time (a third of all refusals).
             refusals = refusals + ['you minted nothing and did not say "done": true — if the map still owes the '
                                    'brief something, mint the unknowns and tasks for it now; if nothing is owed, '
                                    'reply with "done": true']
