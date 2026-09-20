@@ -127,10 +127,17 @@ class _Memo extends StatelessWidget {
         const SizedBox(height: 28),
         Text(proposal.summary, style: body),
         const SizedBox(height: 28),
-        for (final e in proposal.patch.entries) ...[
-          _Change(brief: brief, key_: e.key, value: e.value, body: body),
-          const SizedBox(height: 28),
-        ],
+        for (final e in proposal.patch.entries)
+          if (!e.key.startsWith('removed_')) ...[
+            _Change(
+              brief: brief,
+              key_: e.key,
+              value: e.value,
+              body: body,
+              proposalPatch: proposal.patch,
+            ),
+            const SizedBox(height: 28),
+          ],
         const SizedBox(height: 20),
         Divider(color: cs.outline, thickness: 1.5),
         const SizedBox(height: 20),
@@ -210,11 +217,16 @@ class _Change extends StatelessWidget {
     required this.key_,
     required this.value,
     required this.body,
+    this.proposalPatch = const {},
   });
   final Brief brief;
   final String key_;
   final Object? value;
   final TextStyle body;
+
+  /// The whole patch, for a change that reads a sibling key (a removal's
+  /// text is kept beside its index once accepted).
+  final Map<String, dynamic> proposalPatch;
 
   @override
   Widget build(BuildContext context) {
@@ -240,6 +252,44 @@ class _Change extends StatelessWidget {
           '${en['id']}  —  ${en['title']}',
           trailing: '${en['status'] ?? 'needed'}'.toUpperCase(),
         );
+      case 'edit_need':
+      case 'edit_deliverable':
+      case 'edit_non_goal':
+        final edit = value is Map ? (value as Map) : const {};
+        final index = (edit['index'] as num?)?.toInt() ?? 0;
+        final entries = _section(key_.substring(5));
+        // Once accepted the brief already reads the new way; terra keeps
+        // what the entry said before under `was`.
+        final before = edit['was'] as String? ??
+            (index >= 1 && index <= entries.length ? entries[index - 1] : '');
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _lead(context, 'Rewrite item ${_num(index)} of ', _title(key_.substring(5)), ':'),
+            const SizedBox(height: 12),
+            ReplaceDiff(before: before, after: '${edit['text']}', style: diffStyle(context)),
+          ],
+        );
+      case 'remove_need':
+      case 'remove_deliverable':
+      case 'remove_non_goal':
+        final index = (value as num?)?.toInt() ?? 0;
+        final entries = _section(key_.substring(7));
+        final removed = proposalPatch['removed_${key_.substring(7)}'] as String? ??
+            (index >= 1 && index <= entries.length ? entries[index - 1] : '');
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _lead(context, 'Remove item ${_num(index)} from ', _title(key_.substring(7)),
+                '; the items after it renumber:'),
+            const SizedBox(height: 12),
+            DiffLine.removed(removed, style: diffStyle(context), index: index - 1),
+          ],
+        );
+      case 'removed_need':
+      case 'removed_deliverable':
+      case 'removed_non_goal':
+        return const SizedBox.shrink();
       case 'mission':
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -264,6 +314,20 @@ class _Change extends StatelessWidget {
         );
     }
   }
+
+  List<String> _section(String kind) => switch (kind) {
+        'need' => [for (final e in brief.needs) e.value],
+        'deliverable' => [for (final e in brief.deliverables) e.value],
+        _ => [for (final e in brief.nonGoals) e.value],
+      };
+
+  String _title(String kind) => switch (kind) {
+        'need' => 'Needs',
+        'deliverable' => 'Deliverables',
+        _ => 'Non-goals',
+      };
+
+  String _num(int index) => index.toString().padLeft(2, '0');
 
   Widget _addition(
     BuildContext context,

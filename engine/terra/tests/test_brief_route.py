@@ -299,3 +299,37 @@ def test_sectors_provision_and_explode(tmp_path: Path, monkeypatch):
     st3 = route_status(tmp_path)
     cad3 = next(s for s in st3["budget"]["sectors"] if s["id"] == "cad")
     assert cad3["points_plan"] == 37
+
+
+def test_proposal_edits_and_removes_entries_keeping_numbering_honest(tmp_path: Path, monkeypatch):
+    """A proposal can rewrite an entry in place or remove one; removal renumbers the phases that own
+    later entries and the map unknowns that cite them, and orphans a cite of the removed entry."""
+    from terra.brief import add_phase
+    from terra.paths import terra_root
+    from terra.unknowns import create_unknown
+    import json
+
+    monkeypatch.chdir(tmp_path)
+    init_brief(tmp_path, title="copy", mission="write it")
+    set_brief_fields(tmp_path, needs=["word count", "documents its own readings", "banned words"])
+    add_phase(tmp_path, "p1", needs=[1, 2, 3])
+    create_unknown(tmp_path, "words", claim="word count", notes="cites need:1")
+    create_unknown(tmp_path, "self_doc", claim="self documented", notes="cites need:2")
+    create_unknown(tmp_path, "banned", claim="banned words", notes="cites need:3 | need:2")
+
+    edit = propose_change(tmp_path, summary="sharpen 3", edit_need="3: banned words or marks")
+    assert edit["patch"]["edit_need"] == {"index": 3, "text": "banned words or marks"}
+    rec = accept_proposal(tmp_path, edit["id"])
+    assert rec["needs"][2] == "banned words or marks"
+
+    with pytest.raises(ValueError):
+        propose_change(tmp_path, summary="no such", remove_need=9)
+    remove = propose_change(tmp_path, summary="need 2 asks the file about itself", remove_need=2)
+    rec = accept_proposal(tmp_path, remove["id"])
+    assert rec["needs"] == ["word count", "banned words or marks"]
+    assert rec["phases"][0]["needs"] == [1, 2]
+    unknowns = terra_root(tmp_path) / "map" / "unknowns"
+    notes = {p.stem: json.loads(p.read_text())["notes"] for p in unknowns.glob("*.json")}
+    assert notes["words"] == "cites need:1"
+    assert notes["self_doc"] == "cites need:removed"
+    assert notes["banned"] == "cites need:2 | need:removed"

@@ -741,10 +741,37 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         if not str(item.get('evidence') or '').strip():
             refusals.append(label+': evidence is required'); continue
         fields = {k: str(item[k]).strip() for k in ('need', 'deliverable', 'non_goal', 'mission') if str(item.get(k) or '').strip()}
-        if not fields:
-            refusals.append(label+': changes nothing (need, deliverable, non_goal or mission)'); continue
         if any(re.fullmatch(r'(need|deliverable):?\s*\d+', v) for v in fields.values()):
-            refusals.append(label+': a proposal carries the new text of the need or deliverable, not its number'); continue
+            refusals.append(label+': "need"/"deliverable" add an entry and carry its new text; to change or drop an '
+                            'existing one use "edit": {"need": N, "text": "..."} or "remove": {"need": N}'); continue
+        # A proposal can do anything a person can do to the brief: rewrite an entry in place or remove it.
+        # Indices are 1-based as the brief is rendered; the guard checks they exist before terra sees them.
+        counts = {k: len(observation['brief'].get(k+'s' if k != 'non_goal' else 'non_goals') or []) for k in ('need', 'deliverable', 'non_goal')}
+        bad = None
+        for verb in ('edit', 'remove'):
+            spec = item.get(verb)
+            if spec is None:
+                continue
+            if not isinstance(spec, dict) or len([k for k in spec if k in counts]) != 1:
+                bad = label+': "'+verb+'" names exactly one of need, deliverable, non_goal with its number'; break
+            kind = next(k for k in spec if k in counts)
+            try:
+                index = int(spec[kind])
+            except (TypeError, ValueError):
+                bad = label+': "'+verb+'" '+kind+' must be its number'; break
+            if not 1 <= index <= counts[kind]:
+                bad = label+': '+kind+' '+str(index)+' does not exist (the brief has '+str(counts[kind])+')'; break
+            if verb == 'edit':
+                text = str(spec.get('text') or '').strip()
+                if not text:
+                    bad = label+': "edit" carries the new text'; break
+                fields['edit_'+kind] = str(index)+': '+text
+            else:
+                fields['remove_'+kind] = str(index)
+        if bad:
+            refusals.append(bad); continue
+        if not fields:
+            refusals.append(label+': changes nothing (need, deliverable, non_goal, mission, edit or remove)'); continue
         if str(item['summary']).strip().lower() in open_summaries:
             refusals.append(label+': an open proposal already says this; wait for the person to decide'); continue
         rejected = [p for p in observation['brief'].get('decided') or [] if p.get('status') == 'rejected'
@@ -889,7 +916,8 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
             terra(config, project, 'brief', 'enabler', t['enabler'], 'building')
     for p in accepted['proposals']:
         args = ['brief', 'propose', '--summary', ('[blocking] ' if p.get('blocking') else '')+p['summary']+' — evidence: '+p['evidence']]
-        for key in ('need', 'deliverable', 'non_goal', 'mission'):
+        for key in ('need', 'deliverable', 'non_goal', 'mission',
+                    'edit_need', 'edit_deliverable', 'edit_non_goal', 'remove_need', 'remove_deliverable', 'remove_non_goal'):
             if p.get(key):
                 args += ['--'+key.replace('_', '-'), p[key]]
         terra(config, project, *args)

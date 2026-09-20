@@ -471,8 +471,19 @@ def propose_change(
     deliverable: str | None = None,
     enabler: str | None = None,
     mission: str | None = None,
+    edit_need: str | None = None,
+    edit_deliverable: str | None = None,
+    edit_non_goal: str | None = None,
+    remove_need: int | None = None,
+    remove_deliverable: int | None = None,
+    remove_non_goal: int | None = None,
 ) -> dict[str, Any]:
-    """Queue a change; does not apply until accept."""
+    """Queue a change; does not apply until accept.
+
+    A proposal can do anything a person can do to the brief: add an entry, rewrite one in place
+    (``edit_*`` as ``"<index>: <new text>"``, 1-based) or remove one (``remove_*`` by index). The person
+    decides; nothing here applies.
+    """
     if not summary or not str(summary).strip():
         raise ValueError("summary required")
     rec = load_brief(project_root)
@@ -496,6 +507,12 @@ def propose_change(
         patch["add_enabler"] = parse_enabler_spec(enabler)
     if mission:
         patch["mission"] = mission.strip()
+    for key, spec in (("edit_need", edit_need), ("edit_deliverable", edit_deliverable), ("edit_non_goal", edit_non_goal)):
+        if spec:
+            patch[key] = parse_edit_spec(rec, key[5:], spec)
+    for key, index in (("remove_need", remove_need), ("remove_deliverable", remove_deliverable), ("remove_non_goal", remove_non_goal)):
+        if index is not None:
+            patch[key] = _check_index(rec, key[7:], int(index))
     if not patch:
         patch["note"] = summary.strip()
     proposals.append(prop)
@@ -503,6 +520,54 @@ def propose_change(
     # propose does not bump brief version until accept
     save_brief(project_root, rec)
     return prop
+
+
+_SECTION = {"need": "needs", "deliverable": "deliverables", "non_goal": "non_goals"}
+
+
+def _check_index(rec: dict[str, Any], kind: str, index: int) -> int:
+    entries = list(rec.get(_SECTION[kind]) or [])
+    if not 1 <= index <= len(entries):
+        raise ValueError(f"{kind} {index} does not exist; the brief has {len(entries)}")
+    return index
+
+
+def parse_edit_spec(rec: dict[str, Any], kind: str, spec: str) -> dict[str, Any]:
+    """``"<index>: <new text>"`` → {"index": n, "text": ...}; the index is 1-based as the brief is read."""
+    m = re.match(r"\s*(\d+)\s*:\s*(.+)\s*$", str(spec), re.S)
+    if not m:
+        raise ValueError(f"edit spec must be '<index>: <new text>', got {spec!r}")
+    return {"index": _check_index(rec, kind, int(m.group(1))), "text": m.group(2).strip()}
+
+
+def _renumber_after_removal(project_root: Path, rec: dict[str, Any], kind: str, removed: int) -> None:
+    """Entries are cited by position (need:9), so removing one shifts everything after it. Keep the record
+    honest: phases that own entries, and map unknowns whose notes cite them, move down by one; a citation of
+    the removed entry becomes ``<kind>:removed`` so it is visibly orphaned rather than silently pointing at
+    its neighbour."""
+    section = _SECTION[kind]
+    for phase in rec.get("phases") or []:
+        owned = [int(i) for i in phase.get(section) or []]
+        phase[section] = [i - 1 if i > removed else i for i in owned if i != removed]
+    map_root = terra_root(project_root) / "map"
+    stores = [map_root / "unknowns"] + sorted((map_root / "sessions").glob("*/unknowns")) if map_root.is_dir() else []
+    pattern = re.compile(r"\b" + kind + r":(\d+)")
+
+    def shift(m: re.Match[str]) -> str:
+        n = int(m.group(1))
+        if n == removed:
+            return kind + ":removed"
+        return kind + ":" + str(n - 1 if n > removed else n)
+
+    for path in (q for store in stores if store.is_dir() for q in store.glob("*.json")):
+        try:
+            doc = json.loads(path.read_text())
+        except ValueError:
+            continue
+        notes = doc.get("notes")
+        if isinstance(notes, str) and pattern.search(notes):
+            doc["notes"] = pattern.sub(shift, notes)
+            path.write_text(json.dumps(doc, indent=2) + "\n")
 
 
 def accept_proposal(project_root: Path, proposal_id: str, *, reason: str = "") -> dict[str, Any]:
@@ -543,6 +608,22 @@ def accept_proposal(project_root: Path, proposal_id: str, *, reason: str = "") -
         rec["enablers"] = list(by_id.values())
     if "mission" in patch:
         rec["mission"] = patch["mission"]
+    for kind in ("need", "deliverable", "non_goal"):
+        edit = patch.get("edit_" + kind)
+        if isinstance(edit, dict):
+            entries = list(rec.get(_SECTION[kind]) or [])
+            at = _check_index(rec, kind, int(edit["index"])) - 1
+            edit["was"] = entries[at]  # the record keeps what the entry said before, for anyone reading the decision later
+            entries[at] = str(edit["text"]).strip()
+            rec[_SECTION[kind]] = entries
+    for kind in ("need", "deliverable", "non_goal"):
+        index = patch.get("remove_" + kind)
+        if index is not None:
+            entries = list(rec.get(_SECTION[kind]) or [])
+            patch["removed_" + kind] = entries[_check_index(rec, kind, int(index)) - 1]
+            del entries[int(index) - 1]
+            rec[_SECTION[kind]] = entries
+            _renumber_after_removal(project_root, rec, kind, int(index))
     found["status"] = "accepted"
     found["accepted_at"] = _now()
     if reason.strip():

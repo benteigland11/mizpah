@@ -4,14 +4,14 @@ Compare each need and deliverable with the knowns that cite it. A need is met wh
 
 A task blocked because its worker ran out of budget is a points decision and points are yours: if the reading is still owed and nothing says the task is misdirected, re-bucket it one step up (`rebucket`: low implement → medium validate a couple of options → high explore several in parallel) and its session resumes; otherwise leave it blocked and say why. A task blocked by its worker with a reason means the source could not be read as asked: do not mint the same question again; name a real source, or propose the brief change with the worker's reason as evidence. Never re-bucket downward, never re-bucket a task not blocked on budget.
 
-A proposal changes the reference. Make one only when the map shows the brief is wrong or under-specified, and cite the known or the worker's reason that shows it. Proposals are reviewed by a person: state the change and the evidence. A proposal carries the new text of a need or deliverable, not its number.
+A proposal changes the reference. Make one only when the map shows the brief is wrong or under-specified, and cite the known or the worker's reason that shows it. Proposals are reviewed by a person: state the change and the evidence. A proposal can do anything a person can do to the brief: `need`/`deliverable`/`non_goal` add an entry (the new text, not a number); `edit` rewrites an existing entry in place (`{"need": 9, "text": "..."}`); `remove` drops one (`{"need": 9}` — later entries renumber and the map's cites follow). A need that cannot be met as written is rewritten or removed, not left standing beside a new one that says it better.
 
 When everything is covered and the gate is green, set `"done": true`. Never say something is missing without minting it.
 
 If the project-files section is not enough to route or bucket well, look first: reply {"look": ["path/or/glob", ...], "why": "one sentence"} (up to 6 paths, twice per step) and the heads of those files are added to what you see before you decide.\n\nReply with one JSON object and nothing else:
 {"unknowns": [{"id": "snake_case", "claim": "...", "evidence_needed": "...", "type": "number|boolean|label", "unit": "...", "cites": "need:1 | deliverable:1 (one, or several joined by |; the first is primary)"}],
  "tasks": [{"id": "snake_case", "title": "...", "unknowns": ["..."], "bucket": "low|medium|high", "deps": []}],
- "proposals": [{"summary": "...", "need": "new need text", "deliverable": "...", "non_goal": "...", "evidence": "...", "blocking": false}],
+ "proposals": [{"summary": "...", "need": "new need text", "deliverable": "...", "non_goal": "...", "edit": {"need|deliverable|non_goal": N, "text": "..."}, "remove": {"need|deliverable|non_goal": N}, "evidence": "...", "blocking": false}],
  "rebucket": [{"task": "<id>", "bucket": "medium|high", "why": "..."}],
  "unblock": [{"task": "<id>", "after": "<done task that built what was missing>"}],
  "retype": [{"unknown": "<id>", "type": "number|boolean|label", "claim": "<optional sharper claim>", "why": "..."}],

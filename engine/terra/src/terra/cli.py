@@ -438,6 +438,12 @@ def cmd_brief_propose(args: argparse.Namespace) -> int:
             deliverable=args.deliverable,
             enabler=getattr(args, "enabler", None),
             mission=args.mission,
+            edit_need=args.edit_need,
+            edit_deliverable=args.edit_deliverable,
+            edit_non_goal=args.edit_non_goal,
+            remove_need=args.remove_need,
+            remove_deliverable=args.remove_deliverable,
+            remove_non_goal=args.remove_non_goal,
         )
     except (FileNotFoundError, ValueError, OSError) as e:
         return emit(error(str(e), code="brief_propose"))
@@ -4902,6 +4908,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Propose adding an enabler (tooling/harness)",
     )
     p_bp.add_argument("--mission", default=None)
+    for kind in ("need", "deliverable", "non-goal"):
+        p_bp.add_argument(
+            f"--edit-{kind}", default=None, dest=f"edit_{kind.replace('-', '_')}", metavar="N: NEW TEXT",
+            help=f"Propose rewriting {kind} N (1-based) in place",
+        )
+        p_bp.add_argument(
+            f"--remove-{kind}", default=None, type=int, dest=f"remove_{kind.replace('-', '_')}", metavar="N",
+            help=f"Propose removing {kind} N; later entries renumber, phases and map cites follow",
+        )
     p_bp.set_defaults(func=cmd_brief_propose)
 
     p_ba = br_sub.add_parser("accept", help="Accept a proposal (bumps version)")

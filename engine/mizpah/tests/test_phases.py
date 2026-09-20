@@ -530,3 +530,29 @@ def test_a_builder_never_waits_on_a_reader_of_its_file_and_stems_name_files(proj
     by_id = {t['id']: t for t in accepted['tasks']}
     assert by_id['write']['deps'] == ['count'], (by_id, refusals)
     assert by_id['audit']['deps'] == ['write'], (by_id, refusals)
+
+
+def test_a_proposal_can_rewrite_or_remove_an_entry(project: Path) -> None:
+    """Proposals have every write a person has: edit an entry in place, remove one; the guard checks the index
+    exists, and once accepted the brief on disk reads as the person would have written it."""
+    observation = controller.observe(CONFIG, project)
+    needs = observation['brief']['needs']
+    accepted, refusals = controller.guard(dict(proposals=[
+        dict(summary='need 2 measures nothing as written', edit={'need': 2, 'text': 'Know the branch count before, by ast'}, evidence='e'),
+        dict(summary='need 99 is off the end', edit={'need': 99, 'text': 'x'}, evidence='e'),
+        dict(summary='edit without text', edit={'need': 1}, evidence='e'),
+        dict(summary='the last need asks the file about itself', remove={'need': len(needs)}, evidence='e'),
+    ]), observation, project)
+    assert [p['summary'][:8] for p in accepted['proposals']] == ['need 2 m', 'the last']
+    assert any('need 99 does not exist' in r for r in refusals) and any('carries the new text' in r for r in refusals)
+    assert accepted['proposals'][0]['edit_need'] == '2: Know the branch count before, by ast'
+    assert accepted['proposals'][1]['remove_need'] == str(len(needs))
+    controller.apply(CONFIG, project, accepted)
+    brief = json.loads((project/'.terra'/'brief.json').read_text())
+    patches = [p['patch'] for p in brief['proposals'] if p['status'] == 'open']
+    assert patches[0]['edit_need'] == {'index': 2, 'text': 'Know the branch count before, by ast'}
+    assert patches[1]['remove_need'] == len(needs)
+    for p in brief['proposals']:
+        controller.terra(CONFIG, project, 'brief', 'accept', p['id'])
+    brief = json.loads((project/'.terra'/'brief.json').read_text())
+    assert brief['needs'][1] == 'Know the branch count before, by ast' and len(brief['needs']) == len(needs)-1
