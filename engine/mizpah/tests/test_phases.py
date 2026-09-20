@@ -184,7 +184,7 @@ def test_reading_of_a_built_file_waits_for_its_builder_and_unblock_needs_a_done_
     accepted, refusals = controller.guard(decision, observation, project)
     audit = next(t for t in accepted['tasks'] if t['id'] == 'audit')
     assert audit['deps'] == ['write'], (audit, refusals)
-    assert any('audit' in r and 'added that dependency' in r for r in refusals)
+    assert any('audit' in c and 'added that dependency' in c for c in accepted['cautions'])
     controller.apply(CONFIG, project, accepted)
     terra(project, 'route', 'block', 'count', '--reason', 'the file is absent')
     observation = controller.observe(CONFIG, project)
@@ -394,7 +394,9 @@ def test_a_second_unknown_for_the_same_claim_is_refused_and_a_stale_known_is_rou
                                                                evidence_needed='compare')],
                                                tasks=[dict(id='t2', unknowns=['docs_page_handwritten_compliance'], bucket='low', title='b')]),
                                           observation, project)
-    assert not accepted['unknowns'] and any('already holds this reading as page_matches_docs' in r for r in refusals)
+    assert not accepted['unknowns'] and any('already holds this reading as page_matches_docs' in c for c in accepted['cautions'])
+    # t1 is still open on that reading, so t2 has nothing left to carry: no twin task either.
+    assert not accepted['tasks']
     # A stale known is routed under its own id (once its first task is closed).
     terra(project, 'route', 'cancel', 't1', '--reason', 'test')
     observation = controller.observe(CONFIG, project)
@@ -412,7 +414,7 @@ def test_a_reading_of_an_unbuilt_deliverable_path_waits_for_a_builder(project: P
                                    evidence_needed='count headings', source='report/survey.md')],
                     tasks=[dict(id='count', unknowns=['report_sections'], bucket='low', title='count')])
     accepted, refusals = controller.guard(decision, observation, project)
-    assert not accepted['tasks'] and any('does not exist and no task builds' in r for r in refusals), refusals
+    assert accepted['tasks'] and any('does not exist and no task builds' in c for c in accepted['cautions']), (refusals, accepted['cautions'])
     decision['unknowns'].append(dict(id='survey_written', cites='deliverable:1', type='boolean', creates='report/survey.md',
                                      claim='report/survey.md exists with report_sections sections', evidence_needed='read it'))
     decision['tasks'].append(dict(id='write', unknowns=['survey_written'], bucket='low', title='write'))
@@ -458,7 +460,7 @@ def test_a_route_reply_without_the_deliverable_is_sent_back_for_the_builder(proj
     accepted, refusals = controller.guard(dict(unknowns=[
         dict(id='line_count', cites='need:1', type='number', claim='lines', evidence_needed='wc')],
         tasks=[dict(id='count', unknowns=['line_count'], bucket='low', title='count')]), observation, project, require_deliverables=True)
-    assert accepted['unknowns'] and any('deliverable:1 has no unknown' in r for r in refusals)
+    assert accepted['unknowns'] and any('deliverable:1 has no unknown' in c for c in accepted['cautions'])
     # A later-phase deliverable is not demanded yet.
     assert not any('deliverable:2' in r for r in refusals)
 
@@ -576,7 +578,7 @@ def test_sibling_readings_are_routed_as_one_task(project: Path) -> None:
     assert ids['check_row_1']['unknowns'] == ['row_'+str(i)+'_note' for i in range(1, 6)]
     assert ids['check_row_1']['deps'] == ['write'] and ids['check_row_1']['title'] == 'Check row every note'
     assert len(accepted['unknowns']) == 6
-    assert any('one reading over the list' in r for r in refusals)
+    assert any('one reading over the list' in c for c in accepted['cautions'])
 
 
 def test_a_false_reading_about_a_project_file_cited_to_a_need_is_repairable(project: Path) -> None:

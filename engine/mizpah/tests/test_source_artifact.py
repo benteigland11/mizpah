@@ -84,14 +84,16 @@ def test_the_model_need_not_send_creates(gym: Path) -> None:
     assert accepted['unknowns'][0]['creates'] == 'piece.mid'
 
 
-def test_a_report_with_no_anchor_is_still_refused(gym: Path) -> None:
+def test_a_report_with_no_anchor_is_cautioned_not_refused(gym: Path) -> None:
+    """The anchor rule is a method caution now: the unknown is minted and the caution rides with the briefing."""
     observation = controller.observe(CONFIG, gym)
     decision = dict(unknowns=[
         dict(id='summary_built', cites='deliverable:3', type='boolean', creates='summary.md',
              claim='summary.md is written', evidence_needed='read it'),
     ], tasks=[dict(id='write_summary', unknowns=['summary_built'], bucket='low', title='summary')])
     accepted, refusals = controller.guard(decision, observation, gym)
-    assert not accepted['unknowns'] and any('summary_built' in r and 'names no known' in r for r in refusals)
+    assert [u['id'] for u in accepted['unknowns']] == ['summary_built'] and not refusals
+    assert any('summary_built' in c and 'names no known' in c for c in accepted['cautions'])
 
 
 def test_a_resolved_reading_minted_again_is_reopened_not_refused(gym: Path) -> None:

@@ -206,9 +206,27 @@ def mark_notes_read(root: Path | None, notes: list[dict[str, Any]]) -> None:
     (root/OPERATOR_NOTES).write_text('\n'.join(lines)+'\n')
 
 
+def last_cautions(journal: Path) -> list[str]:
+    """What the guard noted on the previous briefing: applied as decided, said once here."""
+    try:
+        lines = Path(journal).read_text().splitlines()
+    except OSError:
+        return []
+    for line in reversed(lines):
+        try:
+            return [str(c) for c in (json.loads(line).get('cautions') or [])][:12]
+        except ValueError:
+            continue
+    return []
+
+
 def render_observation(observation: dict[str, Any], mode: str, refusals: list[str] = ()) -> str:
     brief = observation['brief']
     lines = []
+    if observation.get('cautions'):
+        lines.append('# Cautions on your last briefing (applied as you decided; nothing to redo unless you agree)')
+        lines += ['  - '+c[:300] for c in observation['cautions']]
+        lines.append('')
     if observation.get('operator_notes'):
         # The person answered the loop (a reply to a notice): it is the first thing the controller reads, and the
         # briefing it writes is the answer. The brief itself moves only through a proposal.
@@ -568,7 +586,7 @@ def _family(unknown_id: str) -> str:
     return re.sub(r'(?<![a-z])\d+(?![a-z])', 'N', unknown_id)
 
 
-def _merge_sibling_tasks(tasks: list[dict[str, Any]], refusals: list[str]) -> list[dict[str, Any]]:
+def _merge_sibling_tasks(tasks: list[dict[str, Any]], cautions: list[str]) -> list[dict[str, Any]]:
     """Ten tasks that each read one row of the same table are one task read ten times: a worker session per
     row cost headline2 ten sessions of ~25 turns for "candidate N has its note". When three or more tasks
     carry nothing but members of one family (ids equal after numbers are masked), they become the first task,
@@ -589,7 +607,7 @@ def _merge_sibling_tasks(tasks: list[dict[str, Any]], refusals: list[str]) -> li
             dropped.add(task['id'])
         head['deps'] = [d for d in head['deps'] if d not in dropped]
         head['title'] = re.sub(r'\b\d+\b', 'every', head['title'], count=1) if re.search(r'\b\d+\b', head['title']) else head['title']
-        refusals.append('tasks '+', '.join(t['id'] for t in rest)+': readings that differ only by an index ('+family
+        cautions.append('tasks '+', '.join(t['id'] for t in rest)+': readings that differ only by an index ('+family
                         +') are one reading over the list; merged into '+head['id']+', which now resolves all '
                         +str(len(head['unknowns']))+' of them in one session')
     kept = [t for t in tasks if t['id'] not in dropped]
@@ -612,6 +630,12 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
     counts = dict(need=len(brief.get('needs') or []), deliverable=len(brief.get('deliverables') or []))
     existing_unknowns = {u['id']: u for u in observation['unknowns']}
     reopened: dict[str, str] = {}   # original id -> the id the decision used for its re-measure
+    # Method guards became cautions (2026-09-20): the decision is applied as made and the caution rides with it
+    # into the journal and the next briefing. A refusal costs a resubmission round; today's tally put 70 of 93
+    # refusals on the guard being wrong about artifacts, their readings and the order between them, and not one
+    # caught what the guards were written for. Terra refuses what must be refused at the tool (a completion
+    # without a run, a known without one); the controller guard keeps only the brief's integrity hard.
+    cautions: list[str] = []
     existing_tasks = {t['id'] for t in observation['tasks']}
     open_unknowns = {u['id'] for u in observation['unknowns'] if u['status'] in OPEN_UNKNOWN}
     routed = {u for t in observation['tasks'] if t['status'] in OPEN_TASK for u in (t.get('unknowns') or [t['unknown']])}
@@ -653,9 +677,10 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
                          ' to be measured again — tasks naming '+uid+' route on '+original)
             continue
         if same_claim:
-            refusals.append('unknown '+uid+': the map already holds this reading as '+same_claim[0]['id']+' ['+str(same_claim[0]['status'])
-                            +']; if its artifact changed it goes stale and its own id is routed again, if it read false the '
-                            'artifact is what changes — a second unknown for one claim is refused'); continue
+            # Not resolved yet: the reading is already on its way. The task routes on the existing id instead.
+            reopened.setdefault(same_claim[0]['id'], uid)
+            cautions.append('unknown '+uid+': the map already holds this reading as '+same_claim[0]['id']+' ['+str(same_claim[0]['status'])
+                            +']; tasks naming '+uid+' route on it'); continue
         twins = [u for u in existing_unknowns.values() if stem(u['id']) == stem(uid) and u['id'] != uid]
         if len(twins) >= 2:
             refusals.append('unknown '+uid+': the third attempt at '+stem(uid)+' ('+', '.join(t['id'] for t in twins)+' already exist); '
@@ -770,10 +795,8 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             and not item.get('enabler')
         if artifact and item.get('type') == 'label':
             # An artifact is verified by agreement with the map, never by recording what it prints.
-            refusals.append('unknown '+item['id']+': an artifact unknown is an agreement, not a label — make it boolean '
-                            '(the output equals the known it names) or number (the value it prints); a label is for a '
-                            'reading of the data (which store, which file)')
-            unknowns.remove(item); continue
+            cautions.append('unknown '+item['id']+': an artifact unknown is usually an agreement (boolean) or a value (number), '
+                            'not a label; applied as minted')
         # A statement about what the map does NOT hold ("the report lists the questions the data could not
         # answer") is anchored on the proposals that record it (CR-001), not on a known.
         proposal_ids = {str(p.get('id')) for p in observation['brief'].get('proposals') or []}
@@ -794,7 +817,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         named_files += [f for f in re.findall(r'[\w./-]+\.[A-Za-z0-9]+', text) if f.lower() in source_artifacts and f.lower() != made]
         if artifact and not names_proposal and not named_files and made not in source_artifacts \
                 and not [w for w in re.findall(r'[a-z][a-z0-9_]*', text) if w in anchors and w != item['id']]:
-            refusals.append('unknown '+item['id']+': it is about '+(item['creates'] or item['cites'])+' but names no known '
+            cautions.append('unknown '+item['id']+': it is about '+(item['creates'] or item['cites'])+' but names no known '
                             'or unknown its content must agree with; an artifact is verified against the map — name '
                             'them in the evidence ("the STN01 row matches stn01_mean_temp_c", "the tests assert '
                             'station_count and mean_temp_c"), minting number unknowns first when the map lacks them; '
@@ -802,7 +825,6 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
                             'it (name its id, e.g. CR-001); a thing that is built (a page, a script) is anchored on the '
                             'source files it is built from (name them: "sections follow content/pitch.md"), and its '
                             'measured properties are separate unknowns that depend on the build')
-            unknowns.remove(item)
     minted = {u['id'] for u in unknowns}
     for index, line in enumerate(refusals):
         m = re.match(r'unknown ([a-z][a-z0-9_]*): ', line)
@@ -871,7 +893,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
                     continue
                 refusals.append('task '+tid+': unknown '+', '.join(repr(u) for u in bad)+' is neither minted here nor open'); continue
             # A task carrying several unknowns keeps the ones that passed; the refused ones were reported above.
-            refusals.append('task '+tid+': dropped unknown '+', '.join(repr(u) for u in bad)+' (refused or absent); kept '+', '.join(kept))
+            cautions.append('task '+tid+': dropped unknown '+', '.join(repr(u) for u in bad)+' (refused or absent); kept '+', '.join(kept))
             ids = kept
         taken = [u for u in ids if u in routed or any(u in t['unknowns'] for t in tasks)]
         if taken:
@@ -879,7 +901,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             if not kept:
                 refusals.append('task '+tid+': unknown '+', '.join(taken)+' already has an open task'); continue
             # One unknown already routed does not sink the others the task carries.
-            refusals.append('task '+tid+': dropped unknown '+', '.join(taken)+' (already has an open task); kept '+', '.join(kept))
+            cautions.append('task '+tid+': dropped unknown '+', '.join(taken)+' (already has an open task); kept '+', '.join(kept))
             ids = kept
         if item.get('bucket') not in BUCKETS:
             refusals.append('task '+tid+': bucket must be one of '+', '.join(BUCKETS)); continue
@@ -891,7 +913,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         if bad:
             # A dependency on a task refused above (or never named) is dropped, not fatal: one bad task
             # otherwise sinks every task behind it and every unknown they carried (components, 2026-09-19).
-            refusals.append('task '+tid+': dropped dependency '+', '.join(bad)+' (refused or absent); kept the task')
+            cautions.append('task '+tid+': dropped dependency '+', '.join(bad)+' (refused or absent); kept the task')
             deps = [d for d in deps if d not in bad]
         title = str(item.get('title') or '').strip()
         if not title:
@@ -935,7 +957,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
                 r_builds = any(u.get('creates') for u in unknowns if u['id'] in r_ids)
                 if not r_builds and any(names_file(r_text, m) for m in made_by_me):
                     deps.remove(d)
-                    refusals.append('task '+tid+': dropped dependency '+d+' — it reads what this task builds; the reverse holds')
+                    cautions.append('task '+tid+': dropped dependency '+d+' — it reads what this task builds; the reverse holds')
         if not builds:
             mine = ' '.join(str(u.get('source') or '')+' '+str(u.get('claim') or '') for u in unknowns if u['id'] in ids).lower()
             for made, owner_task in creators.items():
@@ -943,7 +965,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
                 if owner_task and owner_task != tid and made and (made in mine or (not exists and names_file(mine, made))) \
                         and owner_task not in deps:
                     deps.append(owner_task)
-                    refusals.append('task '+tid+': reads '+made+', which '+owner_task+' builds — added that dependency')
+                    cautions.append('task '+tid+': reads '+made+', which '+owner_task+' builds — added that dependency')
             # A reading of a path a deliverable names that does not exist yet, with nothing routed to build it, is
             # a task that can only block ("count the candidates under brand/marks/" before any were drawn). Checked
             # whatever the task already depends on: inspect_mark_files waited on the mark builder and still read
@@ -957,9 +979,9 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
                 missing = sorted({p for p in named if p and (p in mine or ('/' not in p and re.search(r'\b'+re.escape(p)+r'\b', mine)))
                                   and not exists_somewhere(p) and not any(p in c for c in creators)})
                 if missing:
-                    refusals.append('task '+tid+': reads '+', '.join(missing[:3])+', which does not exist and no task builds — '
+                    cautions.append('task '+tid+': reads '+', '.join(missing[:3])+', which does not exist and no task builds — '
                                     'mint the artifact unknown that creates it (with `creates`) and its task first, and make '
-                                    'this task depend on it'); continue
+                                    'this task depend on it')
         made_here = {u['creates'].lower() for u in unknowns if u['id'] in ids and u.get('creates')}
         def reads_own(task_unknowns: list[str]) -> bool:
             texts = ' '.join(str(u.get('source') or '')+' '+str(u.get('claim') or '') for u in unknowns if u['id'] in task_unknowns)
@@ -972,8 +994,8 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         if builds and not deps and reading_tasks and not builds_source:
             # An artifact that must agree with the map cannot be built before the readings exist. A source
             # artifact is the other way round: its readers depend on it (added above), it depends on nobody.
-            refusals.append('task '+tid+': it builds an artifact that must agree with the map, so it depends on the '
-                            'tasks that produce those knowns; add deps from: '+', '.join(dict.fromkeys(reading_tasks))); continue
+            cautions.append('task '+tid+': it builds an artifact that must agree with the map; it depends on the '
+                            'tasks that produce those knowns; add deps from: '+', '.join(dict.fromkeys(reading_tasks))+' — applied as routed; add the deps if you meant them')
         carried = {u['enabler'] for u in unknowns if u['id'] in ids and u.get('enabler')}
         if len(carried) > 1:
             refusals.append('task '+tid+': one enabler per task ('+', '.join(sorted(carried))+')'); continue
@@ -983,9 +1005,9 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
     for t in tasks:
         gone = [d for d in t['deps'] if d not in accepted_ids]
         if gone:
-            refusals.append('task '+t['id']+': dropped dependency '+', '.join(gone)+' (refused); kept the task')
+            cautions.append('task '+t['id']+': dropped dependency '+', '.join(gone)+' (refused); kept the task')
             t['deps'] = [d for d in t['deps'] if d in accepted_ids]
-    tasks = _merge_sibling_tasks(tasks, refusals)
+    tasks = _merge_sibling_tasks(tasks, cautions)
     covered = {u for t in tasks for u in t['unknowns']}
     listed_by_refused = {str(u) for ti in (decision.get('tasks') or []) if isinstance(ti, dict)
                          and not any(t['id'] == str(ti.get('id')) for t in tasks)
@@ -1114,7 +1136,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             ref = 'deliverable:'+str(index)
             if ref in cited or phases.refused_cites(observation['brief'], [ref]):
                 continue
-            refusals.append(ref+' has no unknown: the readings you routed are of what it names, and nothing builds it. Mint '
+            cautions.append(ref+' has no unknown yet: the readings you routed are of what it names, and nothing builds it. Mint '
                             'its artifact unknown first (boolean, `creates` the file, claim naming the source it is built '
                             'from) with a task; the readings depend on that task')
     if done is True and (observation['brief'].get('proposals') or proposals):
@@ -1128,7 +1150,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             refusals.append('done refused: '+'; '.join(uncovered)+' — mint one unknown per named thing (with `creates`), '
                             'each claim naming it and the known it must agree with')
     return dict(unknowns=unknowns, tasks=tasks, proposals=proposals, rebucket=rebucket, unblock=unblock, retype=retype, noted=noted,
-                reopen=sorted(reopened), done=done, why=str(decision.get('why') or '')), refusals
+                reopen=sorted(reopened), cautions=cautions, done=done, why=str(decision.get('why') or '')), refusals
 
 
 def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> dict[str, list[str]]:
@@ -1332,6 +1354,7 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
     notes = operator_notes(Path(journal).parent)
     if notes:
         observation['operator_notes'] = notes
+    observation['cautions'] = last_cautions(journal)
     refusals: list[str] = []
     accepted = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[], done=None, why='')
     record: dict[str, Any] = dict(mode=mode, observation=observation, attempts=[], usage=usage)
@@ -1394,6 +1417,7 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
         record['applied'].setdefault(key, [])
         record['applied'][key] += applied[key]
     record['refused'] = refusals
+    record['cautions'] = list(accepted.get('cautions') or [])
     record['why'] = accepted.get('why', '')
     record['done'] = accepted.get('done')
     record['answered_notes'] = [str(n.get('text') or '')[:200] for n in notes]

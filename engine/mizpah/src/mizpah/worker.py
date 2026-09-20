@@ -265,14 +265,43 @@ def known_ids_named(project: Path, unknown: dict[str, Any]) -> list[str]:
     return exact+loose
 
 
+def prior_readings(project: Path, unknowns: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """For each unknown that already has a known on the brief's map — a repair or a re-measure — what it read."""
+    out: dict[str, dict[str, Any]] = {}
+    for unknown in unknowns:
+        known = read_known(project, unknown['id'])
+        if known is None:
+            continue
+        stats = known.get('stats') or {}
+        out[unknown['id']] = dict(value=known.get('value'), rate=stats.get('rate'), n=stats.get('n'),
+                                  run=known.get('primary_run_id'), probes=list(known.get('probe_ids') or []))
+    return out
+
+
 def render_assignment(task: dict[str, Any], unknowns: list[dict[str, Any]], map_id: str,
-                      inputs: dict[str, list[str]] | None = None, state_dirname: str = layout.STATE_DIRNAME) -> str:
+                      inputs: dict[str, list[str]] | None = None, state_dirname: str = layout.STATE_DIRNAME,
+                      prior: dict[str, dict[str, Any]] | None = None) -> str:
     """The task, its unknowns and the map: nothing about method and nothing from the brief.
-    `inputs` maps an unknown id to the knowns its probe declares; the worker reads them from ctx["inputs"]."""
+    `inputs` maps an unknown id to the knowns its probe declares; the worker reads them from ctx["inputs"].
+    `prior` maps an unknown id to what it last read, when this task is a repair or a re-measure: the delta is
+    put in front of the worker on its first turn (a repair task was told "make it pass" and not what failed,
+    2026-09-20)."""
     lines = ['Route task `'+task['id']+'` (bucket '+task['bucket']+': '+BUCKET_MODES.get(task['bucket'], '')+'): '+task['title'],
              'It resolves '+('one unknown' if len(unknowns) == 1 else str(len(unknowns))+' unknowns')+':']
     for unknown in unknowns:
         lines += describe_unknown(unknown)
+        last = (prior or {}).get(unknown['id'])
+        if last:
+            value = last.get('value')
+            verdict = ('false' if str(value) in ('0.0', '0', 'False', 'false') else 'true' if str(value) in ('1.0', '1', 'True', 'true')
+                       else str(value))
+            lines.append('  LAST READING: '+verdict+(' (rate '+str(last['rate'])+' over '+str(last['n'])+')' if last.get('rate') is not None else '')
+                         +(', run `'+str(last['run'])+'`' if last.get('run') else '')
+                         +(', by probe '+', '.join('`'+p+'`' for p in last['probes']) if last.get('probes') else '')
+                         +('. This task exists because of that reading: read the probe\'s measure.py first to see exactly '
+                            'what it counted, change the thing it reads so the count passes, then take the reading again. '
+                            'Do not change the probe to make it pass.' if verdict == 'false' else
+                            '. The thing it reads has changed since: take the reading again with the same probe.'))
     acceptance = [a for a in task.get('acceptance') or [] if not str(a).startswith('unknown:')]
     if acceptance:
         lines.append('Acceptance: '+'; '.join(acceptance))
@@ -1958,7 +1987,8 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         task = pick_task(config, project, task_id)
         map_id = open_task_map(config, project, task)
         unknowns = [read_unknown(project, uid, map_id) for uid in task_unknown_ids(task)]
-        assignment = render_assignment(task, unknowns, map_id, probe_inputs(project, task), layout.dirname(project))
+        assignment = render_assignment(task, unknowns, map_id, probe_inputs(project, task), layout.dirname(project),
+                                       prior=prior_readings(project, unknowns))
         parts = library_parts(config, project, unknowns)
         if parts:
             assignment += ('The library already has parts near this work; install and extend one where it nearly fits '
