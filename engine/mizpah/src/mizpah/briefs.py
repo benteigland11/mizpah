@@ -38,7 +38,7 @@ def record(config: dict[str, Any], project: Path, stop: str, cycles: list[dict[s
         return None
     brief = json.loads(brief_path.read_text())
     unknowns = []
-    for path in sorted((project/layout.dirname(project)/'map'/'unknowns').glob('*.json')):
+    for path in sorted((layout.map_root(project)/'unknowns').glob('*.json')):
         u = json.loads(path.read_text())
         notes = str(u.get('notes') or '')
         cites = re.search(r'cites ((?:need|deliverable):\d+)', notes)

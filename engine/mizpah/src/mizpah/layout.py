@@ -33,11 +33,47 @@ def sessions(project: Path) -> Path:
     return state(project)/SESSIONS_DIRNAME
 
 
+
+
+def _slug(text: str) -> str:
+    import re
+    s = re.sub(r'[^a-z0-9]+', '_', str(text).lower()).strip('_')
+    return s[:40] or 'brief'
+
+
+def brief_map(project: Path) -> str:
+    """The map a brief's work lands on: `b_<brief slug>`, a child of global, so a repository that runs its tenth
+    brief keeps each brief's readings apart and global holds only what was promoted as durable. A project made by
+    the earlier engine (`.terra/`) keeps everything on global, as it always did."""
+    if dirname(project) == LEGACY_DIRNAME:
+        return 'global'
+    try:
+        import json
+        brief = json.loads((state(project)/'brief.json').read_text())
+    except (OSError, ValueError):
+        return 'global'
+    return 'b_'+_slug(brief.get('title') or brief.get('id') or 'brief')
+
+
+def map_root(project: Path) -> Path:
+    """Where the current brief's unknowns, knowns and runs live on disk (probes are always under global's map)."""
+    m = brief_map(project)
+    base = state(project)/'map'
+    return base if m == 'global' else base/'sessions'/m
+
+
 def terra_env(project: Path) -> dict[str, str]:
-    """The environment a Terra CLI (host or sandbox) needs to find this project's tree."""
-    return {'TERRA_DIRNAME': dirname(project)}
+    """The environment a Terra CLI (host side) needs: the state directory's name and the brief's map."""
+    env = {'TERRA_DIRNAME': dirname(project)}
+    m = brief_map(project)
+    if m != 'global':
+        env['TERRA_MAP'] = m
+    return env
 
 
 def bind(project: Path) -> None:
-    """Point this process's Terra calls at the project's tree; call once per project before any terra()."""
-    os.environ['TERRA_DIRNAME'] = dirname(project)
+    """Point this process's Terra calls at the project's tree and brief map; call once per project."""
+    for k, v in terra_env(project).items():
+        os.environ[k] = v
+    if 'TERRA_MAP' not in terra_env(project):
+        os.environ.pop('TERRA_MAP', None)

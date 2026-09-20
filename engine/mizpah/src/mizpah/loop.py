@@ -25,6 +25,22 @@ from cg.infra_app_paths_python.src.app_paths import resolve_app_paths
 from cg.infra_atomic_file_write_python.src.atomic_file_write import atomic_write_text
 
 
+def ensure_brief_map(config: dict[str, Any], project: Path, log: Path) -> str:
+    """The brief's map, `b_<slug>` under global, exists before anything is minted on it. Legacy projects stay on
+    global. Task maps parent the brief map, so `known adopt --from t_x` lands on the brief, and only what is
+    promoted deliberately reaches global — a repository's tenth brief does not read the first nine's readings."""
+    map_id = layout.brief_map(project)
+    if map_id == 'global' or (layout.state(project)/'map'/'sessions'/map_id).exists():
+        return map_id
+    try:
+        brief = terra(config, project, 'brief', 'show')
+        terra(config, project, 'map', 'create', map_id, '--parent', 'global', '--purpose', 'brief: '+str(brief.get('title') or map_id))
+    except RuntimeError as error:
+        with log.open('a') as handle:
+            handle.write(json.dumps(dict(at=time.time(), where='brief_map', error=str(error)[:300]))+'\n')
+    return map_id
+
+
 def pickable(config: dict[str, Any], project: Path, root: Path | None = None) -> list[dict[str, Any]]:
     """Tasks to run next: this agent's own in-progress tasks with a session on disk first (a killed run
     resumes where it paused), then the route's pickable ones."""
@@ -270,10 +286,11 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
     """Unattended-safe: one task's crash blocks that task; repeated crashes stop the run; a deadline ends it."""
     project, root = project.resolve(), root.resolve()
     root.mkdir(parents=True, exist_ok=True)
-    layout.bind(project)                       # this process's terra calls find the project's tree
+    layout.bind(project)                       # this process's terra calls find the project's tree and brief map
     init_module.apply_project_config(config, project)   # the project's own sandbox settings, if it has any
     journal = root/'controller.jsonl'
     log = root/'errors.jsonl'
+    ensure_brief_map(config, project, log)
     started = time.time()
     deadline = None if deadline_hours is None else started+deadline_hours*3600
     cycles: list[dict[str, Any]] = []

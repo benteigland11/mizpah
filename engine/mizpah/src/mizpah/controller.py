@@ -131,7 +131,7 @@ def observe(config: dict[str, Any], project: Path) -> dict[str, Any]:
         record = dict(row.get('record') or row)
         record['stale'], record['stale_reasons'] = bool(row.get('stale')), list(row.get('stale_reasons') or [])
         knowns.append(record)
-    unknowns = [json.loads(path.read_text()) for path in sorted((project/layout.dirname(project)/'map'/'unknowns').glob('*.json'))]
+    unknowns = [json.loads(path.read_text()) for path in sorted((layout.map_root(project)/'unknowns').glob('*.json'))]
     route = terra(config, project, 'route', 'status')
     related_briefs = briefs.related(config, brief) if config['mizpah'].get('brief_library', True) else []
     registry = capabilities.render(config, brief)
@@ -1104,7 +1104,7 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
         record_release(project, r['task'], r['after'])
         done.setdefault('unblock', []).append(r['task']+' after '+r['after'])
     for r in accepted.get('retype') or []:
-        path = project/layout.dirname(project)/'map'/'unknowns'/(r['unknown']+'.json')
+        path = layout.map_root(project)/'unknowns'/(r['unknown']+'.json')
         try:
             record = json.loads(path.read_text())
         except (OSError, ValueError):
@@ -1193,7 +1193,7 @@ def ready_order(project: Path, tasks: list[dict[str, Any]]) -> list[dict[str, An
 
     def builds(task: dict[str, Any]) -> bool:
         for uid in [task.get('map_id')]+[a.removeprefix('unknown:') for a in task.get('acceptance') or [] if str(a).startswith('unknown:')]:
-            path = project/layout.dirname(project)/'map'/'unknowns'/(str(uid)+'.json')
+            path = layout.map_root(project)/'unknowns'/(str(uid)+'.json')
             try:
                 if 'creates ' in str(json.loads(path.read_text()).get('notes') or ''):
                     return True

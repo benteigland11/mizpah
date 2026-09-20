@@ -155,12 +155,14 @@ def task_unknown_ids(task: dict[str, Any]) -> list[str]:
 
 
 def read_unknown(project: Path, unknown_id: str, map_id: str | None = None) -> dict[str, Any]:
-    base = project/layout.dirname(project)/'map' if map_id in (None, 'global') else project/layout.dirname(project)/'map'/'sessions'/map_id
+    base = layout.map_root(project) if map_id is None else (project/layout.dirname(project)/'map' if map_id == 'global'
+                                                            else project/layout.dirname(project)/'map'/'sessions'/map_id)
     return json.loads((base/'unknowns'/(unknown_id+'.json')).read_text())
 
 
 def read_known(project: Path, known_id: str, map_id: str | None = None) -> dict[str, Any] | None:
-    base = project/layout.dirname(project)/'map' if map_id in (None, 'global') else project/layout.dirname(project)/'map'/'sessions'/map_id
+    base = layout.map_root(project) if map_id is None else (project/layout.dirname(project)/'map' if map_id == 'global'
+                                                            else project/layout.dirname(project)/'map'/'sessions'/map_id)
     path = base/'knowns'/(known_id+'.json')
     return json.loads(path.read_text()) if path.exists() else None
 
@@ -169,7 +171,7 @@ def open_task_map(config: dict[str, Any], project: Path, task: dict[str, Any]) -
     """A session map for the task with a copy of its unknown; unknowns do not read through."""
     map_id = task_map_id(task)
     if not (project/layout.dirname(project)/'map'/'sessions'/map_id).exists():
-        terra(config, project, 'map', 'create', map_id, '--purpose', 'route task '+task['id'], '--parent', 'global')
+        terra(config, project, 'map', 'create', map_id, '--purpose', 'route task '+task['id'], '--parent', layout.brief_map(project))
     for unknown_id in task_unknown_ids(task):
         unknown = read_unknown(project, unknown_id)
         if (project/layout.dirname(project)/'map'/'sessions'/map_id/'unknowns'/(unknown['id']+'.json')).exists():
@@ -236,7 +238,7 @@ def known_ids_named(project: Path, unknown: dict[str, Any]) -> list[str]:
              if '_' in word and read_known(project, word) is not None]
     words = set(re.findall(r'[a-z][a-z0-9_]*', text.lower()))
     own = set(known_words(str(unknown.get('id') or '')))
-    loose = [path.stem for path in sorted((project/layout.dirname(project)/'map'/'knowns').glob('*.json'))
+    loose = [path.stem for path in sorted((layout.map_root(project)/'knowns').glob('*.json'))
              if path.stem not in exact and path.stem != unknown.get('id') and names_known(words, path.stem)
              and not set(known_words(path.stem)) <= own]
     return exact+loose
@@ -387,6 +389,10 @@ def writeback(snapshot: bytes, project: Path, task: dict[str, Any], map_id: str,
         target.write_bytes(files[name])
         written.append(name)
 
+    # The project map the task adopts to: global, or the brief's map under sessions/ (its knowns, unknowns and
+    # runs live there, not under map/ — the first brief-map run lost its adopted knowns to this rule).
+    brief_map = layout.brief_map(project)
+    project_map = terra_dir+'map/' if brief_map == 'global' else terra_dir+'map/sessions/'+brief_map+'/'
     adopted_runs: set[str] = set()
     for name in sorted(files):
         if name.startswith(WRITEBACK_EXCLUDE):
@@ -404,16 +410,16 @@ def writeback(snapshot: bytes, project: Path, task: dict[str, Any], map_id: str,
             put(name)
         elif name.startswith(terra_dir+'map/sessions/'+map_id+'/'):
             put(name)
-        elif name.startswith(terra_dir+'map/knowns/') and name.endswith('.json'):
+        elif name.startswith(project_map+'knowns/') and name.endswith('.json'):
             known = json.loads(files[name])
             if (known.get('adopted_from') or {}).get('map') == map_id:
                 put(name)
                 adopted_runs.update(known.get('run_ids') or [])
-        elif name.startswith(terra_dir+'map/unknowns/') and name[len(terra_dir+'map/unknowns/'):-5] in task_unknown_ids(task):
+        elif name.startswith(project_map+'unknowns/') and name[len(project_map+'unknowns/'):-5] in task_unknown_ids(task):
             if json.loads(files[name]).get('status') == 'resolved':
                 put(name)
     for name in sorted(files):
-        if name.startswith(terra_dir+'map/runs/') and name.split('/')[3] in adopted_runs:
+        if name.startswith(project_map+'runs/') and name[len(project_map+'runs/'):].split('/')[0] in adopted_runs:
             put(name)
     route_name = terra_dir+'route.json'
     if route_name in files:
@@ -853,7 +859,7 @@ def refresh_stale(config: dict[str, Any], project: Path, root: Path) -> dict[str
                                       +str(reading)+': the reading is owed again')
                 continue
             # Harvest the run directory from the sandbox's tree, then link it with the host's terra.
-            prefix = state_dir+'/map/runs/'+run_id+'/'
+            prefix = layout.map_root(project).relative_to(project).as_posix()+'/runs/'+run_id+'/'
             members = {name: data for name, data in _members(result.workspace).items() if name.startswith(prefix)}
             if not members:
                 out['failed'].append(known_id+': run '+run_id+' not found in the sandbox tree'); continue
@@ -907,7 +913,7 @@ def artifact_agreement_problems(project: Path, unknown_ids: list[str]) -> list[s
     discarded it. So the gate compares: the adopted value against every number known the unknown names, and
     disagreement with all of them is red, with both numbers in the message."""
     problems: list[str] = []
-    known_ids = {p.stem for p in (project/layout.dirname(project)/'map'/'knowns').glob('*.json')}
+    known_ids = {p.stem for p in (layout.map_root(project)/'knowns').glob('*.json')}
     for uid in unknown_ids:
         try:
             unknown = read_unknown(project, uid)
@@ -976,7 +982,7 @@ def run_inputs(project: Path, known: dict[str, Any]) -> dict[str, Any]:
     run_id = str(known.get('primary_run_id') or next(iter(known.get('run_ids') or []), ''))
     if not run_id:
         return {}
-    for base in [project/layout.dirname(project)/'map'/'runs']+sorted((project/layout.dirname(project)/'map'/'sessions').glob('*/runs')):
+    for base in [layout.map_root(project)/'runs']+sorted((project/layout.dirname(project)/'map'/'sessions').glob('*/runs')):
         meta = base/run_id/'meta.json'
         if meta.exists():
             try:
@@ -1038,7 +1044,7 @@ def readopt_retaken(config: dict[str, Any], project: Path, map_id: str, unknown_
 
 
 def run_meta(project: Path, run_id: str) -> dict[str, Any]:
-    for base in (project/layout.dirname(project)/'map'/'runs', *(project/layout.dirname(project)/'map'/'sessions').glob('*/runs')):
+    for base in (layout.map_root(project)/'runs', *(project/layout.dirname(project)/'map'/'sessions').glob('*/runs')):
         path = base/run_id/'meta.json'
         if path.exists():
             try:
@@ -1074,7 +1080,7 @@ def unread_input_problems(project: Path, unknown_ids: list[str]) -> list[str]:
     min_parallel_count was 2, and every phase-2 number followed. Red, with the fix spelled out."""
     problems: list[str] = []
     knowns: dict[str, dict[str, Any]] = {}
-    for path in (project/layout.dirname(project)/'map'/'knowns').glob('*.json'):
+    for path in (layout.map_root(project)/'knowns').glob('*.json'):
         try:
             knowns[path.stem] = json.loads(path.read_text())
         except ValueError:
@@ -1409,7 +1415,7 @@ def bindings(config: dict[str, Any], root: Path, map_id: str, checkins: bool | N
     scratch = root/'scratch'
     scratch.mkdir(parents=True, exist_ok=True)
     sandbox = config['mizpah']['sandbox']
-    environment = dict(sandbox['environment'], TERRA_MAP=map_id, XDG_DATA_HOME='/work/'+PLAYBOOK_PREFIX, **layout.terra_env(project))
+    environment = dict(sandbox['environment'], **{**layout.terra_env(project), 'TERRA_MAP': map_id, 'XDG_DATA_HOME': '/work/'+PLAYBOOK_PREFIX})
     services = ServiceLimits(**sandbox['services']) if sandbox.get('services') else None
     network = NetworkPolicy(**sandbox['network']) if sandbox.get('network') else None
     bound = dict(workspace_dir=str(project.resolve()), cache_dirs=cache_dirs(config), state_dirs=state_dirs(project)) \
