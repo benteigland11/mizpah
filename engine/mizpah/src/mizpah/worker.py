@@ -338,6 +338,13 @@ def render_reference(project: Path, task: dict[str, Any], unknowns: list[dict[st
     return '\n'.join(lines)+'\n'
 
 
+def shared_workspaces(root: Path) -> Path:
+    """Where a loop's tasks share their seed: `<session>/workspaces/`, beside `tasks/`. The seed (the state
+    directories plus the playbook store, 4.5 MB) is the same for every task until a procedure is minted, and
+    the harness stores snapshots by content, so one copy serves the run instead of one per task."""
+    return root.parent.parent/'workspaces' if root.parent.name == 'tasks' else root/'workspaces'
+
+
 def pack_workspace(project: Path, playbook_store: Path | None = None, *, only: tuple[str, ...] = (),
                    exclude: tuple[str, ...] = ()) -> bytes:
     """The project tree plus a copy of the playbook store, as the harness's relative tar.
@@ -1705,11 +1712,13 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         worker_client, checkin, shell = bindings(config, root, map_id, project=project)
         holder['shell'] = shell
         try:
-            session = FocusedSession.open(root, worker=worker_client, shell=shell, controller=checkin)
+            session = FocusedSession.open(root, worker=worker_client, shell=shell, controller=checkin,
+                                          shared_workspaces=shared_workspaces(root))
         except ValueError:
             # A session created with check-ins keeps its reviewer binding even after the toggle went off.
             checkin = client_for(config['controller'], observe_model(root), config)
-            session = FocusedSession.open(root, worker=worker_client, shell=shell, controller=checkin)
+            session = FocusedSession.open(root, worker=worker_client, shell=shell, controller=checkin,
+                                          shared_workspaces=shared_workspaces(root))
         discarded = session.discard_pending()  # a killed run leaves an uncommitted call; nothing is replayed
         lifted = session.reset_generation_block()   # a degenerate window is retried in a fresh one, not re-raised
         if lifted:
@@ -1749,7 +1758,8 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         # Bind mode: only the state directories are packed in; the tree is the project directory itself.
         initial = pack_workspace(project, store, only=state_dirs(project)) if bind_mode(config) else pack_workspace(project, store)
         session = FocusedSession.create(root, build_settings(config, assignment, reference, unknowns), worker=worker_client,
-                                        shell=shell, controller=checkin, initial_workspace=initial)
+                                        shell=shell, controller=checkin, initial_workspace=initial,
+                                        shared_workspaces=shared_workspaces(root))
         probes_before = protected_probes(project, task)
         (root/'task.json').write_text(json.dumps(dict(task=task, unknowns=unknowns, map=map_id, assignment=assignment,
                                                       reference=reference, probes_before=probes_before), indent=1))

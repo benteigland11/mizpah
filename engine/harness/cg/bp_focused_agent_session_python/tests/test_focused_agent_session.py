@@ -1575,3 +1575,24 @@ def test_model_requests_are_journaled_as_deltas_and_read_back_whole(tmp_path):
     for got, sent in zip(expanded, captured):
         assert 'body_delta' not in got
         assert json.dumps(got['body'], sort_keys=True) == json.dumps(sent['body'], sort_keys=True)
+
+
+def test_shared_seed_is_stored_once_and_read_by_every_session(tmp_path):
+    """The library seed every task starts from lives once beside the sessions; a session's own snapshots stay
+    under its root, and pruning there never reaches the seed."""
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, total=1)
+    shared = tmp_path/'workspaces'
+    seed = write_workspace_file(b'', 'seed.md', b'the same seed for every task', byte_limit=1000000, file_limit=1000)
+    a = FocusedSession.create(tmp_path/'a', settings, worker=worker, shell=shell, controller=controller,
+                              initial_workspace=seed, shared_workspaces=shared)
+    b = FocusedSession.create(tmp_path/'b', settings, worker=worker, shell=shell, controller=controller,
+                              initial_workspace=seed, shared_workspaces=shared)
+    assert a.state['workspace'] == b.state['workspace']
+    assert [p.name for p in shared.glob('*.sqlite3')] == [a.state['workspace']+'.sqlite3']
+    assert not list((tmp_path/'a'/'workspaces').glob('*')) and not list((tmp_path/'b'/'workspaces').glob('*'))
+    assert a.workspace() == seed and b.workspace() == seed
+    assert a.run()['status'] == 'complete'   # its own snapshots land under a/, the seed stays shared
+    assert list((tmp_path/'a'/'workspaces').glob('*.sqlite3'))
+    assert (shared/(b.state['workspace']+'.sqlite3')).exists()
+    reopened = FocusedSession.open(tmp_path/'b', worker=worker, shell=shell, controller=controller, shared_workspaces=shared)
+    assert reopened.workspace() == seed

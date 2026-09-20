@@ -407,8 +407,13 @@ class FocusedSession:
     """
 
     def __init__(self, root: str | Path, worker: ModelClient, shell: SandboxedShell,
-                 controller: ModelClient | None) -> None:
+                 controller: ModelClient | None, shared_workspaces: str | Path | None = None) -> None:
         self.root = Path(root).resolve()
+        # Snapshots are content-addressed, so one that several sessions start from (the library seed a
+        # loop hands every task, 4.5 MB of procedures and cache) can live once beside them: the seed is
+        # written there and read from there; a session's own snapshots stay under its root, where its
+        # pruning is the only pruning.
+        self.shared_workspaces = Path(shared_workspaces).resolve() if shared_workspaces else None
         self.worker = worker
         self.shell = shell
         self.controller_client = controller
@@ -423,8 +428,9 @@ class FocusedSession:
     @classmethod
     def create(cls, root: str | Path, settings: SessionSettings, *, worker: ModelClient,
                shell: SandboxedShell, controller: ModelClient | None = None,
-               initial_workspace: bytes = b'', initial_project_document: str = '') -> FocusedSession:
-        result = cls(root, worker, shell, controller)
+               initial_workspace: bytes = b'', initial_project_document: str = '',
+               shared_workspaces: str | Path | None = None) -> FocusedSession:
+        result = cls(root, worker, shell, controller, shared_workspaces)
         with result._locked():
             if result.store.read()['revision'] or result.journal.read_strict('session'):
                 raise ValueError('Session already exists; open it without overwriting')
@@ -441,15 +447,15 @@ class FocusedSession:
                 capabilities=capabilities,
                 controller_identity=_identity(controller) if settings.reference is not None else None,
                 shell_config=_shell_identity(shell), phase='worker', pending_io=None,
-                workspace=result._put_workspace(initial_workspace), input_cursor=0,
+                workspace=result._put_workspace(initial_workspace, seed=True), input_cursor=0,
                 active_turn=None, proposed_final=None, final_text='', handoffs=0, review=None, blocked_reason=None)
             result._save()
         return result
 
     @classmethod
     def open(cls, root: str | Path, *, worker: ModelClient, shell: SandboxedShell,
-             controller: ModelClient | None = None) -> FocusedSession:
-        result = cls(root, worker, shell, controller)
+             controller: ModelClient | None = None, shared_workspaces: str | Path | None = None) -> FocusedSession:
+        result = cls(root, worker, shell, controller, shared_workspaces)
         with result._locked():
             if result.journal.drop_torn_tail('session'):
                 result.journal.append(session_id='session', event_type='torn_tail_dropped', payload={})
@@ -577,7 +583,15 @@ class FocusedSession:
         self.state.setdefault('blocked_reason', None)
         self.workspace()
 
-    def _put_workspace(self, value: Any) -> str:
+    def _workspace_store(self, digest: str, *, write: bool = False) -> RevisionStore:
+        """Where a snapshot lives: under the session, else in the shared directory; a seed is written shared."""
+        local = self.root/'workspaces'/(digest+'.sqlite3')
+        shared = self.shared_workspaces/(digest+'.sqlite3') if self.shared_workspaces else None
+        if shared is not None and (write or (not local.exists() and shared.exists())):
+            return RevisionStore(shared)
+        return RevisionStore(local)
+
+    def _put_workspace(self, value: Any, *, seed: bool = False) -> str:
         limits = self.shell.config.limits
         if self._directory() is not None:
             # Bind mode: the tree is the directory; what is saved is the state part — the tar of the state
@@ -591,7 +605,7 @@ class FocusedSession:
         else:
             workspace_files(value, byte_limit=limits.workspace_bytes, file_limit=limits.max_files)
         digest = hashlib.sha256(value).hexdigest()
-        store = RevisionStore(self.root/'workspaces'/(digest+'.sqlite3'))
+        store = self._workspace_store(digest, write=seed)
         if not store.read()['revision']:
             encoded = base64.b64encode(value).decode('ascii')
             store.commit(0, lambda _: dict(content=encoded))
@@ -604,7 +618,7 @@ class FocusedSession:
         directory = self._directory()
         if directory is not None:
             if not directory.state and self.state.get('workspace') and self.state['workspace'] != _EMPTY_DIGEST:
-                saved = RevisionStore(self.root/'workspaces'/(self.state['workspace']+'.sqlite3')).read()
+                saved = self._workspace_store(self.state['workspace']).read()
                 if saved['revision']:
                     self.shell._directory = directory.with_state(base64.b64decode(saved['data']['content'], validate=True))
                     directory = self.shell._directory
@@ -612,7 +626,7 @@ class FocusedSession:
         digest = self.state['workspace']
         if len(digest) != 64 or any(ch not in '0123456789abcdef' for ch in digest):
             raise ValueError('Invalid workspace identity')
-        saved = RevisionStore(self.root/'workspaces'/(digest+'.sqlite3')).read()
+        saved = self._workspace_store(digest).read()
         value = base64.b64decode(saved['data']['content'], validate=True)
         if hashlib.sha256(value).hexdigest() != digest:
             raise ValueError('Saved workspace failed its integrity check')
