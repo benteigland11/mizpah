@@ -25,7 +25,7 @@ import tarfile
 import time
 from typing import Any
 
-from . import layout
+from . import layout, ops
 
 from cg.bp_focused_agent_session_python.src import (
     ControllerSettings, EndpointConfig, FocusedSession, ModelClient, ReviewPolicy, SandboxedShell, SessionPolicy,
