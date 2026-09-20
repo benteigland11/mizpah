@@ -123,3 +123,20 @@ def test_a_resolved_reading_minted_again_is_reopened_not_refused(gym: Path) -> N
     applied = controller.apply(CONFIG, gym, accepted)
     assert applied.get('reopen') == ['pedal_timing_valid'] and 'revalidate_pedal' in applied['tasks']
     assert json.loads(path.read_text())['status'] == 'open'
+
+
+def test_a_note_from_the_person_is_put_first_and_read_once(gym: Path, tmp_path: Path) -> None:
+    """A reply to a stopped notice lands in operator.jsonl under the session; the next briefing sees it under
+    'From the person', and the one after does not."""
+    root = tmp_path/'sess'
+    root.mkdir()
+    (root/controller.OPERATOR_NOTES).write_text(json.dumps(dict(at=1.0, text='The pedal must not hold through a harmony change.'))+'\n')
+    notes = controller.operator_notes(root)
+    assert [n['text'] for n in notes] == ['The pedal must not hold through a harmony change.']
+    observation = controller.observe(CONFIG, gym)
+    observation['operator_notes'] = notes
+    text = controller.render_observation(observation, 'eval')
+    assert text.startswith('# From the person') and 'harmony change' in text.splitlines()[1]
+    controller.mark_notes_read(root, notes)
+    assert controller.operator_notes(root) == []
+    assert controller.operator_notes(root, unread_only=False)[0]['read'] is True

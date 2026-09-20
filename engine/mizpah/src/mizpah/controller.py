@@ -9,6 +9,7 @@ proposals are only ever queued — the person accepts them.
 from __future__ import annotations
 
 import json
+import time
 import os
 from pathlib import Path
 import re
@@ -169,9 +170,54 @@ def observe(config: dict[str, Any], project: Path) -> dict[str, Any]:
     return observation
 
 
+OPERATOR_NOTES = 'operator.jsonl'   # under the session root: {at, text, read?} — the person's replies to the loop's notices
+
+
+def operator_notes(root: Path | None, *, unread_only: bool = True) -> list[dict[str, Any]]:
+    """What the person said to this run (a reply to a stopped or completed notice, a comment on a live one)."""
+    if root is None or not (root/OPERATOR_NOTES).exists():
+        return []
+    out = []
+    for line in (root/OPERATOR_NOTES).read_text().splitlines():
+        try:
+            note = json.loads(line)
+        except ValueError:
+            continue
+        if unread_only and note.get('read'):
+            continue
+        out.append(note)
+    return out
+
+
+def mark_notes_read(root: Path | None, notes: list[dict[str, Any]]) -> None:
+    """A note is put before the controller once; the briefing that follows is its answer."""
+    if root is None or not notes or not (root/OPERATOR_NOTES).exists():
+        return
+    ats = {n.get('at') for n in notes}
+    lines = []
+    for line in (root/OPERATOR_NOTES).read_text().splitlines():
+        try:
+            note = json.loads(line)
+        except ValueError:
+            continue
+        if note.get('at') in ats:
+            note['read'] = True
+        lines.append(json.dumps(note))
+    (root/OPERATOR_NOTES).write_text('\n'.join(lines)+'\n')
+
+
 def render_observation(observation: dict[str, Any], mode: str, refusals: list[str] = ()) -> str:
     brief = observation['brief']
-    lines = ['# Brief (reference, v'+str(brief.get('version'))+', '+str(brief.get('status'))+')',
+    lines = []
+    if observation.get('operator_notes'):
+        # The person answered the loop (a reply to a notice): it is the first thing the controller reads, and the
+        # briefing it writes is the answer. The brief itself moves only through a proposal.
+        lines.append('# From the person (a reply to this run; answer it in this briefing — route what it asks, propose '
+                     'what would change the brief, or say why nothing changes)')
+        for note in observation['operator_notes']:
+            lines.append('  '+time.strftime('%Y-%m-%d %H:%M', time.gmtime(float(note.get('at') or 0)))+': '+str(note.get('text') or '').strip()[:1200])
+        lines.append('')
+    lines += ['# Brief (reference, v'+str(brief.get('version'))+', '+str(brief.get('status'))+')',
              'Mission: '+str(brief.get('mission'))]
     lines += phases.render(brief)
     lines += enablers.render(brief)
@@ -1270,6 +1316,9 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
     previous_observer = getattr(client, 'observer', None)
     client.observer = (lambda k, p: (observe_usage(k, p), previous_observer(k, p) if previous_observer else None)[0])
     observation = observe(config, project)
+    notes = operator_notes(Path(journal).parent)
+    if notes:
+        observation['operator_notes'] = notes
     refusals: list[str] = []
     accepted = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[], done=None, why='')
     record: dict[str, Any] = dict(mode=mode, observation=observation, attempts=[], usage=usage)
@@ -1334,6 +1383,8 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
     record['refused'] = refusals
     record['why'] = accepted.get('why', '')
     record['done'] = accepted.get('done')
+    record['answered_notes'] = [str(n.get('text') or '')[:200] for n in notes]
+    mark_notes_read(Path(journal).parent, notes)
     # What the loop takes next, in its order: the briefing's handoff line.
     try:
         record['up_next'] = [t['id'] for t in ready_order(project, terra(config, project, 'route', 'next')['tasks'])]

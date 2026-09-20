@@ -574,8 +574,13 @@ def main() -> None:
     parser.add_argument('--max-cycles', type=int, default=3)
     parser.add_argument('--max-tasks', type=int, default=6, help='Safety cap; the brief budget is what bounds tasks')
     parser.add_argument('--deadline-hours', type=float, default=None)
+    parser.add_argument('--note', default=None, help='the person\'s reply to the run\'s last notice: put before the controller at its next briefing')
     args = parser.parse_args()
     root = args.root or layout.sessions(args.project)/time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
+    if args.note:
+        root.mkdir(parents=True, exist_ok=True)
+        with (root/controller.OPERATOR_NOTES).open('a') as handle:
+            handle.write(json.dumps(dict(at=time.time(), text=args.note))+'\n')
     result = run(worker.load_config(args.config), args.project, root, max_cycles=args.max_cycles,
                  max_tasks=args.max_tasks, deadline_hours=args.deadline_hours)
     print(json.dumps(result, indent=2))
