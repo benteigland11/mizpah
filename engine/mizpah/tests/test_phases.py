@@ -514,3 +514,19 @@ def test_retype_asks_the_same_unknown_with_the_right_type_and_releases_its_task(
     assert next(t for t in terra(project, 'route', 'status')['tasks'] if t['id'] == 'measure')['status'] != 'blocked'
     accepted, refusals = controller.guard(dict(retype=[dict(unknown='fact_coverage', type='number')]), observation, project)
     assert not accepted['retype'] and any('changes nothing' in r for r in refusals)
+
+
+def test_a_builder_never_waits_on_a_reader_of_its_file_and_stems_name_files(project: Path) -> None:
+    observation = controller.observe(CONFIG, project)
+    decision = dict(unknowns=[
+        dict(id='line_count', cites='need:1', type='number', claim='lines', evidence_needed='wc'),
+        dict(id='survey_written', cites='deliverable:1', type='boolean', creates='report/survey.md',
+             claim='report/survey.md states line_count', evidence_needed='read it'),
+        dict(id='survey_headings', cites='need:2', type='number', claim='headings in the survey', evidence_needed='count # lines')],
+        tasks=[dict(id='count', unknowns=['line_count'], bucket='low', title='count'),
+               dict(id='write', unknowns=['survey_written'], bucket='low', title='write', deps=['count', 'audit']),
+               dict(id='audit', unknowns=['survey_headings'], bucket='low', title='audit the survey')])
+    accepted, refusals = controller.guard(decision, observation, project)
+    by_id = {t['id']: t for t in accepted['tasks']}
+    assert by_id['write']['deps'] == ['count'], (by_id, refusals)
+    assert by_id['audit']['deps'] == ['write'], (by_id, refusals)

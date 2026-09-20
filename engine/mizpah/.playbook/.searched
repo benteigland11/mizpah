@@ -845,3 +845,7 @@ copy headlines json candidate content banned claims contains exactly headline in
  copy headlines json  has exactly ten candidate objects  agreeing with its measured candidate count 
 the candidate copy in  copy headlines json  is supported by  content product md  and  content name md  without invented claims 
 no headline or subhead in  copy headlines json  contains a word or mark from  content banned json  
+Validate token roles, dark scheme, and colour-literal confinement
+brand colour system tokens color custom dark defines literal missing named occurs
+brand tokens css defines the role named colour system as custom properties on  root with a prefers color scheme  dark override and no missing required role 
+no colour literal used by the colour system occurs outside brand tokens css 

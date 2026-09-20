@@ -655,10 +655,32 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
                 owner_task = next((t['id'] for t in observation['tasks'] if u['id'] in (t.get('unknowns') or [])
                                    and t['status'] in OPEN_TASK), '')
                 creators.setdefault(made, owner_task)
+        def names_file(text: str, made: str) -> bool:
+            # `brand/marks/x/mark.svg` is named by "mark.svg", by "brand/marks", or by the bare stem "mark" as a word
+            # ("render each candidate mark") — the stem match applies only while the file does not exist yet.
+            low = made.lower()
+            stem = low.rsplit('/', 1)[-1].rsplit('.', 1)[0]
+            return low in text or (len(stem) > 2 and re.search(r'\b'+re.escape(stem)+r's?\b', text) is not None)
+        if builds:
+            # A builder never waits on a reader of what it builds (build_candidate_mark_assets was made to depend on
+            # render_marks_small — logo_mark6); the reverse dependency is the true one and is added below.
+            made_by_me = [u['creates'].lower() for u in unknowns if u['id'] in ids and u.get('creates')]
+            for d in list(deps):
+                reader = next((ti for ti in decided_tasks if str(ti.get('id')) == d), None)
+                if reader is None:
+                    continue
+                r_ids = reader.get('unknowns') or ([reader['unknown']] if reader.get('unknown') else [])
+                r_text = ' '.join(str(u.get('source') or '')+' '+str(u.get('claim') or '') for u in unknowns if u['id'] in r_ids).lower()
+                r_builds = any(u.get('creates') for u in unknowns if u['id'] in r_ids)
+                if not r_builds and any(names_file(r_text, m) for m in made_by_me):
+                    deps.remove(d)
+                    refusals.append('task '+tid+': dropped dependency '+d+' — it reads what this task builds; the reverse holds')
         if not builds:
             mine = ' '.join(str(u.get('source') or '')+' '+str(u.get('claim') or '') for u in unknowns if u['id'] in ids).lower()
             for made, owner_task in creators.items():
-                if owner_task and owner_task != tid and made and made in mine and owner_task not in deps:
+                exists = project is not None and (project/made).exists()
+                if owner_task and owner_task != tid and made and (made in mine or (not exists and names_file(mine, made))) \
+                        and owner_task not in deps:
                     deps.append(owner_task)
                     refusals.append('task '+tid+': reads '+made+', which '+owner_task+' builds — added that dependency')
             # A reading of a path a deliverable names that does not exist yet, with nothing routed to build it, is
