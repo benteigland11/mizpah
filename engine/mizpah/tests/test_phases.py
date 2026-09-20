@@ -495,3 +495,22 @@ def test_a_false_artifact_reading_is_routed_again_by_id(project: Path) -> None:
                                           observation, project)
     assert [t['id'] for t in accepted['tasks']] == ['fix'], refusals
     assert 'lists that same id' in controller.render_observation(observation, 'eval')
+
+
+def test_retype_asks_the_same_unknown_with_the_right_type_and_releases_its_task(project: Path) -> None:
+    observation = controller.observe(CONFIG, project)
+    accepted, _ = controller.guard(dict(unknowns=[dict(id='fact_coverage', cites='need:1', type='number',
+                                                        claim='facts carried by each candidate and the best count', evidence_needed='count')],
+                                        tasks=[dict(id='measure', unknowns=['fact_coverage'], bucket='low', title='m')]), observation, project)
+    controller.apply(CONFIG, project, accepted)
+    terra(project, 'route', 'block', 'measure', '--reason', 'measured a list where a number was asked')
+    observation = controller.observe(CONFIG, project)
+    accepted, refusals = controller.guard(dict(retype=[dict(unknown='fact_coverage', type='number', claim='the best fact count among the candidates')]),
+                                          observation, project)
+    assert accepted['retype'] == [dict(unknown='fact_coverage', type='number', claim='the best fact count among the candidates', why='')], refusals
+    controller.apply(CONFIG, project, accepted)
+    doc = json.loads((project/'.terra'/'map'/'unknowns'/'fact_coverage.json').read_text())
+    assert doc['claim'] == 'the best fact count among the candidates' and doc['status'] != 'resolved' and 'cites need:1' in doc['notes']
+    assert next(t for t in terra(project, 'route', 'status')['tasks'] if t['id'] == 'measure')['status'] != 'blocked'
+    accepted, refusals = controller.guard(dict(retype=[dict(unknown='fact_coverage', type='number')]), observation, project)
+    assert not accepted['retype'] and any('changes nothing' in r for r in refusals)

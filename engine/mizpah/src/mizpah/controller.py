@@ -238,8 +238,10 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
         lines.append('  '+u['id']+' ['+str(u['status'])+'] '+str(u['claim'])+why)
     if any('blocked: ' in str(u.get('notes') or '') for u in open_unknowns):
         lines.append('A blocked unknown has no task: its worker could not record the reading as the unknown is typed '
-                     'or asked. Route it again only with a different question or type; otherwise propose the change '
-                     'and leave it — the artifacts that depend on the map may still be built.')
+                     'or asked. If the type was wrong (a list measured where a number was asked, a name where a number '
+                     'was), retype it: "retype": [{"unknown": "<id>", "type": "number|boolean|label", "claim": "<sharper '
+                     'claim, optional>"}] — the same id, asked right, and its task is released. Otherwise propose the '
+                     'change and leave it — the artifacts that depend on the map may still be built.')
     lines.append('Route tasks:'+('' if observation['tasks'] else ' (none)'))
     finished = [t for t in observation['tasks'] if t['status'] in ('done', 'cancelled')]
     if finished:
@@ -422,7 +424,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
     existing_tasks = {t['id'] for t in observation['tasks']}
     open_unknowns = {u['id'] for u in observation['unknowns'] if u['status'] in OPEN_UNKNOWN}
     routed = {u for t in observation['tasks'] if t['status'] in OPEN_TASK for u in (t.get('unknowns') or [t['unknown']])}
-    unknowns, tasks, proposals, rebucket, unblock = [], [], [], [], []
+    unknowns, tasks, proposals, rebucket, unblock, retype = [], [], [], [], [], []
     for item in decision.get('unknowns') or []:
         if not isinstance(item, dict):
             refusals.append('unknown entry is not an object'); continue
@@ -749,6 +751,24 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             refusals.append('unblock '+tid+': it was already released after '+after+' and blocked again, so that reason stands — '
                             'mint the readings its block names as unknowns, propose the change, or leave it'); continue
         unblock.append(dict(task=tid, after=after))
+    for item in decision.get('retype') or []:
+        # The worker measured a list where a number was asked, or a name where a number was: the question was
+        # typed wrong, and the fix is the same unknown asked with the right type (and, if it must, a sharper
+        # claim), not a second unknown and not a proposal. Only an unresolved unknown may be retyped.
+        if not isinstance(item, dict):
+            refusals.append('retype entry is not an object'); continue
+        uid, new_type = str(item.get('unknown') or ''), item.get('type')
+        current = existing_unknowns.get(uid)
+        if current is None:
+            refusals.append('retype '+repr(uid)+': no such unknown'); continue
+        if current.get('status') == 'resolved':
+            refusals.append('retype '+uid+': it is resolved; a resolved reading is re-taken by routing its id, not retyped'); continue
+        if new_type not in TYPES:
+            refusals.append('retype '+uid+': type must be one of '+', '.join(TYPES)); continue
+        claim = str(item.get('claim') or '').strip()
+        if new_type == current.get('type') and not claim:
+            refusals.append('retype '+uid+': same type and no new claim changes nothing'); continue
+        retype.append(dict(unknown=uid, type=new_type, claim=claim, why=str(item.get('why') or '')))
     done = decision.get('done')
     done = bool(done) if isinstance(done, bool) else None
     if require_deliverables:
@@ -774,13 +794,13 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             done = False
             refusals.append('done refused: '+'; '.join(uncovered)+' — mint one unknown per named thing (with `creates`), '
                             'each claim naming it and the known it must agree with')
-    return dict(unknowns=unknowns, tasks=tasks, proposals=proposals, rebucket=rebucket, unblock=unblock,
+    return dict(unknowns=unknowns, tasks=tasks, proposals=proposals, rebucket=rebucket, unblock=unblock, retype=retype,
                 done=done, why=str(decision.get('why') or '')), refusals
 
 
 def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> dict[str, list[str]]:
     """Write the accepted decision through Terra; proposals are queued, never accepted here."""
-    done = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[])
+    done = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[])
     for u in accepted['unknowns']:
         args = ['unknown', 'create', u['id'], '--claim', u['claim'], '--evidence', u['evidence_needed'],
                 '--type', u['type'], '--quantity', u['quantity'],
@@ -840,6 +860,29 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
         terra(config, project, 'route', 'unblock', r['task'])
         record_release(project, r['task'], r['after'])
         done.setdefault('unblock', []).append(r['task']+' after '+r['after'])
+    for r in accepted.get('retype') or []:
+        path = project/'.terra'/'map'/'unknowns'/(r['unknown']+'.json')
+        try:
+            record = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        notes = re.sub(r';?\s*blocked: .*$', '', str(record.get('notes') or '')).strip()
+        terra(config, project, 'unknown', 'delete', r['unknown'])
+        args = ['unknown', 'create', r['unknown'], '--claim', r['claim'] or str(record.get('claim') or ''),
+                '--evidence', str(record.get('evidence_needed') or ''), '--type', r['type'], '--quantity', r['unknown'], '--notes', notes]
+        if record.get('unit'):
+            args += ['--unit', str(record['unit'])]
+        terra(config, project, *args)
+        # The task that carries it, if its worker blocked on the wrong type, is released to try again.
+        route = json.loads((project/'.terra'/'route.json').read_text())
+        for t in route.get('tasks') or []:
+            carried = [t.get('map_id')]+[a.removeprefix('unknown:') for a in t.get('acceptance') or [] if str(a).startswith('unknown:')]
+            if r['unknown'] in carried and t.get('status') == 'blocked':
+                try:
+                    terra(config, project, 'route', 'unblock', t['id'])
+                except RuntimeError:
+                    pass
+        done.setdefault('retype', []).append(r['unknown']+'→'+r['type'])
     return done
 
 
@@ -906,7 +949,7 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
     client = model_client(config)
     observation = observe(config, project)
     refusals: list[str] = []
-    accepted = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], done=None, why='')
+    accepted = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[], done=None, why='')
     record: dict[str, Any] = dict(mode=mode, observation=observation, attempts=[])
     looks = 0
     attempt = 0
@@ -921,7 +964,7 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
             continue
         wants = decision.get('look') if isinstance(decision, dict) else None
         if isinstance(wants, list) and wants and looks < LOOK_ROUNDS \
-                and not any(decision.get(k) for k in ('unknowns', 'tasks', 'proposals', 'rebucket', 'unblock')):
+                and not any(decision.get(k) for k in ('unknowns', 'tasks', 'proposals', 'rebucket', 'unblock', 'retype')):
             # A look costs no attempt: the controller reads before it decides, up to LOOK_ROUNDS times.
             looks += 1
             looked = observation.setdefault('looked', {})
@@ -933,7 +976,7 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
         attempt += 1
         accepted, refusals = guard(decision, observation, project, require_deliverables=(mode == 'route'))
         record['attempts'].append(dict(raw=raw, accepted=accepted, refusals=refusals, observation_chars=len(user)))
-        minted_nothing = not any(accepted[k] for k in ('unknowns', 'tasks', 'proposals', 'rebucket', 'unblock'))
+        minted_nothing = not any(accepted[k] for k in ('unknowns', 'tasks', 'proposals', 'rebucket', 'unblock', 'retype'))
         if minted_nothing and accepted.get('done') is not True and attempt == 1:
             # It described what is owed but routed nothing: ask once for the unknowns or an explicit done.
             refusals = refusals + ['you minted nothing and did not say "done": true — if the map still owes the '
@@ -942,19 +985,19 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
             continue
         if not refusals or attempt == 2:
             break
-        if any(accepted[k] for k in ('unknowns', 'tasks', 'proposals', 'rebucket', 'unblock')):
+        if any(accepted[k] for k in ('unknowns', 'tasks', 'proposals', 'rebucket', 'unblock', 'retype')):
             # Keep what passed; ask only about what did not.
             applied = apply(config, project, accepted)
-            record.setdefault('applied', dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[]))
+            record.setdefault('applied', dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[]))
             for key in applied:
                 record['applied'][key] += applied[key]
             looked = observation.get('looked')
             observation = observe(config, project)
             if looked:
                 observation['looked'] = looked
-            accepted = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], done=accepted.get('done'), why=accepted['why'])
+            accepted = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[], done=accepted.get('done'), why=accepted['why'])
     applied = apply(config, project, accepted)
-    record.setdefault('applied', dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[]))
+    record.setdefault('applied', dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[]))
     for key in applied:
         record['applied'][key] += applied[key]
     record['refused'] = refusals
