@@ -97,12 +97,33 @@ def load_config(path: str | Path) -> dict[str, Any]:
     if not scaffolding['bootstrap']:
         config['worker_policy'] = config['worker_policy'].replace(BOOTSTRAP_WALK, FREE_METHOD, 1)
         assert FREE_METHOD in config['worker_policy'], 'worker policy no longer carries the bootstrap walk sentence'
+    if not scaffolding['small_edits']:
+        # Whole files at once: the policy paragraph goes, and the write/edit caps rise to a whole widget module.
+        # Small edits were a 60K-window rule (a truncated payload lost the model its place); a model with the room
+        # writes a coherent forty lines in one call where the rule took fourteen (pedal gym, 2026-09-20).
+        assert SMALL_EDITS in config['worker_policy'], 'worker policy no longer carries the small-edits paragraph'
+        config['worker_policy'] = config['worker_policy'].replace(SMALL_EDITS, WHOLE_FILES, 1)
+        for key, limit in (('maximum_write_characters', 12000), ('maximum_edit_characters', 6000), ('maximum_tool_argument_characters', 12000)):
+            harness[key] = max(int(harness.get(key) or 0), limit)
     config['route_policy'] = (path.parent/config['route_policy_file']).read_text()
     config['eval_policy'] = (path.parent/config['eval_policy_file']).read_text()
     config['checkin_policy'] = (path.parent/config['checkin_policy_file']).read_text()  # tool-less; no v10 text
     config['playbook_store'] = str(Path(config['playbook_store']).expanduser())
     config['widget_library'] = str(Path(config['widget_library']).expanduser())
     return dict(harness, mizpah=config, harness_config_path=str(harness_path), mizpah_config_path=str(Path(path).resolve()))
+
+
+SMALL_EDITS = ('Every file is built in pieces, and the tools enforce it: `write` creates a file once, as a skeleton — imports, '
+               'signatures, docstrings, `pass` bodies, or a short file — and `edit` adds one function body, one branch or one '
+               'test per call, a few lines each. Anything longer is refused unexecuted, so never attempt it: when a function '
+               'would be long, first add the small helpers it needs, one per edit, then a body that only calls them. To change '
+               'something substantially, read it, delete the block with bash (`sed -i \'START,ENDd\' FILE`), then rebuild it the '
+               'same way — skeleton, then pieces. A scaffold stub you must replace (a widget\'s `src`/`tests`/`examples`) is '
+               '`rm`\'d and rebuilt like that; only a probe\'s `measure.py` — a few lines by design, one probe per unknown — is '
+               'written whole.')
+WHOLE_FILES = ('Write a file whole when you know what goes in it (`write` replaces an existing file too), and `edit` for a '
+               'change to part of one. A scaffold stub you must replace (a widget\'s `src`/`tests`/`examples`) is overwritten '
+               'with `write`.')
 
 
 def terra(config: dict[str, Any], project: Path, *args: str) -> dict[str, Any]:
