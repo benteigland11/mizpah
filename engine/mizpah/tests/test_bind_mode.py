@@ -147,3 +147,22 @@ def test_a_bind_session_seeds_its_state_part_and_finds_it_again_after_open(tmp_p
     reopened = FocusedSession.open(root/'s', worker=model2, shell=shell2, controller=None)
     assert workspace_files(reopened.workspace().state, byte_limit=10**8, file_limit=10**5) == ('.mizpah/brief.json',)
     shell2.close()
+
+
+def test_pack_workspace_drops_symlinks_that_leave_the_tree(tmp_path: Path) -> None:
+    """A venv under the project (not on the cache list) carries bin/python -> an absolute interpreter; the packed
+    tar must not carry it, or the sandbox refuses every member (score-video's re-measure, 2026-09-20)."""
+    import io
+    import tarfile
+    project = tmp_path/'proj'
+    (project/'.mizpah').mkdir(parents=True)
+    (project/'.mizpah'/'brief.json').write_text('{}')
+    (project/'venv-x'/'bin').mkdir(parents=True)
+    (project/'venv-x'/'bin'/'python').symlink_to('/usr/bin/python3')
+    (project/'venv-x'/'lib64').symlink_to('lib')
+    (project/'src').mkdir()
+    (project/'src'/'a.py').write_text('x = 1\n')
+    data = worker.pack_workspace(project)
+    names = {m.name: m for m in tarfile.open(fileobj=io.BytesIO(data), mode='r:')}
+    assert 'src/a.py' in names and 'venv-x/lib64' in names and names['venv-x/lib64'].issym()
+    assert 'venv-x/bin/python' not in names

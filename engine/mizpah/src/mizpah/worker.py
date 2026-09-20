@@ -400,6 +400,12 @@ def pack_workspace(project: Path, playbook_store: Path | None = None, *, only: t
                 continue
             if any(tuple(relative.parts[:len(e)]) == e for e in excluded):
                 continue
+            if path.is_symlink():
+                # A link that leaves the tree (a venv's bin/python -> the base interpreter) cannot travel: the
+                # sandbox refuses the whole tar for one such member (score-video's re-measure, 2026-09-20).
+                link = os.readlink(path)
+                if os.path.isabs(link) or '..' in link.split('/'):
+                    continue
             if path.is_symlink() or path.is_file() or path.is_dir():
                 archive.add(path, arcname=relative.as_posix(), recursive=False)
         if playbook_store is not None and playbook_store.is_dir():
