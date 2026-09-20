@@ -20,8 +20,14 @@ def test_record_outage_names_role_and_endpoint(tmp_path: Path) -> None:
     rows = [json.loads(l) for l in (tmp_path/'outages.jsonl').read_text().splitlines()]
     assert len(rows) == 1
     assert rows[0]['role'] == 'controller' and rows[0]['endpoint'] == 'http://127.0.0.1:58081' and rows[0]['error'] == 'refused'
+    assert rows[0]['kind'] == 'server_down' and 'nothing is listening' in rows[0]['what']
     row = json.loads((tmp_path/'tasks'/'t1'/'outages.jsonl').read_text())
     assert row['role'] == 'worker' and row['endpoint'] == 'chatgpt/gpt-5.6-luna' and row['provider'] == 'subscription' and row['outage'] == 2
+    assert row['kind'] == 'no_reply'
+    ops.record_outage(tmp_path/'x', 'worker', {}, OSError('response exceeded the configured byte limit'), 1, task='write_sketch_sheet', turn=23,
+                      action='the reply is discarded and the worker is asked again with a warning')
+    big = json.loads((tmp_path/'x'/'outages.jsonl').read_text())
+    assert big['kind'] == 'reply_too_big' and big['task'] == 'write_sketch_sheet' and big['turn'] == 23 and 'larger than the transport allows' in big['what']
 
 
 def test_controller_outage_is_recorded_at_the_run_root(tmp_path: Path, monkeypatch) -> None:

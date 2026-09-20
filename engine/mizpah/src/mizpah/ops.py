@@ -40,14 +40,45 @@ def model_label(spec: dict[str, Any]) -> str:
     return str((spec.get('endpoint') or {}).get('base_url') or '?')
 
 
-def record_outage(root: Path, role: str, spec: dict[str, Any], error: BaseException | str, outage: int) -> None:
-    """One line per transport failure, naming the role that hit it and the endpoint that did not answer
-    (a local server by its address, a subscription by profile/model): the anomaly the app shows says which
-    endpoint is down, not just that something was."""
+def outage_kind(error: BaseException | str) -> tuple[str, str]:
+    """(kind, what happened in plain words) for a transport failure. The exception text is for the log; the
+    anomaly the person reads says what went wrong ('the reply was too big', not 'OSError')."""
+    text = str(error)
+    low = text.lower()
+    if 'exceeded the configured byte limit' in low:
+        return 'reply_too_big', 'its reply was larger than the transport allows and was discarded'
+    if 'timed out' in low or 'timeout' in low:
+        return 'no_reply', 'it gave no reply before the request timed out'
+    if 'name resolution' in low or 'nodename' in low or 'getaddrinfo' in low:
+        return 'dns', 'its address could not be resolved (DNS)'
+    if 'ssl' in low or 'tls' in low or 'record mac' in low:
+        return 'tls', 'the encrypted connection failed mid-reply (TLS)'
+    if 'incompleteread' in low or 'remote end closed' in low or 'connection reset' in low or 'broken pipe' in low:
+        return 'connection_dropped', 'the connection dropped mid-reply'
+    if 'connection refused' in low or 'errno 111' in low or low.strip() in ('refused', 'connectionrefusederror'):
+        return 'server_down', 'nothing is listening at its address'
+    if 'http status 5' in low or ' 502' in low or ' 503' in low or ' 504' in low:
+        return 'server_error', 'the server answered with an error'
+    if 'http status 429' in low or 'rate limit' in low:
+        return 'rate_limited', 'the server refused for rate limiting'
+    if 'uncertain' in low:
+        return 'uncertain', 'the exchange failed with the outcome unknown'
+    return 'transport', 'the transport failed'
+
+
+def record_outage(root: Path, role: str, spec: dict[str, Any], error: BaseException | str, outage: int, *,
+                  task: str | None = None, turn: int | None = None, waited_seconds: float | None = None,
+                  action: str | None = None) -> None:
+    """One line per transport failure: who hit it (role, endpoint), what happened (kind, in words), where the work
+    stood (task, turn), how long the loop waited, and what it did about it. The anomaly the app shows is this
+    line; it said 'OSError: response exceeded the configured byte limit' before, which reads as a network
+    fault when it was the model typing a 16 MB drawing (2026-09-20)."""
     root.mkdir(parents=True, exist_ok=True)
+    kind, what = outage_kind(error)
     (root/'outages.jsonl').open('a').write(json.dumps(dict(
         at=time.time(), role=role, endpoint=model_label(spec), provider=spec.get('provider') or 'llama',
-        error=str(error)[:200], outage=outage))+'\n')
+        kind=kind, what=what, task=task, turn=turn, waited_seconds=round(waited_seconds, 1) if waited_seconds else None,
+        action=action, error=str(error)[:200], outage=outage))+'\n')
 
 
 def model_up(base_url: str | None, timeout: float = 5.0) -> bool:

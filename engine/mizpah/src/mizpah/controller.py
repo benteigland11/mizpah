@@ -1265,7 +1265,8 @@ def decide_through_outages(client: Any, config: dict[str, Any], system: str, use
         except ModelTransportError as error:
             outages += 1
             run_root = Path(config['mizpah'].get('run_root') or '.')
-            ops.record_outage(run_root, 'controller', config['controller'], error, outages)
+            ops.record_outage(run_root, 'controller', config['controller'], error, outages, task='briefing',
+                              action='the briefing is asked for again' if outages <= 5 else 'the sixth in a row: the step fails')
             if outages > 5:
                 raise
             checker = health or ops.Health(config, run_root)

@@ -1854,10 +1854,17 @@ def run_through_outages(session: FocusedSession, config: dict[str, Any], root: P
             # The wait starts at the outage, not at entry: one call to run() spans a whole burst of turns.
             outages += 1
             from . import ops
-            ops.record_outage(root, 'worker', config['worker'], error, outages)
+            too_big = 'exceeded the configured byte limit' in str(error)
+            try:
+                turn = session.status()['completed_worker_turns']
+            except Exception:  # noqa: BLE001
+                turn = None
+            ops.record_outage(root, 'worker', config['worker'], error, outages, task=root.name, turn=turn,
+                              action=('the reply is discarded and the worker is asked again with a warning' if too_big
+                                      else 'the torn call is discarded and the worker asks again' if outages <= 5
+                                      else 'the sixth in a row: the task fails'))
             if outages > 5:
                 raise
-            too_big = 'exceeded the configured byte limit' in str(error)
             if not too_big:
                 # A server that went away is waited for; a reply that was too big is the worker's own doing and
                 # the server is fine.
