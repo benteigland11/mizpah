@@ -49,7 +49,7 @@ def _merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
 
 
 def shipped_names() -> set[str]:
-    return {item['name'] for item in json.loads(SHIPPED_PROFILES.read_text())['profiles']}
+    return set(shipped_profiles())
 
 
 LOCAL_KINDS = {
@@ -100,15 +100,32 @@ def local_profile(name: str, base_url: str, kind: str = 'auto', display_name: st
                 local_kind=kind, **LOCAL_KINDS[kind])
 
 
-def registry(config: dict[str, Any] | None = None, environ: dict[str, str] | None = None) -> ProfileRegistry:
-    """Shipped profiles, then ``mizpah.providers`` overrides by name, then client ids from the environment."""
+_SHIPPED_CACHE: dict[str, Any] | None = None
+
+
+def shipped_profiles() -> dict[str, dict[str, Any]]:
+    """The shipped profile file, read once per process: a loop runs the profiles it started with. Reading it
+    on every controller step let a half-edited file (someone adding a provider) fail every live eval with a
+    validation error about a provider the loop never used (2026-09-20)."""
+    global _SHIPPED_CACHE
+    if _SHIPPED_CACHE is None:
+        _SHIPPED_CACHE = {item['name']: item for item in json.loads(SHIPPED_PROFILES.read_text())['profiles']}
+    return _SHIPPED_CACHE
+
+
+def registry(config: dict[str, Any] | None = None, environ: dict[str, str] | None = None,
+             only: str | None = None) -> ProfileRegistry:
+    """Shipped profiles, then ``mizpah.providers`` overrides by name, then client ids from the environment.
+    ``only`` builds (and so validates) one profile: a session for luna does not depend on Bedrock's shape."""
     env = os.environ if environ is None else environ
-    shipped = {item['name']: item for item in json.loads(SHIPPED_PROFILES.read_text())['profiles']}
+    shipped = dict(shipped_profiles())
     overrides = ((config or {}).get('mizpah') or {}).get('providers') or {}
     for name, override in overrides.items():
         shipped[name] = _merge(shipped.get(name, {'name': name}), override)
     profiles = []
     for name, data in shipped.items():
+        if only is not None and name != only:
+            continue
         variable = CLIENT_ID_ENVIRONMENT.get(name)
         if variable and env.get(variable) and isinstance(data.get('auth'), dict):
             data = _merge(data, {'auth': {'client_id': env[variable]}})
@@ -117,7 +134,7 @@ def registry(config: dict[str, Any] | None = None, environ: dict[str, str] | Non
 
 
 def session_for(name: str, config: dict[str, Any] | None = None, *, open_browser: bool = True) -> ProviderSession:
-    profile = registry(config).get(name)
+    profile = registry(config, only=name).get(name)
     return ProviderSession(profile, CredentialStore(credential_path(config)), open_browser=open_browser, user_agent='mizpah/0.1')
 
 
