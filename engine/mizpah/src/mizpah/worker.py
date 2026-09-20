@@ -1834,8 +1834,11 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         # One repair round: the library refused something the worker built, for reasons it can act on (a
         # missing test, a project name in src/, a hardcoded path). Without this the worker never saw the
         # validator's words and real work did not compound.
+        # Repair rounds continue while each one fixes something (the refused count falls) and turns remain; a
+        # round that fixes nothing ends it — the same rule as red gate rounds. Fix one of two, and you get
+        # another go at the other.
         refused = [('widget', r) for r in widgets['rejected']]+[('procedure', r) for r in playbook['rejected']]
-        if refused and status['status'] == 'complete' and budget-status['completed_worker_turns'] > 0:
+        while refused and status['status'] == 'complete' and budget-status['completed_worker_turns'] > 0:
             session.continue_with(refusal_message(refused))
             status = run_through_outages(session, config, root, maximum_worker_turns=budget-status['completed_worker_turns'])
             session.prune_workspaces()
@@ -1844,12 +1847,16 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
                                        allowed=tuple(procedures_used(root)+procedures_created(root)))
             for key in ('checked_in', 'unchanged'):
                 widgets[key] = sorted(set(widgets[key]) | set(again_w[key]))
-            widgets['rejected'] = [r for r in again_w['rejected']]
+            widgets['rejected'] = list(again_w['rejected'])
             for key in ('installed', 'created', 'improved', 'ignored'):
                 playbook[key] = sorted(set(playbook.get(key) or []) | set(again_p.get(key) or []))
-            playbook['rejected'] = [r for r in again_p['rejected']]
+            playbook['rejected'] = list(again_p['rejected'])
             rounds.append(dict(turns=status['completed_worker_turns'], session=status['status'], gate='library_repair',
                                final_text=status['final_text'], playbook=again_p, widgets=again_w))
+            still = [('widget', r) for r in widgets['rejected']]+[('procedure', r) for r in playbook['rejected']]
+            if len(still) >= len(refused):
+                break   # nothing fixed this round: the worker has had its say
+            refused = still
     verdict = ('complete' if gate['ok'] else 'blocked_by_worker' if blocked_reason is not None
                else 'stopped' if status['status'] == 'stopped' else 'incomplete')
     result = dict(task=task['id'], unknown=task['map_id'], unknowns=task_unknown_ids(task), map=map_id, resumed=resuming,
