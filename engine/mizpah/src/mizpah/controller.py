@@ -1277,7 +1277,8 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
             # Keep what passed; ask only about what did not.
             applied = apply(config, project, accepted)
             record.setdefault('applied', dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[]))
-            for key in applied:
+            for key in applied:   # `refused` appears only when Terra refused a create; it is not in the template
+                record['applied'].setdefault(key, [])
                 record['applied'][key] += applied[key]
             looked = observation.get('looked')
             observation = observe(config, project)
@@ -1288,6 +1289,7 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
     applied = apply(config, project, accepted)
     record.setdefault('applied', dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[]))
     for key in applied:
+        record['applied'].setdefault(key, [])
         record['applied'][key] += applied[key]
     record['refused'] = refusals
     record['why'] = accepted.get('why', '')
