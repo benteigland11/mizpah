@@ -18,6 +18,11 @@ from typing import Any
 
 from . import layout
 
+try:  # the workspace's path widget; the same rules the app resolves with
+    from cg.infra_app_paths_python.src.app_paths import resolve_app_paths
+except ImportError:  # pragma: no cover — a bare checkout without cg on the path
+    resolve_app_paths = None
+
 # Directories that hold toolchains and builds rather than the work: bound read-only in the sandbox, never
 # snapshotted. A project's config.json may add to or replace them.
 DEFAULT_CACHE_DIRS = ('.venv', 'node_modules', 'build', 'dist', 'target', '.dart_tool', '.gradle', '.cache', '__pycache__')
@@ -45,9 +50,31 @@ def default_config(cache_dirs: tuple[str, ...] = DEFAULT_CACHE_DIRS) -> dict[str
 
 def gyms_root() -> Path:
     """Where projects that belong to no repository live: training gyms, drills, a brief tried on scratch."""
-    base = Path(os.environ.get('XDG_DATA_HOME') or Path.home()/'.local'/'share')/'mizpah'/'gyms'
+    if resolve_app_paths is not None:
+        base = resolve_app_paths('mizpah').data_dir/'gyms'
+    else:
+        base = Path(os.environ.get('XDG_DATA_HOME') or Path.home()/'.local'/'share')/'mizpah'/'gyms'
     base.mkdir(parents=True, exist_ok=True)
     return base
+
+
+def projects_registry() -> Path:
+    """Every project this machine has initialised, one line each: how a front end lists a task before its first
+    run has written a session anywhere. Beside the runs registry, in the per-user state directory."""
+    if resolve_app_paths is not None:
+        return resolve_app_paths('mizpah').state_dir/'projects.jsonl'
+    return Path(os.environ.get('XDG_STATE_HOME') or Path.home()/'.local'/'state')/'mizpah'/'projects.jsonl'
+
+
+def register_project(project: Path, title: str, *, gym: bool) -> None:
+    try:
+        path = projects_registry()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open('a') as handle:
+            handle.write(json.dumps(dict(project=str(project), title=title, gym=gym,
+                                         created_at=__import__('time').time()))+'\n')
+    except OSError:
+        pass  # a registry that cannot be written never stops an init
 
 
 def new_gym(title: str) -> Path:
@@ -64,8 +91,26 @@ def new_gym(title: str) -> Path:
     return folder
 
 
-def init(repo: Path, *, title: str, mission: str, terra: str, require_git: bool = True) -> dict[str, Any]:
+def set_base(project: Path, name: str | None) -> dict[str, Any]:
+    """Declare the environment base a project runs on (`base: <name>` in its config); None clears it."""
+    from . import bases
+    if name is not None:
+        bases.load(name)   # must exist
+    path = layout.state(project)/'config.json'
+    pc = project_config(project) or default_config()
+    if name is None:
+        pc.pop('base', None)
+    else:
+        pc['base'] = name
+    path.write_text(json.dumps(pc, indent=1)+'\n')
+    return pc
+
+
+def init(repo: Path, *, title: str, mission: str, terra: str, require_git: bool = True, base: str | None = None) -> dict[str, Any]:
     repo = Path(repo).resolve()
+    if base is not None:
+        from . import bases
+        bases.load(base)   # refuse before anything is written
     top = git_toplevel(repo)
     if require_git and (top is None or top != repo):
         raise SystemExit(str(repo)+' is not the top of a git repository; Mizpah edits the real tree and git is its safety net '
@@ -84,13 +129,27 @@ def init(repo: Path, *, title: str, mission: str, terra: str, require_git: bool 
     run('init')
     run('brief', 'init', '--title', title, '--mission', mission)
     run('route', 'init')
-    (state/'config.json').write_text(json.dumps(default_config(), indent=1)+'\n')
+    out = furnish(repo, title)
+    if base is not None:
+        set_base(repo, base)
+        out['base'] = base
+    return out
+
+
+def furnish(repo: Path, title: str) -> dict[str, Any]:
+    """What makes a Terra tree a Mizpah project: the per-project config, the sessions directory, the gitignore
+    line and the registry entry. `init` does it after creating the brief; `draft authorize` after moving one in."""
+    repo = Path(repo).resolve()
+    state = repo/layout.STATE_DIRNAME
+    if not (state/'config.json').exists():
+        (state/'config.json').write_text(json.dumps(default_config(), indent=1)+'\n')
     (state/layout.SESSIONS_DIRNAME).mkdir(exist_ok=True)
     ignore = repo/'.gitignore'
     lines = ignore.read_text().splitlines() if ignore.exists() else []
     if GITIGNORE_LINE not in lines:
         with ignore.open('a') as handle:
             handle.write(('' if not lines or lines[-1] == '' else '\n')+GITIGNORE_LINE+'\n')
+    register_project(repo, title, gym=repo.is_relative_to(gyms_root()) if hasattr(repo, 'is_relative_to') else False)
     return dict(project=str(repo), state=str(state), brief=str(state/'brief.json'), sessions=str(state/layout.SESSIONS_DIRNAME),
                 gitignore=GITIGNORE_LINE)
 
@@ -112,10 +171,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument('--mission', required=True)
     parser.add_argument('--terra', default=str(Path(sys.executable).parent/'terra'), help='the terra CLI (default: beside this python)')
     parser.add_argument('--no-git', action='store_true', help='allow a directory that is not a git repository')
+    parser.add_argument('--base', default=None, help='an environment base (`mizpah.bases list`) bound read-only into every task')
     args = parser.parse_args(argv)
     repo = new_gym(args.title) if args.gym else Path(args.repo)
-    print(json.dumps(dict(init(repo, title=args.title, mission=args.mission, terra=args.terra, require_git=not args.no_git),
-                          gym=bool(args.gym)), indent=1))
+    print(json.dumps(dict(init(repo, title=args.title, mission=args.mission, terra=args.terra, require_git=not args.no_git,
+                               base=args.base), gym=bool(args.gym)), indent=1))
 
 
 if __name__ == '__main__':
@@ -123,11 +183,27 @@ if __name__ == '__main__':
 
 
 def apply_project_config(config: dict[str, Any], project: Path) -> dict[str, Any]:
-    """Layer the project's `.mizpah/config.json` over the loaded user config: only the sandbox keys a project
-    may own (workspace mode, cache dirs, network, extra binds). Providers, models and policies stay the user's."""
-    layer = project_config(project).get('sandbox') or {}
+    """Layer the project's `.mizpah/config.json` over the loaded user config: the sandbox keys a project may
+    own (workspace mode, cache dirs, network, extra binds), and — when the task chose its own — the model
+    behind each seat (`models.worker` / `models.controller`, written by `mizpah-provider use --project`).
+    Policies stay the user's."""
+    pc = project_config(project)
+    layer = pc.get('sandbox') or {}
     allowed = {'workspace', 'cache_dirs', 'network', 'share_network', 'read_only_binds', 'services'}
     picked = {k: v for k, v in layer.items() if k in allowed}
     if picked:
         config['mizpah']['sandbox'] = dict(config['mizpah'].get('sandbox') or {}, **picked)
+    if pc.get('base'):
+        from . import bases
+        bases.apply(config, str(pc['base']))   # the environment the gym runs on: bound read-only, env set
+    for role in ('worker', 'controller'):
+        spec = (pc.get('models') or {}).get(role)
+        if isinstance(spec, dict) and spec:
+            base = dict(config.get(role) or {})
+            for key, value in spec.items():
+                if isinstance(value, dict) and isinstance(base.get(key), dict):
+                    base[key] = dict(base[key], **value)   # endpoint, generation: merge, do not replace
+                else:
+                    base[key] = value
+            config[role] = base
     return config

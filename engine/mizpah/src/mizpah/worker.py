@@ -1752,6 +1752,8 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             assignment += ('The playbook already has methods near this work; search for them, open the best with '
                            '`playbook open <id> --for ...` and follow it before working the method out yourself:\n'
                            +'\n'.join('  - '+m for m in methods)+'\n')
+        from . import bases
+        assignment += bases.enabler_text(config)   # the gym's environment base, when it has one
         worker_client, checkin, shell = bindings(config, root, map_id, project=project)
         holder['shell'] = shell
         reference = render_reference(project, task, unknowns)
