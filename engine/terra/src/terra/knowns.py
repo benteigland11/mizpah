@@ -692,6 +692,16 @@ def link_run_known(
 
         stamp_deps(project_root, rec)
     save_known(project_root, rec)
+    # Say it at link time, not only at the gate: a count whose runs disagree is two readings of two sources.
+    samples = [v for run in ((rec.get("stats") or {}).get("by_run") or []) for v in (run.get("values") or [])
+               if isinstance(v, (int, float)) and not isinstance(v, bool)]
+    if rec.get("type") == "number" and len(samples) > 1 and all(float(v).is_integer() for v in samples) \
+            and len({float(v) for v in samples}) > 1:
+        import sys as _sys
+        print(f"  ⚠ known {known_id}: its live runs read "
+              + ", ".join(str(int(v)) for v in sorted({float(v) for v in samples}))
+              + " — a count does not average and the gate will say so; void the runs taken before the source changed",
+              file=_sys.stderr)
     return load_known(project_root, known_id)
 
 

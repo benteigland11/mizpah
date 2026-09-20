@@ -158,6 +158,28 @@ def _collect_map_violations(
                     ),
                 }
             )
+        # A count does not average. Integer-valued samples of one number known that disagree are two readings
+        # of two different sources — the runs before an artifact changed and the runs after — and their mean is
+        # a number nobody read (distinct_wordmark_letterform_count = 1.5 from runs 0, 0, 3, 3). The runs that no
+        # longer describe the source are voided; the mean is not a value.
+        samples = [v for run in ((rec.get("stats") or {}).get("by_run") or []) for v in (run.get("values") or [])
+                   if isinstance(v, (int, float)) and not isinstance(v, bool)]
+        if rec.get("type") == "number" and len(samples) > 1 and all(float(v).is_integer() for v in samples) \
+                and len({float(v) for v in samples}) > 1:
+            distinct = sorted({float(v) for v in samples})
+            violations.append(
+                {
+                    "kind": "samples_disagree",
+                    "id": kid,
+                    "map_id": map_id,
+                    "why": (
+                        f"known {kid} is a count whose live runs read "
+                        + ", ".join(str(int(v)) for v in distinct)
+                        + f" — a count does not average (the map shows {rec.get('value')}); void the runs that no "
+                        "longer describe the source (terra run void <run> --reason ...) so one reading remains"
+                    ),
+                }
+            )
         corr = ((rec.get("stats") or {}).get("corroboration")) or {}
         if corr.get("agree") is False and corr.get("accepted") is not True:
             violations.append(
