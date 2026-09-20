@@ -79,6 +79,12 @@ def _procedure_hits(config: dict[str, Any], query: str, stems: set[str], limit: 
     return hits
 
 
+def benchmark(project: Path) -> bool:
+    """`benchmark: true` in the project's config: measured, never remembered."""
+    from . import init as init_module
+    return bool(init_module.project_config(project).get('benchmark'))
+
+
 def lookup(config: dict[str, Any], project: Path, entry: str) -> list[str]:
     """Prior art for one owed entry: resolved unknowns elsewhere, widgets, procedures. Empty when nothing shares
     three real words with it — two let a Flutter diff widget answer 'leads-with note' (headline3)."""
@@ -87,7 +93,10 @@ def lookup(config: dict[str, Any], project: Path, entry: str) -> list[str]:
         return _CACHE[key]
     stems = briefs._stems(briefs._words(key))
     query = _query(key)
-    found = _brief_hits(config, stems)+_widget_hits(config, project, query, stems)+_procedure_hits(config, query, stems)
+    # A benchmark (a brief run again to measure what practice changed) sees only the library proper — widgets
+    # and procedures — never what an earlier run of the same brief minted: that would be memory, not skill.
+    hits = [] if benchmark(project) else _brief_hits(config, stems)
+    found = hits+_widget_hits(config, project, query, stems)+_procedure_hits(config, query, stems)
     _CACHE[key] = found
     return found
 

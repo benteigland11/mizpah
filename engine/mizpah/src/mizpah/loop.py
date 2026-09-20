@@ -17,7 +17,7 @@ import time
 import traceback
 from typing import Any
 
-from . import briefs, capabilities, controller, ops, worker
+from . import briefs, capabilities, controller, ops, worker, priorart
 from . import layout
 from . import init as init_module
 from .worker import terra
@@ -92,6 +92,28 @@ def terra_list(config: dict[str, Any], project: Path, *args: str) -> list[dict[s
     text = process.stdout.strip()
     start = text.find('[')
     return json.loads(text[start:]) if start >= 0 else []
+
+
+def commit_procedures(store: Path, message: str, author: str = 'mizpah worker <worker@mizpah>') -> bool:
+    """The playbook store is a git repository: every change to a procedure is a commit a person can read,
+    diff and restore. The loop commits once per work order, in that work order's name; the app commits
+    once per save. Returns whether anything was committed. Never fails the run."""
+    import subprocess
+    try:
+        if not store.is_dir():
+            return False
+        if not (store/'.git').exists():
+            subprocess.run(['git', 'init', '-q'], cwd=store, check=True, capture_output=True)
+            (store/'.gitignore').write_text('.*.tmp\n')
+        subprocess.run(['git', 'add', '-A'], cwd=store, check=True, capture_output=True)
+        staged = subprocess.run(['git', 'diff', '--cached', '--quiet'], cwd=store)
+        if staged.returncode == 0:
+            return False
+        subprocess.run(['git', '-c', 'user.name=mizpah', '-c', 'user.email=mizpah@local',
+                        'commit', '-q', '--author', author, '-m', message], cwd=store, check=True, capture_output=True)
+        return True
+    except (OSError, subprocess.CalledProcessError):
+        return False
 
 
 def _crew(spec: dict[str, Any]) -> dict[str, Any]:
@@ -389,6 +411,10 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                 try:
                     # One session root per task, so a re-bucketed task resumes its own session.
                     result = worker.run_task(config, project, root/'tasks'/task['id'], task['id'])
+                    # Whatever the worker filed or improved in the playbook lands as one commit in its name.
+                    commit_procedures(Path(config['mizpah']['playbook_store']).expanduser(),
+                                      'work order '+task['id']+' · '+project.name+' ('+result.get('verdict', '?')+')',
+                                      author='worker '+str(run_record['crew']['worker'].get('model') or 'model')+' <worker@mizpah>')
                 except Exception as error:  # noqa: BLE001
                     errors += 1
                     with log.open('a') as handle:
@@ -502,7 +528,8 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
     reap('end')
     report(stop)
     try:
-        briefs.record(config, project, stop, cycles)   # the controller's library grows by one finished run
+        if not priorart.benchmark(project):   # a benchmark run is measured, not remembered
+            briefs.record(config, project, stop, cycles)   # the controller's library grows by one finished run
     except Exception as error:  # noqa: BLE001
         with log.open('a') as handle:
             handle.write(json.dumps(dict(at=time.time(), where='briefs.record', error=str(error)[:300]))+'\n')

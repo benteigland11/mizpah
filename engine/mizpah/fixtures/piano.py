@@ -220,7 +220,17 @@ def benchmark_attempt(attempt: int) -> Path:
     fresh = json.loads((folder/'.mizpah'/'brief.json').read_text())
     keep = {k: pinned[k] for k in pinned if k not in ('created_at', 'updated_at', 'history', 'proposals')}
     (folder/'.mizpah'/'brief.json').write_text(json.dumps(dict(fresh, **keep, proposals=[]), indent=1)+'\n')
+    mark_benchmark(folder)
     return folder
+
+
+def mark_benchmark(folder: Path) -> None:
+    """A benchmark is measured, never remembered: the brief library neither records it nor is consulted for it.
+    What it may use is the library proper — widgets and procedures — which is the point of the check."""
+    path = folder/'.mizpah'/'config.json'
+    pc = json.loads(path.read_text())
+    pc['benchmark'] = True
+    path.write_text(json.dumps(pc, indent=1)+'\n')
 
 
 # ---------------------------------------------------------------- the ruler
