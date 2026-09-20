@@ -170,6 +170,14 @@ class RunInbox {
     final closed = tasks.where((t) => t['status'] != 'in_progress').toList();
 
     _crew = crew();
+    // Which briefing first routed each work order: a later "already exists"
+    // decline points back at it instead of reading as an unexplained refusal.
+    _routedIn = {};
+    for (var i = 0; i < journal.length; i++) {
+      for (final id in ((journal[i]['applied'] as Map?)?['tasks'] as List? ?? const [])) {
+        _routedIn.putIfAbsent('$id', () => i + 1);
+      }
+    }
     final docs = <InboxDocument>[];
     var nBriefing = 0;
     var ji = 0;
@@ -405,6 +413,8 @@ class RunInbox {
 
   /// Refusals share a handful of shapes; group by the text after the
   /// subject so 13 lines read as three reasons.
+  Map<String, int> _routedIn = const {};
+
   List<DocLine> _grouped(List<String> refused) {
     final groups = <String, List<String>>{};
     for (final r in refused) {
@@ -424,11 +434,18 @@ class RunInbox {
       final full = refused.firstWhere((r) => r.contains(reason));
       final text = full.contains(': ') ? full.split(': ').skip(1).join(': ') : full;
       final named = subjects.where((s) => s.isNotEmpty).toList();
+      // "already exists": the controller re-listed work the route already
+      // held; say which briefing routed it.
+      String withOrigin(String subject) {
+        final id = subject.split(' ').last;
+        final n = _routedIn[id];
+        return n != null && text.startsWith('already exists') ? '$subject (#${n.toString().padLeft(3, '0')})' : subject;
+      }
       out.add(
         named.isEmpty
             ? DocLine(text)
             : DocLine(
-                named.join(', '),
+                named.map(withOrigin).join(', '),
                 lead: named.length > 1 ? '$text ×${named.length}' : text,
                 mono: true,
               ),
