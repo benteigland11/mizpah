@@ -1176,11 +1176,13 @@ def decide_through_outages(client: Any, config: dict[str, Any], system: str, use
             return decide(client, config, system, user)
         except RejectedGeneration:
             raise
-        except ModelTransportError:
+        except ModelTransportError as error:
             outages += 1
+            run_root = Path(config['mizpah'].get('run_root') or '.')
+            ops.record_outage(run_root, 'controller', config['controller'], error, outages)
             if outages > 5:
                 raise
-            checker = health or ops.Health(config, Path(config['mizpah'].get('run_root') or '.'))
+            checker = health or ops.Health(config, run_root)
             if not checker.wait_for_model((config['controller'].get('endpoint') or {}).get('base_url'), wait_seconds=wait_seconds):
                 raise
 

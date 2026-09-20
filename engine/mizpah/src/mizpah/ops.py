@@ -40,6 +40,16 @@ def model_label(spec: dict[str, Any]) -> str:
     return str((spec.get('endpoint') or {}).get('base_url') or '?')
 
 
+def record_outage(root: Path, role: str, spec: dict[str, Any], error: BaseException | str, outage: int) -> None:
+    """One line per transport failure, naming the role that hit it and the endpoint that did not answer
+    (a local server by its address, a subscription by profile/model): the anomaly the app shows says which
+    endpoint is down, not just that something was."""
+    root.mkdir(parents=True, exist_ok=True)
+    (root/'outages.jsonl').open('a').write(json.dumps(dict(
+        at=time.time(), role=role, endpoint=model_label(spec), provider=spec.get('provider') or 'llama',
+        error=str(error)[:200], outage=outage))+'\n')
+
+
 def model_up(base_url: str | None, timeout: float = 5.0) -> bool:
     """llama.cpp answers /health with 200 (ready) or 503 (loading); a hosted API has no /health and
     answers 404 or 401, which still means the host is reachable, and that is the question here."""

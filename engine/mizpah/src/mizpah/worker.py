@@ -1660,10 +1660,10 @@ def run_through_outages(session: FocusedSession, config: dict[str, Any], root: P
         except ModelTransportError as error:
             # The wait starts at the outage, not at entry: one call to run() spans a whole burst of turns.
             outages += 1
-            (root/'outages.jsonl').open('a').write(json.dumps(dict(at=time.time(), error=str(error)[:200], outage=outages))+'\n')
+            from . import ops
+            ops.record_outage(root, 'worker', config['worker'], error, outages)
             if outages > 5:
                 raise
-            from . import ops
             checker = health or ops.Health(config, root)
             if not checker.wait_for_model((config['worker'].get('endpoint') or {}).get('base_url'), wait_seconds=wait_seconds):
                 raise
