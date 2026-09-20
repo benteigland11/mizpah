@@ -264,6 +264,18 @@ def render_assignment(task: dict[str, Any], unknowns: list[dict[str, Any]], map_
                      'is that it exists at its path and validates. An enabler is packed as a small repo from its path: leave '
                      'a README there that is its interface (what to call, with what, what comes back) — the next project '
                      'installs the directory and reads only that.')
+    made = [str(u.get('creates')) for u in unknowns if u.get('creates') and not task.get('enabler_id')]
+    if made:
+        lines.append('This task makes '+', '.join('`'+m+'`' for m in made)+'. The code that makes it is an instrument, and '
+                     'an instrument is a widget: build it under `cg/<domain>-<name>-python` (`cartograph create`), with a small '
+                     'API that names the decisions it makes (for a piece: `apply_pedal_per_harmony(...)`, `shape_phrase_velocity(...)`, '
+                     '`ritardando(...)`; for a document: the sections it lays down), tests that assert those decisions on its '
+                     'output, and a README that is its interface. Then produce the artifact by calling it. Widgets are not a '
+                     'clean-up after the work: they are how the work meets the bar — `cartograph validate` passing on the '
+                     'maker is the reading that its rules hold, before the artifact is measured. Search first (`cartograph '
+                     'search`, several terms — the maker may exist and only need one more function); a script at the project '
+                     'root is invisible to the library and lost when the task ends. After green the widget is checked in and '
+                     'the next worker installs it.')
     lines.append('Your map is `'+map_id+'` (TERRA_MAP is set): probes are shared, but the unknowns, your runs and '
                  'the knowns you graduate live there.')
     ids = [u['id'] for u in unknowns]
@@ -1362,10 +1374,23 @@ def refusal_message(refused: list[tuple[str, str]]) -> str:
 
 
 def green_message(gate: dict[str, Any], unknown_id: str | list[str], used: list[str] = (), cost: dict[str, Any] | None = None,
-                  skips: dict[str, list[str]] | None = None, uncovered: dict[str, list[str]] | None = None) -> str:
+                  skips: dict[str, list[str]] | None = None, uncovered: dict[str, list[str]] | None = None,
+                  made: list[str] = ()) -> str:
     if isinstance(unknown_id, list):
         unknown_id = ', '.join(unknown_id)
     paid = ''
+    skill = ''
+    if made:
+        # A task that made something exercised a skill: the rules it applied to the thing, with the instrument that
+        # applies them. That is what the next worker grabs. The pipeline (render, engrave, probe) is a different
+        # procedure, linked — the pedal gym's worker recorded "render, encode, probe" and nothing about pedalling.
+        skill = (' You made '+', '.join('`'+m+'`' for m in made)+'. The procedure to record for that is the skill, not '
+                 'the pipeline: one step per rule you applied to the thing (the rule as a person would state it; the widget '
+                 'function that applies it; the reading that verifies it held, with its threshold). Someone who opens it '
+                 'should be able to do what you did to a different piece. The pipeline around it — render, encode, '
+                 'engrave, probe, ladder — is its own procedure: link it with `--procedure`, never restate it. Distinct '
+                 'skills are distinct procedures (pedalling is not phrasing): create as many as you exercised, each '
+                 'searched for first, each validated.')
     if uncovered:
         rows = ['  - '+proc+': '+', '.join(ids) for proc, ids in uncovered.items()]
         paid += (' Unknowns this task resolved that the procedure you followed has no step for:\n'+'\n'.join(rows)+
@@ -1404,8 +1429,8 @@ def green_message(gate: dict[str, Any], unknown_id: str | list[str], used: list[
             'your probes call under cg/ are checked in for you once `cartograph validate` passes; do not build or '
             'extract anything now — the reading is taken and the parts it needed already exist. One thing to record, so '
             'the next worker starts where you finished: the method. Record what you actually followed so the next worker '
-            'finds it with `playbook search`, naming the widgets it should install. '+library+paid+
-            ' Then `playbook validate <id>` and reply with the procedure id and nothing else.\n')
+            'finds it with `playbook search`, naming the widgets it should install. '+library+skill+paid+
+            ' Then `playbook validate <id>` for each and reply with the procedure ids (comma separated) and nothing else.\n')
 
 
 def client_for(spec: dict[str, Any], observer: Any, config: dict[str, Any] | None = None) -> ModelClient:
@@ -1841,7 +1866,8 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         followed = procedures_used(root)
         session.continue_with(green_message(gate, task_unknown_ids(task), followed, tool_fight(root),
                                             checklist_skips(evidence(session)),
-                                            uncovered_by_procedures(config, followed, unknowns)))
+                                            uncovered_by_procedures(config, followed, unknowns),
+                                            made=[str(u.get('creates')) for u in unknowns if u.get('creates')]))
         status = run_through_outages(session, config, root, maximum_worker_turns=budget-status['completed_worker_turns'])
         session.prune_workspaces()
         widgets = harvest_widgets(evidence(session), root, config)
