@@ -43,6 +43,27 @@ def default_config(cache_dirs: tuple[str, ...] = DEFAULT_CACHE_DIRS) -> dict[str
     )
 
 
+def gyms_root() -> Path:
+    """Where projects that belong to no repository live: training gyms, drills, a brief tried on scratch."""
+    base = Path(os.environ.get('XDG_DATA_HOME') or Path.home()/'.local'/'share')/'mizpah'/'gyms'
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def new_gym(title: str) -> Path:
+    """A fresh git-initialised folder under the gyms root, named for the brief. The project is ordinary from
+    here: same `.mizpah/`, same loop, same record; it just has no code of the person's around it."""
+    slug = layout._slug(title)
+    stamp = __import__('time').strftime('%Y%m%dT%H%M%SZ', __import__('time').gmtime())
+    folder = gyms_root()/(slug+'-'+stamp)
+    folder.mkdir(parents=True)
+    subprocess.run(['git', 'init', '-q'], cwd=folder, check=True)
+    (folder/'README.md').write_text('# '+title+'\n\nA Mizpah gym: a project with no repository of its own.\n')
+    subprocess.run(['git', 'add', '-A'], cwd=folder, check=True)
+    subprocess.run(['git', '-c', 'user.name=mizpah', '-c', 'user.email=mizpah@local', 'commit', '-qm', 'gym: '+title], cwd=folder, check=True)
+    return folder
+
+
 def init(repo: Path, *, title: str, mission: str, terra: str, require_git: bool = True) -> dict[str, Any]:
     repo = Path(repo).resolve()
     top = git_toplevel(repo)
@@ -86,12 +107,15 @@ def project_config(project: Path) -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     parser.add_argument('repo', nargs='?', default='.')
+    parser.add_argument('--gym', action='store_true', help='house the project under the gyms root instead of a repository of yours')
     parser.add_argument('--title', required=True)
     parser.add_argument('--mission', required=True)
     parser.add_argument('--terra', default=str(Path(sys.executable).parent/'terra'), help='the terra CLI (default: beside this python)')
     parser.add_argument('--no-git', action='store_true', help='allow a directory that is not a git repository')
     args = parser.parse_args(argv)
-    print(json.dumps(init(Path(args.repo), title=args.title, mission=args.mission, terra=args.terra, require_git=not args.no_git), indent=1))
+    repo = new_gym(args.title) if args.gym else Path(args.repo)
+    print(json.dumps(dict(init(repo, title=args.title, mission=args.mission, terra=args.terra, require_git=not args.no_git),
+                          gym=bool(args.gym)), indent=1))
 
 
 if __name__ == '__main__':
