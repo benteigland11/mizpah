@@ -94,7 +94,7 @@ def load_config(path: str | Path) -> dict[str, Any]:
     config['checkin_policy'] = (path.parent/config['checkin_policy_file']).read_text()  # tool-less; no v10 text
     config['playbook_store'] = str(Path(config['playbook_store']).expanduser())
     config['widget_library'] = str(Path(config['widget_library']).expanduser())
-    return dict(harness, mizpah=config, harness_config_path=str(harness_path))
+    return dict(harness, mizpah=config, harness_config_path=str(harness_path), mizpah_config_path=str(Path(path).resolve()))
 
 
 def terra(config: dict[str, Any], project: Path, *args: str) -> dict[str, Any]:

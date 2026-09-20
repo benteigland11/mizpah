@@ -231,7 +231,8 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
     # The pointer from a session root back to its project, and whether the loop is alive: what a
     # front end needs to find runs on disk without guessing from directory names.
     run_record = dict(project=str(project), root=str(root), pid=os.getpid(), started_at=started,
-                      config=str(config.get('harness_config_path', '')), ended_at=None, stop=None)
+                      config=str(config.get('harness_config_path', '')), mizpah_config=str(config.get('mizpah_config_path', '')),
+                      ended_at=None, stop=None)
     (root/'run.json').write_text(json.dumps(run_record, indent=1))
     _register(run_record)
     # A previous run of this root killed without its finally leaves services running; they are its, so reap them.
