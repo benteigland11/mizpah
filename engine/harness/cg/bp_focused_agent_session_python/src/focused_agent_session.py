@@ -24,7 +24,7 @@ from cg.logic_llamaclient_python.src.native import KnownIssues, SyncNativeTransp
 from cg.data_session_event_log_python.src.session_event_log import SessionEventLog
 from cg.infra_revision_store_python.src.revision_store import RevisionStore
 from cg.infra_sandboxed_shell_execution_python.src.sandboxed_shell_execution import (
-    NetworkPolicy, SandboxedShell, ServiceLimits, ShellConfig, ShellLimits, ShellResult, WorkspaceEditError, edit_workspace_file,
+    DirectoryWorkspace, NetworkPolicy, SandboxedShell, ServiceLimits, ShellConfig, ShellLimits, ShellResult, WorkspaceEditError, edit_workspace_file,
     read_workspace_file, read_workspace_lines, workspace_files, write_workspace_file,
 )
 from cg.universal_controller_progress_python.src.controller_progress import ControllerProgress, ReviewPolicy
@@ -190,6 +190,9 @@ def expand_model_requests(events: list[Any]) -> list[Any]:
         out.append(SimpleNamespace(**{**vars(event), 'payload': payload}) if not isinstance(event, dict)
                    else dict(event, payload=payload))
     return out
+
+
+_EMPTY_DIGEST = hashlib.sha256(b'').hexdigest()
 
 
 def _state_digest(state: dict[str, Any]) -> str:
@@ -558,9 +561,14 @@ class FocusedSession:
     def _put_workspace(self, value: Any) -> str:
         limits = self.shell.config.limits
         if self._directory() is not None:
-            # Bind mode: the directory is the state; the saved snapshot is the empty marker and the file
-            # tools work on the directory through `workspace()`.
-            value = b''
+            # Bind mode: the tree is the directory; what is saved is the state part — the tar of the state
+            # directories (the project's .mizpah, the worker's .playbook) as of now. It seeds the directory
+            # now and again on open, so a session's first command sees the brief and a resumed session sees
+            # what it left. (Saving the empty marker here left every bind-mode session with an empty state
+            # tree: `terra route status` inside the sandbox answered "no route", 2026-09-20.)
+            value = value.state if isinstance(value, DirectoryWorkspace) else (value or b'')
+            if value:
+                self.shell._directory = self._directory().with_state(value)
         else:
             workspace_files(value, byte_limit=limits.workspace_bytes, file_limit=limits.max_files)
         digest = hashlib.sha256(value).hexdigest()
@@ -572,9 +580,15 @@ class FocusedSession:
 
     def workspace(self) -> Any:
         """Return the verified opaque worker workspace, never host controller files.
-        In bind mode this is the DirectoryWorkspace: the same operations, over the project directory."""
+        In bind mode this is the DirectoryWorkspace: the same operations, over the project directory, seeded
+        with the saved state part when the directory holds none yet (a session just opened)."""
         directory = self._directory()
         if directory is not None:
+            if not directory.state and self.state.get('workspace') and self.state['workspace'] != _EMPTY_DIGEST:
+                saved = RevisionStore(self.root/'workspaces'/(self.state['workspace']+'.sqlite3')).read()
+                if saved['revision']:
+                    self.shell._directory = directory.with_state(base64.b64decode(saved['data']['content'], validate=True))
+                    directory = self.shell._directory
             return directory
         digest = self.state['workspace']
         if len(digest) != 64 or any(ch not in '0123456789abcdef' for ch in digest):

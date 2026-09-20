@@ -119,3 +119,31 @@ def test_the_host_refreshes_a_stale_known_whose_reading_reproduces_and_reports_o
     assert not rows['same_lines']['stale'] and rows['same_lines']['record']['stats']['n'] == 2
     assert rows['grew_lines']['stale']
     assert (root/'refresh.jsonl').exists()
+
+
+def test_a_bind_session_seeds_its_state_part_and_finds_it_again_after_open(tmp_path: Path) -> None:
+    """The state tar (the project's .mizpah, the worker's .playbook) must reach the directory at create and
+    survive an open: every bind-mode session started with an empty state tree before (2026-09-20)."""
+    from cg.bp_focused_agent_session_python.src.focused_agent_session import FocusedSession, workspace_files
+    config = worker.load_config(ROOT/'config.luna.json')
+    config['mizpah']['sandbox'] = dict(config['mizpah']['sandbox'], workspace='bind', cache_dirs=[], services=None, network=None,
+                                       share_network=False)
+    config['shell']['limits'] = dict(config['shell']['limits'], workspace_bytes=4*1024**2, max_files=2000)
+    project = tmp_path/'proj'
+    (project/'.mizpah'/'map').mkdir(parents=True)
+    (project/'.mizpah'/'brief.json').write_text('{"title": "reference"}')
+    (project/'a.py').write_text('x = 1\n')
+    root = tmp_path/'sess'
+    root.mkdir()
+    model, _, shell = worker.bindings(config, root, 'm1', checkins=False, project=project)
+    settings = worker.build_settings(config, 'assignment', 'reference', [])
+    initial = worker.pack_workspace(project, only=worker.state_dirs(project))
+    session = FocusedSession.create(root/'s', settings, worker=model, shell=shell, controller=None, initial_workspace=initial)
+    assert workspace_files(session.workspace().state, byte_limit=10**8, file_limit=10**5) == ('.mizpah/brief.json',)
+    result = shell.run('cat /work/.mizpah/brief.json', session.workspace())
+    assert result.status == 'ok' and 'reference' in result.stdout, (result.status, result.stderr)
+    shell.close()
+    model2, _, shell2 = worker.bindings(config, root, 'm1', checkins=False, project=project)
+    reopened = FocusedSession.open(root/'s', worker=model2, shell=shell2, controller=None)
+    assert workspace_files(reopened.workspace().state, byte_limit=10**8, file_limit=10**5) == ('.mizpah/brief.json',)
+    shell2.close()
