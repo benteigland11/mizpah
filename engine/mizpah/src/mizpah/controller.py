@@ -565,6 +565,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
     brief = observation['brief']
     counts = dict(need=len(brief.get('needs') or []), deliverable=len(brief.get('deliverables') or []))
     existing_unknowns = {u['id']: u for u in observation['unknowns']}
+    reopened: dict[str, str] = {}   # original id -> the id the decision used for its re-measure
     existing_tasks = {t['id'] for t in observation['tasks']}
     open_unknowns = {u['id'] for u in observation['unknowns'] if u['status'] in OPEN_UNKNOWN}
     routed = {u for t in observation['tasks'] if t['status'] in OPEN_TASK for u in (t.get('unknowns') or [t['unknown']])}
@@ -596,6 +597,15 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         # repair_docs_handwritten_compliance, _v2 and _current in a row, 2026-09-19).
         same_claim = [u for u in existing_unknowns.values() if u['id'] != uid and u.get('type') == item.get('type')
                       and _same_reading(str(u.get('claim') or ''), str(item.get('claim') or ''))]
+        if same_claim and same_claim[0].get('status') == 'resolved' and same_claim[0]['id'] not in reopened:
+            # A resolved reading minted again (pedal_timing_valid_after_fix, _current) is a re-measure of the original:
+            # the artifact was repaired and the reading must be taken afresh. Reopen its own id and route on it rather
+            # than refuse — refusing twice stalled the pedal gym's controller (2026-09-20).
+            original = same_claim[0]['id']
+            reopened[original] = uid
+            noted.append('unknown '+uid+': the map holds this reading as '+original+' [resolved]; reopened '+original+
+                         ' to be measured again — tasks naming '+uid+' route on '+original)
+            continue
         if same_claim:
             refusals.append('unknown '+uid+': the map already holds this reading as '+same_claim[0]['id']+' ['+str(same_claim[0]['status'])
                             +']; if its artifact changed it goes stale and its own id is routed again, if it read false the '
@@ -759,7 +769,8 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         listed = item.get('unknowns')
         if not listed and item.get('unknown'):
             listed = [item.get('unknown')]
-        ids = [str(u) for u in (listed or [])]
+        alias = {new: orig for orig, new in reopened.items()}
+        ids = [alias.get(str(u), str(u)) for u in (listed or [])]
         if not ID_PATTERN.match(tid):
             refusals.append('task '+repr(tid)+': id must match ^[a-z][a-z0-9_]*$'); continue
         if tid in existing_tasks or any(t['id'] == tid for t in tasks):
@@ -789,7 +800,8 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
                                                for f in re.findall(r'[\w./-]+\.[A-Za-z0-9]+', text))
         false_artifacts = {k['id'] for k in observation['knowns'] if k['type'] == 'boolean' and k.get('rate') is not None
                            and float(k['rate']) < 0.5 and about_a_file(k['id'])}
-        bad = [u for u in ids if u not in minted and u not in open_unknowns and u not in stale_ids and u not in false_artifacts]
+        bad = [u for u in ids if u not in minted and u not in open_unknowns and u not in stale_ids and u not in false_artifacts
+               and u not in reopened]
         if bad:
             kept = [u for u in ids if u not in bad]
             if not kept:
@@ -1058,12 +1070,19 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             refusals.append('done refused: '+'; '.join(uncovered)+' — mint one unknown per named thing (with `creates`), '
                             'each claim naming it and the known it must agree with')
     return dict(unknowns=unknowns, tasks=tasks, proposals=proposals, rebucket=rebucket, unblock=unblock, retype=retype, noted=noted,
-                done=done, why=str(decision.get('why') or '')), refusals
+                reopen=sorted(reopened), done=done, why=str(decision.get('why') or '')), refusals
 
 
 def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> dict[str, list[str]]:
     """Write the accepted decision through Terra; proposals are queued, never accepted here."""
     done = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[])
+    for uid in accepted.get('reopen') or []:
+        # A resolved reading to be taken again: open on the map, so its task is routable and its known is replaced.
+        try:
+            terra(config, project, 'unknown', 'status', uid, 'open', '--notes', 'reopened by the controller: measure again after the artifact changed')
+            done.setdefault('reopen', []).append(uid)
+        except RuntimeError as error:
+            done.setdefault('refused', []).append(uid+': reopen: '+str(error)[:200])
     for u in accepted['unknowns']:
         args = ['unknown', 'create', u['id'], '--claim', u['claim'], '--evidence', u['evidence_needed'],
                 '--type', u['type'], '--quantity', u['quantity'],

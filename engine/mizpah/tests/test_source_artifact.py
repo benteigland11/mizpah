@@ -92,3 +92,34 @@ def test_a_report_with_no_anchor_is_still_refused(gym: Path) -> None:
     ], tasks=[dict(id='write_summary', unknowns=['summary_built'], bucket='low', title='summary')])
     accepted, refusals = controller.guard(decision, observation, gym)
     assert not accepted['unknowns'] and any('summary_built' in r and 'names no known' in r for r in refusals)
+
+
+def test_a_resolved_reading_minted_again_is_reopened_not_refused(gym: Path) -> None:
+    """After a repair the controller wants the reading taken afresh; its only vocabulary is a new unknown, which
+    was refused as a twin twice and stalled the pedal gym (2026-09-20). Now the original is reopened and the task
+    routes on it."""
+    (gym/'piece.mid').write_bytes(b'MThd')   # the piece exists; the reading is of it
+    observation = controller.observe(CONFIG, gym)
+    first = dict(unknowns=[
+        dict(id='pedal_timing_valid', cites='need:2', type='boolean', source='piece.mid',
+             claim='every CC64 down in piece.mid follows its chord onset within 50 ms', evidence_needed='count'),
+    ], tasks=[dict(id='validate_pedal', unknowns=['pedal_timing_valid'], bucket='low', title='validate')])
+    accepted, refusals = controller.guard(first, observation, gym)
+    assert not refusals, refusals
+    controller.apply(CONFIG, gym, accepted)
+    # The worker resolved it false and its task closed (by hand here).
+    terra(gym, 'route', 'cancel', 'validate_pedal', '--reason', 'done by hand in the test')
+    path = gym/'.terra'/'map'/'unknowns'/'pedal_timing_valid.json'
+    doc = json.loads(path.read_text()); doc['status'] = 'resolved'; path.write_text(json.dumps(doc))
+    observation = controller.observe(CONFIG, gym)
+    again = dict(unknowns=[
+        dict(id='pedal_timing_valid_after_fix', cites='need:2', type='boolean', source='piece.mid',
+             claim='every CC64 down in piece.mid follows its chord onset within 50 ms', evidence_needed='count again'),
+    ], tasks=[dict(id='revalidate_pedal', unknowns=['pedal_timing_valid_after_fix'], bucket='low', title='revalidate')])
+    accepted, refusals = controller.guard(again, observation, gym)
+    assert not refusals, refusals
+    assert accepted['unknowns'] == [] and accepted['reopen'] == ['pedal_timing_valid']
+    assert accepted['tasks'][0]['unknowns'] == ['pedal_timing_valid'], accepted['tasks']
+    applied = controller.apply(CONFIG, gym, accepted)
+    assert applied.get('reopen') == ['pedal_timing_valid'] and 'revalidate_pedal' in applied['tasks']
+    assert json.loads(path.read_text())['status'] == 'open'
