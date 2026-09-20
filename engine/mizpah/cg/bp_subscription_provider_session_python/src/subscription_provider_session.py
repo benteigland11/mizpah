@@ -536,6 +536,9 @@ class ProviderTransport:
                 return b"", f"CodecError: {error}"
         for key in getattr(self.profile, "unsupported_fields", ()):
             body.pop(key, None)   # the backend answers 400 to these; the profile says so
+        for old, new in getattr(self.profile, "renamed_fields", {}).items():
+            if old in body and new not in body:
+                body[new] = body.pop(old)   # the backend spells the field differently
         return json.dumps(body, allow_nan=False).encode("utf-8"), None
 
     def _decode(self, response: HttpResponse, elapsed: float, payload: dict[str, Any]) -> WireResponse:

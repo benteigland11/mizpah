@@ -439,6 +439,20 @@ def test_authorized_user_file_login_and_refresh(store: CredentialStore, tmp_path
     assert session.status()["quarantined"]
 
 
+def test_renamed_fields_are_rewritten_on_the_wire(store: CredentialStore) -> None:
+    profile = ProviderProfile("r", "R", ApiKeyAuth(environment_variable="K"), "https://api.example.org/v1", "/chat/completions",
+                              credential_headers={"Authorization": "Bearer {token}"}, renamed_fields={"max_tokens": "max_completion_tokens"})
+    http = FakeHttp()
+    session = _session(profile, store, http)
+    session.login(api_key="sk-1")
+    http.model_answers.append(HttpResponse(200, {"content-type": "application/json"}, json.dumps(
+        {"choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+         "usage": {"prompt_tokens": 1, "completion_tokens": 1}}).encode()))
+    session.transport()("/chat/completions", {"messages": [{"role": "user", "content": "u"}], "max_tokens": 5})
+    sent = json.loads(http.calls[-1]["body"])
+    assert sent["max_completion_tokens"] == 5 and "max_tokens" not in sent
+
+
 def test_endpoint_and_count(store: CredentialStore) -> None:
     session = _session(pkce_profile(), store, FakeHttp())
     assert session.endpoint() == {"base_url": "https://api.example.org/backend", "completion_path": "/responses",

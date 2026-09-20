@@ -329,6 +329,61 @@ def cmd_configure(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_check(args: argparse.Namespace) -> int:
+    """Does the provider answer in the shape the engine expects? Lists models, then runs one tiny completion.
+
+    Reports each step's HTTP status and the first bytes of any error body, so a wrong path, header or
+    field shows up as text rather than as a failed session later.
+    """
+    import time
+    config = _config(args.config)
+    session = session_for(args.provider, config)
+    profile = session.profile
+    report: dict[str, Any] = dict(event='check', provider=profile.name, address=profile.base_url_for(), steps=[])
+    status = session.status()
+    if not status['signed_in']:
+        report['steps'].append(dict(step='credential', ok=False, detail=status.get('reason') or 'not signed in'))
+        _emit(report)
+        return 1
+    rows, source = available_models(session)
+    report['steps'].append(dict(step='models', ok=source == 'live', source=source, count=len(rows),
+                                url=profile.models_url_for(session.credential().metadata),
+                                sample=[r['id'] for r in rows[:5]]))
+    model = args.model or (rows[0]['id'] if rows else None)
+    if model is None:
+        report['steps'].append(dict(step='completion', ok=False, detail='no model to try; pass --model'))
+        _emit(report)
+        return 1
+    payload = {'model': model, 'messages': [{'role': 'user', 'content': 'Reply with the single word OK.'}], 'max_tokens': 8}
+    effort = next((r for r in rows if r['id'] == model), {}).get('default_effort')
+    if effort:
+        payload['reasoning_effort'] = effort
+    transport = session.transport()
+    started = time.monotonic()
+    response = transport(profile.completion_path, payload, timeout_seconds=args.timeout)
+    step: dict[str, Any] = dict(step='completion', model=model, status=response.status,
+                                seconds=round(time.monotonic() - started, 2), ok=False)
+    if response.error:
+        step['detail'] = response.error
+        step['body'] = response.body[:400]
+    else:
+        try:
+            chat = json.loads(response.body)
+            choice = chat['choices'][0]
+            step['ok'] = True
+            step['content'] = (choice['message'].get('content') or '')[:80]
+            step['finish_reason'] = choice.get('finish_reason')
+            step['usage'] = chat.get('usage')
+            step['wire'] = profile.wire
+        except (ValueError, KeyError, IndexError, TypeError) as error:
+            step['detail'] = f'response is not a single-choice chat completion: {type(error).__name__}: {error}'
+            step['body'] = response.body[:400]
+    report['steps'].append(step)
+    report['ok'] = all(s['ok'] for s in report['steps'])
+    _emit(report)
+    return 0 if report['ok'] else 1
+
+
 def cmd_logout(args: argparse.Namespace) -> int:
     session = session_for(args.provider, _config(args.config))
     _emit(dict(event='signed_out', provider=args.provider, removed=session.logout()))
@@ -369,6 +424,10 @@ def main(argv: list[str] | None = None) -> int:
     add_local.set_defaults(run=cmd_add_local)
     remove = commands.add_parser('remove', help='remove a provider you added'); remove.add_argument('provider')
     remove.set_defaults(run=cmd_remove)
+    check = commands.add_parser('check', help='list models and run one tiny completion; report shapes')
+    check.add_argument('provider'); check.add_argument('--model', default=None)
+    check.add_argument('--timeout', type=float, default=120.0)
+    check.set_defaults(run=cmd_check)
     args = parser.parse_args(argv)
     return args.run(args)
 

@@ -111,6 +111,8 @@ class ProviderProfile:
     # Request fields this backend refuses (ChatGPT's Codex backend answers 400 to max_output_tokens);
     # dropped before the request is sent.
     unsupported_fields: tuple[str, ...] = ()
+    # Request fields this backend spells differently (OpenAI's newer models want max_completion_tokens).
+    renamed_fields: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.wire not in WIRE_DIALECTS:
@@ -181,11 +183,12 @@ class ProviderProfile:
     def headers_for(self, access_token: str, metadata: Mapping[str, Any] | None = None) -> dict[str, str]:
         """Static headers plus credential headers rendered from the token and its metadata.
 
-        ``credential_headers`` values are format strings over ``token`` and any
-        metadata key, e.g. ``{"Authorization": "Bearer {token}", "x-account": "{account_id}"}``.
+        ``credential_headers`` values are format strings over ``token``, any metadata key, and any
+        setting in ``template_values``, e.g. ``{"Authorization": "Bearer {token}", "x-account": "{account_id}"}``.
         A header whose fields are missing is left out rather than sent half-rendered.
         """
-        values: dict[str, Any] = dict(metadata or {})
+        values: dict[str, Any] = dict(self.template_values)
+        values.update(metadata or {})
         values["token"] = access_token
         rendered = dict(self.static_headers)
         for name, template in self.credential_headers.items():

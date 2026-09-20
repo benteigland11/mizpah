@@ -111,6 +111,10 @@ def test_template_values_are_settings() -> None:
     assert filled.base_url_for() == "https://eu.example.org/v1/projects/p1/endpoints/openapi"
     assert filled.models_url == "https://eu.example.org/v1/publishers/models"
     assert filled.base_url_for({"project": "from-token"}) == "https://eu.example.org/v1/projects/from-token/endpoints/openapi"
+    headed = profile_from_dict(dict(filled.to_dict(), credential_headers={"Authorization": "Bearer {token}", "x-project": "{project}"},
+                                    renamed_fields={"max_tokens": "max_completion_tokens"}))
+    assert headed.headers_for("t") == {"Authorization": "Bearer t", "x-project": "p1"}
+    assert headed.renamed_fields == {"max_tokens": "max_completion_tokens"}
 
 
 def test_validation() -> None:

@@ -161,7 +161,10 @@
         "high",
         "xhigh"
       ],
-      "default_reasoning_effort": "medium"
+      "default_reasoning_effort": "medium",
+      "renamed_fields": {
+        "max_tokens": "max_completion_tokens"
+      }
     },
     {
       "name": "xai_api",
@@ -222,7 +225,7 @@
       "token_count": "usage_calibrated",
       "context_window": 256000,
       "timeout_seconds": 900,
-      "notes": "Kimi Code subscription endpoint as documented for Kimi Code CLI providers. PAYG keys use https://api.moonshot.ai/v1 instead (override api_base_url).",
+      "notes": "Kimi Code subscription endpoint. Kimi allowlists coding agents by client and answers 403 'only available for Coding Agents such as Kimi CLI, Claude Code, Roo Code, Kilo Code' to others; Mizpah is not on that list yet, so this row may be refused until it is. The pay-as-you-go Moonshot API row works regardless.",
       "models_path": "/models"
     },
     {
@@ -450,7 +453,10 @@
       "token_count": "usage_calibrated",
       "context_window": 128000,
       "timeout_seconds": 900,
-      "notes": "Your Azure OpenAI resource name is the subdomain of its endpoint; the key is from the resource's Keys page. Deployments appear as models."
+      "notes": "Your Azure OpenAI resource name is the subdomain of its endpoint; the key is from the resource's Keys page. Deployments appear as models.",
+      "renamed_fields": {
+        "max_tokens": "max_completion_tokens"
+      }
     },
     {
       "name": "together_api",
@@ -832,9 +838,12 @@
       "token_count": "usage_calibrated",
       "context_window": 128000,
       "timeout_seconds": 900,
-      "notes": "A Bedrock API key (console > Bedrock > API keys) on the OpenAI-compatible endpoint. IAM/SigV4 signing is not wired, and models that only speak the Converse API are not reachable this way.",
+      "notes": "A Bedrock API key (console > Bedrock > API keys) on the OpenAI-compatible chat endpoint, which AWS documents for the OpenAI open-weight models (openai.gpt-oss-*); other Bedrock models speak Converse and are not reachable this way. Bedrock publishes no model list on this path: type the model id. IAM/SigV4 signing is not wired.",
       "template_values": {
         "region": "us-east-1"
+      },
+      "renamed_fields": {
+        "max_tokens": "max_completion_tokens"
       }
     },
     {
@@ -851,7 +860,8 @@
       "completion_path": "/chat/completions",
       "wire": "chat_completions",
       "credential_headers": {
-        "Authorization": "Bearer {token}"
+        "Authorization": "Bearer {token}",
+        "x-goog-user-project": "{project}"
       },
       "models": [],
       "default_model": null,
@@ -869,6 +879,28 @@
       "template_values": {
         "region": "us-central1"
       }
+    },
+    {
+      "name": "moonshot_api",
+      "display_name": "Moonshot API key (Kimi, pay as you go)",
+      "auth": {
+        "kind": "api_key",
+        "environment_variable": "MOONSHOT_API_KEY"
+      },
+      "api_base_url": "https://api.moonshot.ai/v1",
+      "completion_path": "/chat/completions",
+      "wire": "chat_completions",
+      "credential_headers": {
+        "Authorization": "Bearer {token}"
+      },
+      "models": [],
+      "default_model": null,
+      "models_path": "/models",
+      "reasoning_efforts": [],
+      "token_count": "usage_calibrated",
+      "context_window": 256000,
+      "timeout_seconds": 900,
+      "notes": "Moonshot's international platform, OpenAI-compatible; not gated by client."
     }
   ]
 }
