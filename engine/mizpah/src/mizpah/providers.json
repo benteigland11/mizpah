@@ -306,13 +306,12 @@
         "environment_variable": "ANTHROPIC_API_KEY"
       },
       "api_base_url": "https://api.anthropic.com/v1",
-      "completion_path": "/chat/completions",
-      "wire": "chat_completions",
+      "completion_path": "/messages",
+      "wire": "messages",
       "static_headers": {
         "anthropic-version": "2023-06-01"
       },
       "credential_headers": {
-        "Authorization": "Bearer {token}",
         "x-api-key": "{token}"
       },
       "models": [],
@@ -321,12 +320,17 @@
       "token_count": "usage_calibrated",
       "context_window": 200000,
       "timeout_seconds": 900,
-      "notes": "Anthropic's OpenAI SDK compatibility layer (/v1/chat/completions); extended thinking and some features are Messages-API only. API only: Claude plan OAuth is prohibited in third-party tools since 2026-02-20. The registry's backend-anthropic-messages-codec widget is the upgrade path to the native API. reasoning_effort maps to an extended-thinking budget on the compatibility layer; unset means no thinking.",
+      "notes": "The native Messages API: prompt caching (breakpoints on the system prompt and the last tool), effort levels, thinking. Tool calls, tool results and images are translated from the Chat shape. Multi-workspace keys need anthropic-workspace-id in static_headers. API only: Claude plan OAuth is prohibited in third-party tools since 2026-02-20.",
       "reasoning_efforts": [
         "low",
         "medium",
-        "high"
-      ]
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "default_reasoning_effort": null,
+      "renamed_fields": {},
+      "unsupported_fields": []
     },
     {
       "name": "mistral_api",

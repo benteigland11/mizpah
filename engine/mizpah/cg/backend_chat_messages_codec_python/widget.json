@@ -1,18 +1,18 @@
 {
   "meta": {
-    "id": "backend-llm-provider-profiles-python",
-    "name": "LLM Provider Profiles",
-    "version": "1.7.0",
+    "id": "backend-chat-messages-codec-python",
+    "name": "Chat Messages Codec",
+    "version": "1.0.0",
     "domain": "backend",
     "tags": [
-      "llm",
-      "provider",
-      "oauth",
-      "profile",
-      "registry"
+      "anthropic",
+      "messages-api",
+      "chat-completions",
+      "sse",
+      "tool-calls"
     ]
   },
-  "description": "Typed profile for an LLM provider reachable through a subscription or API key: auth flow kind and endpoints, API base and completion path, header builder for a stored credential, model catalog and token-count strategy. Profiles are data the caller supplies; a small registry resolves them by name.",
+  "description": "Translate an OpenAI Chat Completions request into an Anthropic Messages request (system hoisting, tool_use / tool_result blocks, input_schema tools, output_config effort, cache_control breakpoints) and fold a Messages response or SSE event stream back into one Chat-Completions-shaped response with content, tool_calls, finish_reason and usage. Pure functions over dicts and lines.",
   "tech_stack": {
     "language": "python",
     "dependencies": []
@@ -25,7 +25,7 @@
   },
   "validation": {
     "engine_version": 1,
-    "validated_at": "2026-09-20T03:55:48.040291+00:00",
+    "validated_at": "2026-09-20T03:55:43.982187+00:00",
     "runtime": "python 3.12.13"
   }
 }

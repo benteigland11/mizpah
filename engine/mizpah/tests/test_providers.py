@@ -17,7 +17,9 @@ def test_shipped_profiles_load_and_xai_needs_a_client_id() -> None:
     assert copilot.auth.kind == 'device_code' and providers.missing_client_id(copilot) is None
     assert copilot.models_url == 'https://api.githubcopilot.com/models'
     anthropic = reg.get('anthropic_api')
-    assert anthropic.headers_for('k') == {'anthropic-version': '2023-06-01', 'Authorization': 'Bearer k', 'x-api-key': 'k'}
+    assert anthropic.wire == 'messages' and anthropic.completion_path == '/messages'
+    assert anthropic.headers_for('k') == {'anthropic-version': '2023-06-01', 'x-api-key': 'k'}
+    assert anthropic.models_url == 'https://api.anthropic.com/v1/models'
     chatgpt = reg.get('openai_chatgpt')
     assert chatgpt.auth.kind == 'oauth_pkce' and chatgpt.auth.redirect_uri == 'http://localhost:1455/auth/callback'
     assert chatgpt.headers_for('t', {'account_id': 'a'})['chatgpt-account-id'] == 'a'

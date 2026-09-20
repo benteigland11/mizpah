@@ -15,7 +15,7 @@ import re
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
-WIRE_DIALECTS = ("chat_completions", "responses")
+WIRE_DIALECTS = ("chat_completions", "responses", "messages")
 TOKEN_COUNT_STRATEGIES = ("tokenize_endpoint", "usage_calibrated")
 AUTH_KINDS = ("oauth_pkce", "device_code", "api_key", "none", "authorized_user_file")
 

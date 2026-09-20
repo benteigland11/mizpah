@@ -23,6 +23,11 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
+from cg.backend_chat_messages_codec_python.src.chat_messages_codec import (
+    chat_to_messages,
+    fold_sse as fold_messages_sse,
+    messages_to_chat,
+)
 from cg.backend_chat_responses_codec_python.src.chat_responses_codec import (
     chat_to_responses,
     fold_sse,
@@ -483,9 +488,10 @@ class ProviderTransport:
     def request_metadata(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         """What changed on the wire, with no authentication material."""
         metadata = {"provider": self.profile.name, "wire": self.profile.wire, "url": self._url(path)}
-        if self.profile.wire == "responses":
+        codec = {"responses": chat_to_responses, "messages": chat_to_messages}.get(self.profile.wire)
+        if codec is not None:
             try:
-                metadata["dropped_fields"] = list(chat_to_responses(payload).dropped_fields)
+                metadata["dropped_fields"] = list(codec(payload).dropped_fields)
             except ValueError as error:
                 metadata["codec_error"] = str(error)
         return metadata
@@ -529,9 +535,9 @@ class ProviderTransport:
         body = dict(payload)
         if not body.get("model") and self.profile.default_model:
             body["model"] = self.profile.default_model
-        if self.profile.wire == "responses":
+        if self.profile.wire in ("responses", "messages"):
             try:
-                body = chat_to_responses(body).body
+                body = (chat_to_responses if self.profile.wire == "responses" else chat_to_messages)(body).body
             except ValueError as error:
                 return b"", f"CodecError: {error}"
         for key in getattr(self.profile, "unsupported_fields", ()):
@@ -545,9 +551,18 @@ class ProviderTransport:
         text = response.body.decode("utf-8", errors="replace")
         if not 200 <= response.status < 300:
             return WireResponse(response.status, text, elapsed)
+        streamed = (response.headers.get("content-type", "").startswith("text/event-stream")
+                    or text.lstrip().startswith(("event:", "data:")))
         if self.profile.wire == "chat_completions":
             chat = _json_object(text)
-        elif response.headers.get("content-type", "").startswith("text/event-stream") or text.lstrip().startswith(("event:", "data:")):
+        elif self.profile.wire == "messages":
+            if streamed:
+                chat = fold_messages_sse(text.splitlines(keepends=True))
+            else:
+                chat = _json_object(text)
+                if chat is not None and "choices" not in chat:
+                    chat = messages_to_chat(chat)
+        elif streamed:
             chat = fold_sse(text.splitlines(keepends=True))
         else:
             chat = _json_object(text)

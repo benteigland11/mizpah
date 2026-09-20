@@ -117,6 +117,10 @@ def test_template_values_are_settings() -> None:
     assert headed.renamed_fields == {"max_tokens": "max_completion_tokens"}
 
 
+def test_messages_wire_is_a_dialect() -> None:
+    assert ProviderProfile("m", "M", ApiKeyAuth(), "https://api.example.org/v1", "/messages", wire="messages").wire == "messages"
+
+
 def test_validation() -> None:
     with pytest.raises(ValueError):
         ProviderProfile("n", "N", ApiKeyAuth(), "api.example.org", "/x")

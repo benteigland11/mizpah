@@ -453,6 +453,35 @@ def test_renamed_fields_are_rewritten_on_the_wire(store: CredentialStore) -> Non
     assert sent["max_completion_tokens"] == 5 and "max_tokens" not in sent
 
 
+def test_messages_wire_round_trips(store: CredentialStore) -> None:
+    profile = ProviderProfile("m", "M", ApiKeyAuth(environment_variable="K"), "https://api.example.org/v1", "/messages", wire="messages",
+                              static_headers={"anthropic-version": "2023-06-01"}, credential_headers={"x-api-key": "{token}"})
+    http = FakeHttp()
+    session = _session(profile, store, http)
+    session.login(api_key="sk-1")
+    events = [
+        {"type": "message_start", "message": {"id": "msg_1", "model": "m", "usage": {"input_tokens": 9}}},
+        {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+        {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "hi"}},
+        {"type": "content_block_stop", "index": 0},
+        {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 1}},
+        {"type": "message_stop"},
+    ]
+    http.model_answers.append(HttpResponse(200, {"content-type": "text/event-stream"}, _sse(events)))
+    transport = session.transport()
+    payload = {"messages": [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}], "max_tokens": 5, "seed": 1}
+    assert transport.request_metadata("/messages", payload)["dropped_fields"] == ["seed"]
+    response = transport("/messages", payload)
+    chat = json.loads(response.body)
+    assert response.status == 200 and chat["choices"][0]["message"]["content"] == "hi" and chat["usage"]["prompt_tokens"] == 9
+    sent = json.loads(http.calls[-1]["body"])
+    assert sent["system"][0]["text"] == "s" and sent["messages"] == [{"role": "user", "content": [{"type": "text", "text": "u"}]}]
+    assert http.calls[-1]["headers"]["x-api-key"] == "sk-1" and http.calls[-1]["headers"]["anthropic-version"] == "2023-06-01"
+    http.model_answers.append(HttpResponse(200, {"content-type": "application/json"}, json.dumps(
+        {"id": "msg_2", "content": [{"type": "text", "text": "plain"}], "stop_reason": "end_turn", "usage": {"input_tokens": 1, "output_tokens": 1}}).encode()))
+    assert json.loads(transport("/messages", payload).body)["choices"][0]["message"]["content"] == "plain"
+
+
 def test_endpoint_and_count(store: CredentialStore) -> None:
     session = _session(pkce_profile(), store, FakeHttp())
     assert session.endpoint() == {"base_url": "https://api.example.org/backend", "completion_path": "/responses",
