@@ -229,6 +229,19 @@ def init_brief(
     return save_brief(project_root, rec)
 
 
+def _removed_indices(old: list[str], new: list[str]) -> list[int]:
+    """1-based indices dropped when ``new`` is ``old`` with some entries removed and the rest kept in order
+    (an edit that also rewrites text is not a removal; nothing is renumbered for it)."""
+    if len(new) >= len(old):
+        return []
+    removed, j = [], 0
+    for i, entry in enumerate(old, 1):
+        if j < len(new) and new[j] == entry:
+            j += 1
+        else:
+            removed.append(i)
+    return removed if j == len(new) else []
+
 def set_brief_fields(
     project_root: Path,
     *,
@@ -273,7 +286,15 @@ def set_brief_fields(
             continue
         clean = [str(v).strip() for v in vals if str(v).strip()]
         if replace_lists:
+            # A replacement that only drops entries is a removal, and entries are cited by position: renumber
+            # the phases and the map's cites exactly as an accepted remove proposal would (highest index first,
+            # so earlier indices stay valid while later ones shift).
+            old_entries = list(rec.get(key) or [])
+            kind = {"needs": "need", "non_goals": "non_goal", "deliverables": "deliverable"}[key]
+            removed = _removed_indices(old_entries, clean)
             rec[key] = clean
+            for index in sorted(removed, reverse=True):
+                _renumber_after_removal(project_root, rec, kind, index)
         else:
             existing = list(rec.get(key) or [])
             for c in clean:

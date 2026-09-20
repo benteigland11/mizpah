@@ -67,6 +67,7 @@ class FakeEngine implements Engine {
         project: r.project,
         session: r.session,
         running: r.running,
+        archived: r.archived,
       );
       final was = _runs[r.id];
       _runs[r.id] = rp;
@@ -98,7 +99,7 @@ class FakeEngine implements Engine {
           _briefStamp[r.id] = key;
         } catch (_) {}
       }
-      sig.write('${r.id}|${r.running}|$key|');
+      sig.write('${r.id}|${r.running}|${r.archived}|$key|');
       for (final f in [
         File('${r.session}/loop.json'),
         File('${r.session}/controller.jsonl'),
@@ -146,7 +147,7 @@ class FakeEngine implements Engine {
     final out = <AttentionItem>[];
     for (final id in _runs.keys.toList()) {
       final brief = _briefs[id];
-      if (brief == null) continue;
+      if (brief == null || _runs[id]!.archived) continue; // archived paper stays filed
       final summary = _summary(id, brief);
       final docs = await readInbox(id);
       for (final d in docs) {
@@ -364,7 +365,9 @@ class FakeEngine implements Engine {
         } catch (_) {}
       }
       if (stop == 'controller_stalled') attention++;
-      state = r.running
+      state = r.archived
+          ? 'archived'
+          : r.running
           ? 'live'
           : stop == 'nothing_owed'
           ? 'completed'
@@ -386,16 +389,38 @@ class FakeEngine implements Engine {
     return b;
   }
 
+  /// A run project's brief is Terra's file: the edit goes through
+  /// `terra brief set --replace-lists` in the project directory (version
+  /// bump, and a dropped entry renumbers phases and map cites the way an
+  /// accepted removal does) and the draft is re-read from disk. A live
+  /// loop sees the new brief at its next step. Enablers and phases are
+  /// not written here: their state belongs to the loop.
   @override
   Future<void> writeBrief(String id, Map<String, dynamic> brief) async {
     final current = _briefs[id];
     if (current == null) throw ArgumentError.value(id, 'id', 'no such brief');
-    // Terra bumps version on every direct write (brief set, add need, …).
-    final stored = Map<String, dynamic>.of(brief);
-    if (_canonical(brief) != _canonical(current)) {
+    if (_canonical(brief) == _canonical(current)) return;
+    final run = _runs[id];
+    if (run == null) {
+      final stored = Map<String, dynamic>.of(brief);
       stored['version'] = (current['version'] as int? ?? 1) + 1;
+      _briefs[id] = stored;
+      return;
     }
-    _briefs[id] = stored;
+    List<String> strings(Object? v) => [for (final e in (v as List? ?? const [])) '$e'];
+    final args = <String>[
+      'set',
+      '--replace-lists',
+      '--title', '${brief['title'] ?? ''}',
+      '--mission', '${brief['mission'] ?? ''}',
+      for (final n in strings(brief['needs'])) ...['--need', n],
+      for (final n in strings(brief['non_goals'])) ...['--non-goal', n],
+      for (final d in strings(brief['deliverables'])) ...['--deliverable', d],
+      if (brief['budget_points'] is int) ...['--budget-points', '${brief['budget_points']}']
+      else if (current['budget_points'] != null) '--clear-budget-points',
+      '--budget-notes', '${brief['budget_notes'] ?? ''}',
+    ];
+    await _terraBrief(run, args);
   }
 
   /// JSON with keys sorted at every level, so order never reads as a change.
@@ -496,9 +521,11 @@ class RunProject {
     required this.project,
     required this.session,
     this.running = false,
+    this.archived = false,
   });
   final String id;
   final String project;
   final String session;
   final bool running;
+  final bool archived;
 }

@@ -333,3 +333,25 @@ def test_proposal_edits_and_removes_entries_keeping_numbering_honest(tmp_path: P
     assert notes["words"] == "cites need:1"
     assert notes["self_doc"] == "cites need:removed"
     assert notes["banned"] == "cites need:2 | need:removed"
+
+
+def test_replacing_needs_with_fewer_renumbers_like_a_removal(tmp_path: Path, monkeypatch):
+    """The app's editor saves the whole list; dropping one entry renumbers phases and cites the same way
+    an accepted remove proposal does, and a save that rewrites text renumbers nothing."""
+    from terra.brief import add_phase
+    from terra.paths import terra_root
+    from terra.unknowns import create_unknown
+    import json
+
+    monkeypatch.chdir(tmp_path)
+    init_brief(tmp_path, title="t", mission="m")
+    set_brief_fields(tmp_path, needs=["a", "b", "c"])
+    add_phase(tmp_path, "p1", needs=[1, 2, 3])
+    create_unknown(tmp_path, "uc", claim="c", notes="cites need:3")
+    set_brief_fields(tmp_path, needs=["a", "c"], replace_lists=True)
+    rec = load_brief(tmp_path)
+    assert rec["needs"] == ["a", "c"] and rec["phases"][0]["needs"] == [1, 2]
+    notes = json.loads((terra_root(tmp_path) / "map" / "unknowns" / "uc.json").read_text())["notes"]
+    assert notes == "cites need:2"
+    set_brief_fields(tmp_path, needs=["a", "c sharper"], replace_lists=True)
+    assert load_brief(tmp_path)["phases"][0]["needs"] == [1, 2]
