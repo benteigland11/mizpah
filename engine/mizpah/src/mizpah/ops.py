@@ -59,6 +59,8 @@ def outage_kind(error: BaseException | str) -> tuple[str, str]:
         return 'server_down', 'nothing is listening at its address'
     if 'http status 5' in low or ' 502' in low or ' 503' in low or ' 504' in low:
         return 'server_error', 'the server answered with an error'
+    if 'http status 4' in low and 'http status 429' not in low:
+        return 'bad_request', 'the server refused the request as malformed (a config problem on our side, not an outage)'
     if 'http status 429' in low or 'rate limit' in low:
         return 'rate_limited', 'the server refused for rate limiting'
     if 'uncertain' in low:
