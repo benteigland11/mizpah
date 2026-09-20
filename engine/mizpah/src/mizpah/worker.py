@@ -264,7 +264,7 @@ def render_assignment(task: dict[str, Any], unknowns: list[dict[str, Any]], map_
                      'is that it exists at its path and validates. An enabler is packed as a small repo from its path: leave '
                      'a README there that is its interface (what to call, with what, what comes back) — the next project '
                      'installs the directory and reads only that.')
-    made = [str(u.get('creates')) for u in unknowns if u.get('creates') and not task.get('enabler_id')]
+    made = [unknown_notes(u)['creates'] for u in unknowns if unknown_notes(u).get('creates')] if not task.get('enabler_id') else []
     if made:
         lines.append('This task makes '+', '.join('`'+m+'`' for m in made)+'. The code that makes it is an instrument, and '
                      'an instrument is a widget: build it under `cg/<domain>-<name>-python` (`cartograph create`), with a small '
@@ -1867,7 +1867,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         session.continue_with(green_message(gate, task_unknown_ids(task), followed, tool_fight(root),
                                             checklist_skips(evidence(session)),
                                             uncovered_by_procedures(config, followed, unknowns),
-                                            made=[str(u.get('creates')) for u in unknowns if u.get('creates')]))
+                                            made=[unknown_notes(u)['creates'] for u in unknowns if unknown_notes(u).get('creates')]))
         status = run_through_outages(session, config, root, maximum_worker_turns=budget-status['completed_worker_turns'])
         session.prune_workspaces()
         widgets = harvest_widgets(evidence(session), root, config)
