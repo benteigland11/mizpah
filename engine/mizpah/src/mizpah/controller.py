@@ -689,6 +689,22 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
     # unknowns minted alongside) its content agrees with. Without that anchor the probe can only check
     # that the file exists: a report with a table of invented stations passed on 2026-09-18.
     anchors = {k['id'] for k in observation['knowns']} | {u['id'] for u in observation['unknowns']} | {u['id'] for u in unknowns}
+    # Source artifacts: files the readings are taken OF (a composition, a dataset the worker writes), not reports
+    # that must agree with knowns. One is anchored by the needs that describe it by name or by the unknowns that
+    # read it; its measured properties are separate unknowns that depend on the build, and a derived artifact
+    # may anchor on it before it exists. Refusing them ("names no known") left the piano benchmark's attempt 2
+    # with validators of a MIDI nothing was allowed to write, and the deps guard then made the builder wait on
+    # its own readers (2026-09-20).
+    source_artifacts: set[str] = set()
+    for item in decision.get('unknowns') or []:
+        made = str(item.get('creates') or '').lower() if isinstance(item, dict) else ''
+        if not made:
+            continue
+        others = [u for u in (decision.get('unknowns') or []) if isinstance(u, dict) and u is not item]+list(observation['unknowns'])
+        read_by_others = any(made in (str(u.get('source') or '')+' '+str(u.get('claim') or '')).lower() for u in others)
+        named_by_needs = any(made in str(n).lower() for n in observation['brief'].get('needs') or [])
+        if read_by_others or named_by_needs:
+            source_artifacts.add(made)
     for item in list(unknowns):
         # An artifact unknown is one that creates something, or a boolean citing a deliverable ("exits 0" against
         # `source: environment` is the existence check by another door). A number or label citing a deliverable
@@ -717,7 +733,10 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             deliverable_text = entries[index] if 0 <= index < len(entries) else ''
         named_files = [f for f in re.findall(r'[\w./-]+\.[A-Za-z0-9]+', deliverable_text+' '+text)
                        if f.lower() != str(item['creates']).lower() and f in text and project is not None and source_exists(project, f)]
-        if artifact and not names_proposal and not named_files \
+        made = str(item['creates'] or '').lower()
+        # A derived artifact (notes.md about piece.mid) anchors on a source artifact this same briefing mints.
+        named_files += [f for f in re.findall(r'[\w./-]+\.[A-Za-z0-9]+', text) if f.lower() in source_artifacts and f.lower() != made]
+        if artifact and not names_proposal and not named_files and made not in source_artifacts \
                 and not [w for w in re.findall(r'[a-z][a-z0-9_]*', text) if w in anchors and w != item['id']]:
             refusals.append('unknown '+item['id']+': it is about '+(item['creates'] or item['cites'])+' but names no known '
                             'or unknown its content must agree with; an artifact is verified against the map — name '
@@ -879,8 +898,10 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         reading_tasks = [t['id'] for t in tasks if not any(u in artifact_ids for u in t['unknowns']) and not reads_own(t['unknowns'])]
         reading_tasks += [t['id'] for t in observation['tasks'] if t['status'] in OPEN_TASK
                           and not any(u in artifact_ids for u in (t.get('unknowns') or [])) and not reads_own(t.get('unknowns') or [])]
-        if builds and not deps and reading_tasks:
-            # An artifact that must agree with the map cannot be built before the readings exist.
+        builds_source = any(str(u.get('creates') or '').lower() in source_artifacts for u in unknowns if u['id'] in ids and u.get('creates'))
+        if builds and not deps and reading_tasks and not builds_source:
+            # An artifact that must agree with the map cannot be built before the readings exist. A source
+            # artifact is the other way round: its readers depend on it (added above), it depends on nobody.
             refusals.append('task '+tid+': it builds an artifact that must agree with the map, so it depends on the '
                             'tasks that produce those knowns; add deps from: '+', '.join(dict.fromkeys(reading_tasks))); continue
         carried = {u['enabler'] for u in unknowns if u['id'] in ids and u.get('enabler')}
