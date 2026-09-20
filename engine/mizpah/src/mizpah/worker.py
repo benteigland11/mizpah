@@ -1431,11 +1431,12 @@ def green_message(gate: dict[str, Any], unknown_id: str | list[str], used: list[
                    'procedure for that and `playbook add-step` one step at a time, each step one action with the exact '
                    'commands; if it was nothing but the bootstrap, create nothing and reply "none". '+linking)
     return ('Gate green: known '+unknown_id+' '+('are' if ',' in unknown_id else 'is')+' on the project map. The widgets '
-            'your probes call under cg/ are checked in for you once `cartograph validate` passes; do not build or '
-            'extract anything now — the reading is taken and the parts it needed already exist. One thing to record, so '
-            'the next worker starts where you finished: the method. Record what you actually followed so the next worker '
-            'finds it with `playbook search`, naming the widgets it should install. '+library+skill+paid+
-            ' Then `playbook validate <id>` for each and reply with the procedure ids (comma separated) and nothing else.\n')
+            'under cg/ that pass `cartograph validate` are checked in for you now; do not build or extract anything at '
+            'this point — the reading is taken and the parts it needed already exist. This is the review of what you '
+            'minted while working, against what you actually did: the method the next worker finds with `playbook '
+            'search`, naming the widgets it should install. Where you minted nothing yet, mint it now. '+library+skill+paid+
+            ' Every procedure you touched must pass `playbook validate <id>` (fix it if it does not); then reply with the '
+            'procedure ids (comma separated) and nothing else.\n')
 
 
 def client_for(spec: dict[str, Any], observer: Any, config: dict[str, Any] | None = None) -> ModelClient:
