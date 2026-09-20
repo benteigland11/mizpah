@@ -88,6 +88,8 @@ def chat_to_responses(payload: dict[str, Any], *, store: bool = False, stream: b
         if key in ("messages", "model", "tools", "tool_choice", "response_format", "stream", "store", "reasoning_effort"):
             continue
         if key in RENAMED_FIELDS:
+            if RENAMED_FIELDS[key] == "max_output_tokens" and isinstance(value, (int, float)) and value <= 0:
+                continue   # llama.cpp's -1 means unlimited; the Responses API has no such value, so the limit is omitted
             body[RENAMED_FIELDS[key]] = value
         elif key in PASSTHROUGH_FIELDS:
             body[key] = value

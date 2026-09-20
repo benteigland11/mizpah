@@ -204,7 +204,7 @@ def cmd_add_local(args: argparse.Namespace) -> int:
     status = session.status()
     status['api_base_url'] = session.profile.api_base_url
     status['custom'] = True
-    _emit(dict(event='added', **status))
+    _emit(dict(event='added', kind=profile['local_kind'], **status))
     return 0
 
 
@@ -279,8 +279,8 @@ def main(argv: list[str] | None = None) -> int:
     add_local = commands.add_parser('add-local', help='add a server on this machine as a provider')
     add_local.add_argument('name', help='short id, e.g. my_llama')
     add_local.add_argument('--base-url', required=True)
-    add_local.add_argument('--kind', choices=('llama', 'openai'), default='openai',
-                           help='llama: llama.cpp server with exact /tokenize counting; openai: any /v1/chat/completions server')
+    add_local.add_argument('--kind', choices=('auto', 'llama', 'openai'), default='auto',
+                           help='auto asks the server; llama: llama.cpp with exact /tokenize counting; openai: any /v1/chat/completions server')
     add_local.add_argument('--display-name', default=None)
     add_local.set_defaults(run=cmd_add_local)
     remove = commands.add_parser('remove', help='remove a provider you added'); remove.add_argument('provider')

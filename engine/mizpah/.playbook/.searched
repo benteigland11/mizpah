@@ -849,3 +849,11 @@ Validate token roles, dark scheme, and colour-literal confinement
 brand colour system tokens color custom dark defines literal missing named occurs
 brand tokens css defines the role named colour system as custom properties on  root with a prefers color scheme  dark override and no missing required role 
 no colour literal used by the colour system occurs outside brand tokens css 
+Write the home page copy and verify its required content
+copy home content contain evidence json sentence what word zero appears banned
+ copy home md  must be under 350 words  agreeing with known  home word count  
+ copy home md  must carry every fact in  content facts json   so known  home fact count  must equal the number of facts in that file 
+ copy home md  must contain no sentence untraceable to  content product md  or  content name md   so known  home untraced sentence count  must be zero 
+it is not known whether every number in  copy home md  appears as a value in  content evidence json  with its source named 
+ copy home md  must contain no banned word or mark  so known  home banned count  must be zero 
+it is not known whether  copy home md  has  in order  sections for what it is  how it works  the evidence  and how to start 

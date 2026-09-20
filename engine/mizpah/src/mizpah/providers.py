@@ -60,13 +60,42 @@ LOCAL_KINDS = {
 }
 
 
-def local_profile(name: str, base_url: str, kind: str, display_name: str | None = None) -> dict[str, Any]:
-    """A complete no-auth profile for a server on this machine, as config data."""
-    if kind not in LOCAL_KINDS:
-        raise ValueError(f'kind must be one of {sorted(LOCAL_KINDS)}')
+def detect_local_kind(base_url: str, *, timeout_seconds: float = 3.0) -> str | None:
+    """'llama' when the server answers llama.cpp's /tokenize, 'openai' when it answers at all, None when down.
+
+    llama.cpp answers /tokenize (405 for GET is still an answer from that route); Ollama, LM Studio and
+    vLLM have no such route and return 404, which is the tell.
+    """
+    import urllib.error
+    import urllib.request
+    root = base_url.rstrip('/')
+    if root.endswith('/v1'):
+        root = root[:-3]
+    try:
+        with urllib.request.urlopen(root + '/tokenize', timeout=timeout_seconds):
+            return 'llama'
+    except urllib.error.HTTPError as error:
+        return 'openai' if error.code == 404 else 'llama'
+    except OSError:
+        return None
+
+
+def local_profile(name: str, base_url: str, kind: str = 'auto', display_name: str | None = None) -> dict[str, Any]:
+    """A complete no-auth profile for a server on this machine, as config data.
+
+    ``kind`` 'auto' asks the server (see ``detect_local_kind``) and falls back to 'openai' when it is
+    not answering yet; 'llama' or 'openai' force it.
+    """
     if not base_url.startswith(('http://', 'https://')):
         raise ValueError('base url must start with http:// or https://')
-    return dict(name=name, display_name=display_name or name, auth={'kind': 'none'}, api_base_url=base_url.rstrip('/'),
+    if kind == 'auto':
+        kind = detect_local_kind(base_url) or 'openai'
+    if kind not in LOCAL_KINDS:
+        raise ValueError(f'kind must be auto or one of {sorted(LOCAL_KINDS)}')
+    root = base_url.rstrip('/')
+    if kind == 'llama' and root.endswith('/v1'):
+        root = root[:-3]  # tokenize/props live at the server root; the profile adds /v1 to the chat path
+    return dict(name=name, display_name=display_name or name, auth={'kind': 'none'}, api_base_url=root,
                 wire='chat_completions', models=[], reasoning_efforts=[], context_window=None, timeout_seconds=900,
                 local_kind=kind, **LOCAL_KINDS[kind])
 

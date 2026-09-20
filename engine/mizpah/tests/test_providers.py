@@ -215,6 +215,43 @@ def test_added_local_server_follows_reachability_and_use_writes_llama_client(tmp
     assert provider_cli.main(['--config', str(engine), 'remove', 'box']) == 2
 
 
+def test_local_kind_is_detected_from_tokenize(tmp_path: Path, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    import threading
+
+    class LlamaLike(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            self.send_response(200 if self.path.startswith('/tokenize') else 404)
+            self.end_headers()
+            self.wfile.write(b'{"tokens": []}' if self.path.startswith('/tokenize') else b'{}')
+
+        def log_message(self, *args) -> None:
+            return
+
+    server = HTTPServer(('127.0.0.1', 0), LlamaLike)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f'http://127.0.0.1:{server.server_address[1]}'
+    try:
+        assert providers.detect_local_kind(base) == 'llama'
+        assert providers.detect_local_kind(base + '/v1') == 'llama'
+        assert providers.local_profile('x', base + '/v1')['api_base_url'] == base  # llama root, not /v1
+        assert providers.local_profile('x', base)['local_kind'] == 'llama'
+    finally:
+        server.shutdown()
+        server.server_close()
+    openai_server, openai_base = _serve(b'{}', status=404)
+    try:
+        assert providers.detect_local_kind(openai_base) == 'openai'
+        assert providers.local_profile('y', openai_base)['local_kind'] == 'openai'
+    finally:
+        openai_server.shutdown()
+        openai_server.server_close()
+    assert providers.detect_local_kind('http://127.0.0.1:9') is None
+    assert providers.local_profile('z', 'http://127.0.0.1:9')['local_kind'] == 'openai'  # not up yet: the safe default
+    with pytest.raises(ValueError):
+        providers.local_profile('z', 'http://127.0.0.1:9', 'weird')
+
+
 def test_openai_local_kind_goes_through_the_session_transport(tmp_path: Path, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path))
     engine = tmp_path / 'engine.json'

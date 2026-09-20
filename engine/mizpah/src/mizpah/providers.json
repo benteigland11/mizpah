@@ -103,7 +103,10 @@
    "default_reasoning_effort": "high",
    "static_headers": {
     "x-grok-client-version": "0.1.220"
-   }
+   },
+   "unsupported_fields": [
+    "max_output_tokens"
+   ]
   },
   {
    "name": "github_copilot",
