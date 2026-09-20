@@ -145,6 +145,101 @@ def sweep_services(live_roots: list[Path] = ()) -> list[str]:
     return stopped
 
 
+# ---------------------------------------------------------------- leaked processes
+
+LEAK_MARK = 'MIZPAH_LOOP'
+
+
+def mark_loop(root: Path) -> None:
+    """Every process this loop starts inherits the mark, down to a chromium a probe launched three forks
+    deep: the mark is how a leak is traced back to its loop after its parent is gone."""
+    os.environ[LEAK_MARK] = str(root)
+
+
+def _proc(pid: int) -> dict[str, Any] | None:
+    base = Path('/proc')/str(pid)
+    try:
+        environ = (base/'environ').read_bytes().split(b'\0')
+        stat = (base/'stat').read_text()
+        status = (base/'status').read_text()
+    except OSError:
+        return None
+    mark = next((e[len(LEAK_MARK)+1:].decode(errors='replace') for e in environ if e.startswith(LEAK_MARK.encode()+b'=')), None)
+    if mark is None:
+        return None
+    tail = stat[stat.rfind(')')+2:].split()
+    comm = stat[stat.find('(')+1:stat.rfind(')')]
+    ppid = int(tail[1])
+    rss_kb = next((int(line.split()[1]) for line in status.splitlines() if line.startswith('VmRSS:')), 0)
+    try:
+        cmdline = (base/'cmdline').read_bytes().replace(b'\0', b' ').decode(errors='replace').strip()
+    except OSError:
+        cmdline = comm
+    ticks = os.sysconf('SC_CLK_TCK')
+    try:
+        uptime = float(Path('/proc/uptime').read_text().split()[0])
+        age = uptime-int(tail[19])/ticks
+    except (OSError, ValueError, IndexError):
+        age = 0.0
+    return dict(pid=pid, ppid=ppid, comm=comm, cmdline=cmdline[:200], root=mark, rss_mb=round(rss_kb/1024), age_s=round(age))
+
+
+def leaked_processes(root: Path, live_roots: list[Path] = ()) -> list[dict[str, Any]]:
+    """Marked processes whose parent is gone (reparented to PID 1): a probe killed by a timeout or a sandbox
+    teardown leaves its browser behind on the host, and nothing else reaps it. A loop itself (detached by
+    the app, so ppid 1 by design) is never a leak; a leak of another loop still alive is that loop's to reap
+    at its own cycle boundary."""
+    live = {str(Path(r).resolve()) for r in live_roots}
+    mine = str(Path(root).resolve())
+    found = []
+    for entry in Path('/proc').iterdir():
+        if not entry.name.isdigit() or int(entry.name) == os.getpid():
+            continue
+        info = _proc(int(entry.name))
+        if info is None or info['ppid'] != 1 or 'mizpah.loop' in info['cmdline']:
+            continue
+        if info['root'] != mine and info['root'] in live:
+            continue
+        found.append(info)
+    return found
+
+
+def reap_leaks(root: Path, live_roots: list[Path] = (), *, where: str = '') -> list[dict[str, Any]]:
+    """Kill leaked processes (TERM, then KILL) and record each in <root>/leaks.jsonl: the count is a number the
+    report shows, so a widget that keeps things open is seen, not just cleaned up after."""
+    import signal
+    leaks = leaked_processes(root, live_roots)
+    for info in leaks:
+        try:
+            os.kill(info['pid'], signal.SIGTERM)
+        except OSError:
+            pass
+    deadline = time.time()+3
+    for info in leaks:
+        while time.time() < deadline and Path('/proc', str(info['pid'])).exists():
+            time.sleep(0.1)
+        if Path('/proc', str(info['pid'])).exists():
+            try:
+                os.kill(info['pid'], signal.SIGKILL)
+            except OSError:
+                pass
+            info['forced'] = True
+    if leaks:
+        with (Path(root)/'leaks.jsonl').open('a') as handle:
+            for info in leaks:
+                handle.write(json.dumps(dict(at=time.time(), where=where, **info))+'\n')
+    return leaks
+
+
+def leak_summary(root: Path) -> dict[str, Any]:
+    """What the run leaked so far, by command: the report's line and the number a person watches."""
+    rows = _read_jsonl(Path(root)/'leaks.jsonl')
+    by_comm: dict[str, int] = {}
+    for row in rows:
+        by_comm[str(row.get('comm'))] = by_comm.get(str(row.get('comm')), 0)+1
+    return dict(count=len(rows), by_comm=by_comm, rss_mb=sum(int(r.get('rss_mb') or 0) for r in rows))
+
+
 # ---------------------------------------------------------------- notify
 
 def notify(config: dict[str, Any], root: Path, title: str, body: str) -> None:
@@ -181,6 +276,12 @@ def write_report(config: dict[str, Any], project: Path, root: Path, cycles: list
              '', 'engine '+_engine_version()+' · model '+model_label(config['worker'])
              +' · '+str(round((time.time()-started)/3600, 2))+' h · '
              +str(sum(len(c.get('tasks') or []) for c in cycles))+' tasks', '']
+    leaks = leak_summary(root)
+    if leaks['count']:
+        lines.append('**Leaked processes reaped: '+str(leaks['count'])+'** ('
+                     +', '.join(k+' ×'+str(v) for k, v in sorted(leaks['by_comm'].items()))+', '+str(leaks['rss_mb'])
+                     +' MB) — a task left these running on the host after its probe ended; see leaks.jsonl')
+        lines.append('')
     lines.append('## Tasks')
     for cycle in cycles:
         for task in cycle.get('tasks') or []:

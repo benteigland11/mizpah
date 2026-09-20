@@ -84,6 +84,24 @@ def terra_list(config: dict[str, Any], project: Path, *args: str) -> list[dict[s
     return json.loads(text[start:]) if start >= 0 else []
 
 
+def _crew(spec: dict[str, Any]) -> dict[str, Any]:
+    """A role's model, both as the report labels it and as its parts."""
+    gen = spec.get('generation') or {}
+    base_url = (spec.get('endpoint') or {}).get('base_url')
+    model = gen.get('model') or spec.get('model')
+    if not model and base_url:
+        # A local server knows which file it loaded; the config only knows the address.
+        import urllib.request
+        try:
+            with urllib.request.urlopen(base_url.rstrip('/')+'/v1/models', timeout=3) as r:
+                data = (json.load(r).get('data') or [{}])[0].get('id') or ''
+                model = data.rsplit('/', 1)[-1].removesuffix('.gguf') or None
+        except Exception:  # noqa: BLE001 — a crew label never blocks a run
+            model = None
+    return dict(label=ops.model_label(spec), provider=spec.get('provider'), model=model,
+                effort=gen.get('reasoning_effort'), base_url=base_url)
+
+
 def registry_path() -> Path:
     """Every run this machine starts, one line each, wherever its root lives: how a front end finds them."""
     base = Path(os.environ.get('XDG_STATE_HOME') or Path.home()/'.local'/'state')
@@ -228,11 +246,15 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
     stalled_evals = 0
     health = ops.Health(config, root)
     config['mizpah']['run_root'] = str(root)   # the controller's outage wait records health here too
+    ops.mark_loop(root)   # every process under this loop carries the root; a leak is traced back by it
     # The pointer from a session root back to its project, and whether the loop is alive: what a
     # front end needs to find runs on disk without guessing from directory names.
     run_record = dict(project=str(project), root=str(root), pid=os.getpid(), started_at=started,
                       config=str(config.get('harness_config_path', '')), mizpah_config=str(config.get('mizpah_config_path', '')),
-                      ended_at=None, stop=None)
+                      ended_at=None, stop=None,
+                      # who is on the job: how a front end names the controller and the worker
+                      crew=dict(controller=_crew(config.get('controller') or {}),
+                                worker=_crew(config.get('worker') or {})))
     (root/'run.json').write_text(json.dumps(run_record, indent=1))
     _register(run_record)
     # A previous run of this root killed without its finally leaves services running; they are its, so reap them.
@@ -240,6 +262,24 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                                              and (r/'loop.json').exists() and _loop_alive(r)])
     if orphans:
         (root/'services.jsonl').open('a').write(json.dumps(dict(at=time.time(), swept=orphans))+'\n')
+
+    def live_roots() -> list[Path]:
+        return [r for r in Path(root).parent.glob('*') if r.is_dir() and r != root and (r/'loop.json').exists() and _loop_alive(r)]
+
+    def reap(where: str) -> list[dict[str, Any]]:
+        # Processes a task left behind on the host (a probe's browser outliving a killed probe) are killed at
+        # every boundary and counted: a widget that keeps things open shows up as a number, not as lost RAM.
+        try:
+            leaks = ops.reap_leaks(root, live_roots(), where=where)
+        except Exception as error:  # noqa: BLE001 — reaping never ends the run
+            with log.open('a') as handle:
+                handle.write(json.dumps(dict(at=time.time(), where='reap', error=str(error)[:300]))+'\n')
+            return []
+        if leaks:
+            print('reaped '+str(len(leaks))+' leaked process(es) after '+where+': '
+                  +', '.join(l['comm']+' pid '+str(l['pid'])+' '+str(l['rss_mb'])+' MB' for l in leaks[:6]), flush=True)
+        return leaks
+    reap('start')
     # SIGTERM (a plain `kill`) should still run the finally blocks that stop services and write the report.
     import signal
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
@@ -302,6 +342,9 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                 errors = 0
                 record['tasks'].append({k: result[k] for k in ('task', 'unknown', 'unknowns', 'verdict', 'blocked_reason', 'turns',
                                                                'resumed', 'checkins', 'held_guidance', 'problems', 'playbook', 'widgets')})
+                leaked = reap(task['id'])
+                if leaked:
+                    record['tasks'][-1]['leaked'] = [dict(comm=l['comm'], rss_mb=l['rss_mb'], age_s=l['age_s']) for l in leaked]
                 if result['verdict'] == 'stopped':
                     stop = 'stopped_by_operator'
                     break
@@ -382,6 +425,7 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
         # SIGTERM or Ctrl-C: the task's session paused where it was (it reopens there); services stopped in
         # run_task's finally; the report says so.
         stop = 'interrupted'
+    reap('end')
     report(stop)
     try:
         briefs.record(config, project, stop, cycles)   # the controller's library grows by one finished run
@@ -391,7 +435,7 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
     if stop not in ('nothing_owed', 'max_cycles', 'max_tasks'):
         ops.notify(config, root, project.name+' stopped: '+stop,
                    str(tasks_run)+' tasks in '+str(round((time.time()-started)/3600, 2))+' h; report at '+str(root/'report.md'))
-    result = dict(stop=stop, cycles=cycles, tasks_run=tasks_run, hours=round((time.time()-started)/3600, 2),
+    result = dict(stop=stop, cycles=cycles, tasks_run=tasks_run, hours=round((time.time()-started)/3600, 2), leaks=ops.leak_summary(root),
                   blocked=[dict(id=t['id'], reason=t.get('blocked_reason')) for t in blocked(config, project)],
                   open_proposals=terra(config, project, 'brief', 'show').get('open_proposals'))
     (root/'loop.json').write_text(json.dumps(result, indent=1))
