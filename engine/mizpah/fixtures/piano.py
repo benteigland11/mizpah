@@ -190,9 +190,9 @@ def voicing_touch() -> Path:
         'Perform a given 8-bar chord sequence so the top voice sings: the melody note of each chord louder than '
         'the rest, the left hand under it, legato in the melody and a detached final bar, rendered.',
         needs=[
-            '8 bars in 4/4 in a stated major key, the progression I V vi iii IV I IV V then I, two chords per bar '
-            'as four-note voicings (two notes per hand), `piece.mid` program 0, the top note of each chord forming '
-            'a stepwise melody.',
+            '8 bars in 4/4 in a stated major key, two chords per bar as four-note voicings (two notes per hand), '
+            'the 16-chord progression I V vi iii IV I IV V | I V vi iii IV I V I (bar by bar, two per bar), '
+            '`piece.mid` program 0, the top note of each chord forming a stepwise melody.',
             'Voicing: in every chord the top note is at least 12 velocity louder than each other note of the '
             'chord, and the left-hand notes are at least 8 softer than the right-hand inner voice.',
             'Touch: in bars 1-7 each melody note overlaps the next by 20-60 ms (legato); in bar 8 every note ends '
