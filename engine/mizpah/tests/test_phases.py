@@ -477,10 +477,15 @@ def test_a_builder_naming_a_deliverable_file_gets_its_cite_inferred(project: Pat
 
 def test_a_false_artifact_reading_is_routed_again_by_id(project: Path) -> None:
     observation = controller.observe(CONFIG, project)
-    accepted, _ = controller.guard(dict(unknowns=[dict(id='survey_matches', cites='deliverable:1', type='boolean', creates='report/survey.md',
-                                                        claim='report/survey.md states line_count', evidence_needed='compare')],
-                                        tasks=[dict(id='write', unknowns=['survey_matches'], bucket='low', title='write')]), observation, project)
+    accepted, refusals = controller.guard(dict(unknowns=[
+        dict(id='line_count', cites='need:1', type='number', claim='lines', evidence_needed='wc'),
+        dict(id='survey_matches', cites='deliverable:1', type='boolean', creates='report/survey.md',
+             claim='report/survey.md states line_count', evidence_needed='compare')],
+        tasks=[dict(id='count', unknowns=['line_count'], bucket='low', title='count'),
+               dict(id='write', unknowns=['survey_matches'], bucket='low', title='write', deps=['count'])]), observation, project)
+    assert {t['id'] for t in accepted['tasks']} == {'count', 'write'}, refusals
     controller.apply(CONFIG, project, accepted)
+    terra(project, 'route', 'cancel', 'count', '--reason', 'test')
     terra(project, 'route', 'cancel', 'write', '--reason', 'test')
     observation = controller.observe(CONFIG, project)
     observation['unknowns'] = [dict(u, status='resolved') if u['id'] == 'survey_matches' else u for u in observation['unknowns']]
