@@ -493,25 +493,44 @@ class FocusedSession:
     def _wal(self) -> Path:
         return self.root/'events'/'checkpoint.wal.json'
 
-    def _save(self) -> None:
-        """Commit, then a one-line journal record. The store's commit is atomic on its own (sqlite's
+    def _save(self, *, commit: bool = True) -> None:
+        """Commit, then a one-line journal record; or with ``commit=False`` only note that the state moved,
+        for a boundary inside a turn. The store is written where the never-replay rule needs a copy: before
+        each model call and before each shell command (an outcome that never lands is then a pending
+        operation, uncertain, never redone on its own), at the end of a turn, and on every operator action.
+        The boundaries between — a response whose tool calls are about to run, a tool outcome with more of
+        the batch to go, a handoff's bookkeeping — ride on the next commit. A turn with one tool call is
+        three writes of the state instead of four; a handoff, one instead of four.
+
+        Commit, then a one-line journal record. The store's commit is atomic on its own (sqlite's
         rollback journal), so the state is written once per save: journalling the whole state every turn
         cost 278 KB a turn (182 MB on one 172-turn task), the store kept every revision besides (176 MB
         more), and a write-ahead copy of each commit doubled the bytes again (1.3 MB written per 240 KB
         checkpoint with the VACUUM the prune ran) — for a recovery that only ever needs the newest copy.
         A save interrupted mid-commit resumes from the previous revision; a write-ahead file left by an
         earlier harness is still honoured on restore."""
+        if not commit:
+            self._dirty = True
+            return
+        self._dirty = False
         self.state['session'] = self.session.export_state()
         self.state['controller_progress'] = self.progress.export_state()
         snapshot = deepcopy(self.state)
         digest = _state_digest(snapshot)
         committed = self.store.commit(self.revision, lambda _: dict(checkpoint=digest, state=snapshot))
         self.revision = committed['revision']
+        self._committed_workspace = snapshot.get('workspace')
         self.journal.append(session_id='session', event_type='checkpoint',
             payload=dict(revision=self.revision, state_sha256=digest))
         self.store.prune(self.revisions_kept)
 
+    def _flush(self) -> None:
+        """Commit what deferred saves left in memory, at a boundary the session may be left on."""
+        if getattr(self, '_dirty', False):
+            self._save()
+
     def _restore(self) -> None:
+        self._dirty = False
         saved = self.store.read()
         checkpoints = [event for event in self.journal.read_strict('session') if event.event_type == 'checkpoint']
         wal = None
@@ -549,6 +568,7 @@ class FocusedSession:
             raise ValueError('Revision store differs from its journal')
         self.revision = saved['revision']
         self.state = deepcopy(saved['data']['state'])
+        self._committed_workspace = self.state.get('workspace')
         if self.state['schema'] != 2:
             raise ValueError('Legacy session requires its original harness; start a new document-based session')
         self.settings = _settings(self.state['settings'])
@@ -745,7 +765,9 @@ class FocusedSession:
             self.state['final_text'] = self.state['proposed_final']
         # Snapshots the saved state no longer references are history nobody reads; a full /work tarball
         # per turn (5 MB with a few widgets in cg/) filled a RAM-backed scratch disk in an afternoon.
-        keep = {self.state['workspace']}
+        # The committed state may still point at the one before (its save is deferred to the next
+        # commit), and a restore needs it: keep both.
+        keep = {self.state['workspace'], getattr(self, '_committed_workspace', None)}
         for path in (self.root/'workspaces').glob('*.sqlite3'):
             if path.stem not in keep:
                 path.unlink(missing_ok=True)
@@ -759,14 +781,14 @@ class FocusedSession:
             self.state['rollover_requested'] = None
             self.state['recent_calls'] = []
             self.state['phase'] = 'handoff'
-            self._save()
+            self._save(commit=False)
             return
         if self.session.needs_rollover(count):
             # A just-reset window must leave room for actual work.
             if self.session.window_index and len(self.session.messages) <= len(self.session.base_messages)+1:
                 raise ContextCapacityExceeded('The resumed context is already above the rollover threshold')
             self.state['phase'] = 'handoff'
-            self._save()
+            self._save(commit=False)
             return
         incoming = self._incoming()
         response = self._complete(self.worker, payload, 'worker', self.settings.session_policy.context_capacity, count,
@@ -788,7 +810,7 @@ class FocusedSession:
             self.state['phase'] = 'tools'
         else:
             self._finish_turn()
-        self._save()
+        self._save(commit=self.state['phase'] != 'tools')   # a response with tool calls is committed with its first tool
 
     def _tool(self) -> None:
         turn = self.state['active_turn']
@@ -1014,7 +1036,7 @@ class FocusedSession:
         self.state['pending_io'] = None
         if not self.session.pending_tools:
             self._finish_turn()
-        self._save()
+        self._save(commit=not self.session.pending_tools)   # the turn ends with its last tool; the ones before ride on the next tool's commit
 
     def _handoff(self) -> None:
         policy = self.settings.session_policy
@@ -1036,7 +1058,7 @@ class FocusedSession:
         self.state['workspace'] = self._put_workspace(workspace)
         self._event('worker_history_archive', dict(window_index=self.session.window_index,
             archive=source_archive, sha256=digest))
-        self._save()
+        self._save(commit=False)
         archive_message = dict(role='user', content=
             'Your complete original history for this window is saved in your workspace at '+source_archive+'. '
             'Use it when a needed detail is absent from your own handoff or retained results. '
@@ -1076,7 +1098,7 @@ class FocusedSession:
         self._event('worker_handoff', transition)
         self.state.update(phase='worker', pending_io=None, input_cursor=0, handoffs=self.state['handoffs']+1)
         self.state.get('generation_rejections', {}).pop('worker', None)   # a fresh window gets a fresh retry budget
-        self._save()
+        self._save(commit=False)
 
     def _focus_files(self) -> dict[str, str]:
         """Bounded content of the workspace files the settings mark as decisive for review."""
@@ -1429,6 +1451,7 @@ class FocusedSession:
         with self._locked():
             if self.store.read()['revision'] != self.revision:
                 raise RuntimeError('Session changed; reopen before pruning')
+            self._flush()
             keep = {self.state['workspace']}
             removed = 0
             for path in (self.root/'workspaces').glob('*.sqlite3'):
@@ -1641,7 +1664,15 @@ class FocusedSession:
         self._save()
 
     def step(self) -> dict[str, Any]:
-        """Perform one persisted boundary; never replay an uncertain operation."""
+        """Perform one boundary and persist it; never replay an uncertain operation."""
+        status = self._step()
+        with self._locked():
+            self._flush()
+        return status
+
+    def _step(self) -> dict[str, Any]:
+        """One boundary, committed only where recovery needs it (see `_save`); `run` drives this and
+        flushes where it leaves the session."""
         with self._locked():
             if self.store.read()['revision'] != self.revision:
                 raise RuntimeError('Session changed; reopen before continuing')
@@ -1675,6 +1706,8 @@ class FocusedSession:
                 # Discard partial in-memory mutations as well as on process restart.
                 self._restore()
                 raise
+            if self.state['phase'] == 'complete' or self.state.get('blocked_reason'):
+                self._flush()
             return self.status()
 
     def run(self, *, maximum_worker_turns: int | None = None, stop_when: Any = None) -> dict[str, Any]:
@@ -1689,11 +1722,17 @@ class FocusedSession:
         while self.state['phase'] != 'complete':
             if (maximum_worker_turns is not None and self.progress.turns-initial >= maximum_worker_turns
                     and self.state['phase'] == 'worker'):
+                with self._locked():
+                    self._flush()
                 return self.status() | dict(status='paused')
             if stop_when is not None and self.state['phase'] == 'worker' and self.state.get('pending_io') is None and stop_when():
-                self._event('stopped', dict(turns=self.progress.turns))
+                with self._locked():
+                    self._event('stopped', dict(turns=self.progress.turns))
+                    self._flush()
                 return self.status() | dict(status='stopped')
-            self.step()
+            self._step()
+        with self._locked():
+            self._flush()
         return self.status()
 
     def status(self) -> dict[str, Any]:
