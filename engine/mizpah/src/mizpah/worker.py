@@ -846,6 +846,7 @@ def duplicate_reading_problems(project: Path, unknown_ids: list[str]) -> list[st
     re-measurement reruns the same probe and reproduces it, so the gate has to notice the coincidence itself.
     Integers and round values are exempt (counts and booleans coincide honestly)."""
     values: dict[str, list[str]] = {}
+    inputs: dict[str, dict[str, Any]] = {}
     for uid in unknown_ids:
         known = read_known(project, uid)
         if not known or (known.get('stats') or {}).get('kind') != 'number':
@@ -854,13 +855,40 @@ def duplicate_reading_problems(project: Path, unknown_ids: list[str]) -> list[st
         if not isinstance(value, float) or value == int(value) or round(value, 2) == value:
             continue
         values.setdefault(repr(value), []).append(uid)
+        inputs[uid] = run_inputs(project, known)
     problems = []
     for value, ids in values.items():
-        if len(ids) > 1:
-            problems.append(', '.join(ids)+' all read exactly '+value+': different quantities do not agree to every digit — '
-                            'each probe is reading the same computation (the same pair, the same scheme, the same file). '
-                            'Give each its own inputs and re-take them; void the runs that repeat')
+        if len(ids) < 2:
+            continue
+        # Two contrasts of the same fill against white agree to every digit honestly (logo_mark7: both #19324a). The
+        # record shows why only when each probe declares the input it read (a known: binding) and the bound values
+        # coincide; an unexplained coincidence is still the same computation read twice.
+        explained = all(inputs[i] for i in ids) and len({json.dumps(inputs[i], sort_keys=True) for i in ids}) == 1
+        if explained:
+            continue
+        problems.append(', '.join(ids)+' all read exactly '+value+': different quantities do not agree to every digit — '
+                        'each probe is reading the same computation (the same pair, the same scheme, the same file). '
+                        'Give each its own inputs and re-take them; void the runs that repeat. If they truly share an input '
+                        '(the same fill, the same file), make that input a known and declare it on both probes (probe init '
+                        '--input name=known:<id>) so the record shows why they agree')
     return problems
+
+
+def run_inputs(project: Path, known: dict[str, Any]) -> dict[str, Any]:
+    """The input snapshot of the known's primary run: what the probe declared it read from the map (empty when
+    the probe declared nothing)."""
+    run_id = str(known.get('primary_run_id') or next(iter(known.get('run_ids') or []), ''))
+    if not run_id:
+        return {}
+    for base in [project/'.terra'/'map'/'runs']+sorted((project/'.terra'/'map'/'sessions').glob('*/runs')):
+        meta = base/run_id/'meta.json'
+        if meta.exists():
+            try:
+                doc = json.loads(meta.read_text())
+            except ValueError:
+                return {}
+            return dict(doc.get('inputs') or {}) if doc.get('input_bindings') else {}
+    return {}
 
 
 def vacuous_truth_problems(project: Path, unknown_ids: list[str]) -> list[str]:
