@@ -121,6 +121,12 @@ def read_looks(project: Path, paths: list[Any], looked: dict[str, str]) -> list[
     return refused
 
 
+def unknown_created(unknown: dict[str, Any]) -> str | None:
+    """The file an unknown's task creates, from the notes Terra keeps (`creates X`)."""
+    m = re.search(r'creates ([\w./-]+)', str(unknown.get('notes') or ''))
+    return m.group(1) if m else None
+
+
 def observe(config: dict[str, Any], project: Path) -> dict[str, Any]:
     """Everything the controller reads, bounded: the brief and a digest of the map and route."""
     brief = terra(config, project, 'brief', 'show')
@@ -869,8 +875,16 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             for kind, index in re.findall(r'cites (need|deliverable):(\d+)', notes):
                 entries = brief_entries[kind]
                 text += ' '+(entries[int(index)-1] if 0 < int(index) <= len(entries) else '')
-            return project is not None and any(source_exists(project, f) or any(True for _ in project.glob('**/'+f))
-                                               for f in re.findall(r'[\w./-]+\.[A-Za-z0-9]+', text))
+            named = re.findall(r'[\w./-]+\.[A-Za-z0-9]+', text)
+            if project is not None and any(source_exists(project, f) or any(True for _ in project.glob('**/'+f)) for f in named):
+                return True
+            # Nothing named: the reading is about what the project makes when the project makes anything (the
+            # benchmark's phrase_structure_valid — "phrases of 4 or 8 bars" — is about piece.mid without saying so,
+            # 2026-09-20). Only a reading whose named source is a file no task creates is about given data.
+            made = {str(unknown_created(x)).lower() for x in observation['unknowns'] if unknown_created(x)}
+            if named and not any(f.lower() in made for f in named):
+                return False
+            return bool(made)
         # A boolean that reads false about a file the project makes is a reading the file must be changed to pass,
         # and a task on its own id is the repair: the reading is reopened and taken again after. (A false reading
         # about given data is the brief being wrong — a proposal, not a task — and stays refused.)
