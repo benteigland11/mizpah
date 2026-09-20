@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../cg/layered_ledger_graph/layered_ledger_graph.dart';
 import '../../models/databook.dart';
 import '../../state/databook_manager.dart';
 import '../../theme/app_theme.dart';
@@ -40,8 +41,6 @@ class DataBookScreen extends StatelessWidget {
             ),
           );
         }
-        final needs = book.entries.where((e) => e.kind == 'need').toList();
-        final dels = book.entries.where((e) => e.kind == 'deliverable').toList();
         return SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(40, 28, 40, 48),
           child: Center(
@@ -76,26 +75,19 @@ class DataBookScreen extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: Sp.xl),
-                  const _ColumnHeads(),
-                  if (manager.view == 'map')
-                    for (final m in book.maps) _MapSection(node: m)
-                  else if (needs.isNotEmpty) ...[
-                    const _GroupHead('NEEDS'),
-                    for (final e in needs)
-                      _Row(
-                        entry: e,
-                        open: manager.open == (e.kind, e.index),
-                        onTap: () => manager.toggle(e),
-                      ),
-                  ],
-                  if (manager.view != 'map' && dels.isNotEmpty) ...[
-                    const _GroupHead('DELIVERABLES'),
-                    for (final e in dels)
-                      _Row(
-                        entry: e,
-                        open: manager.open == (e.kind, e.index),
-                        onTap: () => manager.toggle(e),
-                      ),
+                  if (manager.view == 'map') ...[
+                    const _ColumnHeads(),
+                    for (final m in book.maps) _MapSection(node: m),
+                  ] else ...[
+                    _Graph(
+                      book: book,
+                      selected: manager.selectedNode,
+                      onSelect: manager.selectNode,
+                    ),
+                    if (manager.selectedEntry(book) case final e?) ...[
+                      const SizedBox(height: Sp.l),
+                      _Row(entry: e, open: true, onTap: () => manager.selectNode(null)),
+                    ],
                   ],
                   if (manager.view != 'map' && book.orphans.isNotEmpty) ...[
                     const _GroupHead('KNOWN, UNCITED'),
@@ -123,8 +115,7 @@ class DataBookScreen extends StatelessWidget {
 }
 
 /// Column widths, shared by the head and every row so the rules line up.
-const _wIndex = 36.0, _wValue = 150.0, _wUnit = 90.0, _wType = 76.0;
-const _wN = 40.0, _wConf = 56.0, _wMethod = 190.0;
+const _wIndex = 36.0, _wValue = 190.0, _wN = 48.0, _wConf = 56.0;
 
 /// BY BRIEF · BY MAP, the selected one underlined in the accent.
 class _ViewToggle extends StatelessWidget {
@@ -159,7 +150,7 @@ class _ViewToggle extends StatelessWidget {
         ),
       );
     }
-    return Row(children: [one('brief', 'BY BRIEF'), one('map', 'BY MAP')]);
+    return Row(children: [one('graph', 'THREADS'), one('map', 'BY MAP')]);
   }
 }
 
@@ -261,12 +252,9 @@ class _ColumnHeads extends StatelessWidget {
           Expanded(child: Text('ITEM', style: k)),
           h('VALUE', _wValue, a: TextAlign.right),
           const SizedBox(width: Sp.m),
-          h('UNIT', _wUnit),
-          h('TYPE', _wType),
           h('N', _wN, a: TextAlign.right),
           const SizedBox(width: Sp.m),
           h('CONF', _wConf),
-          h('METHOD', _wMethod),
         ],
       ),
     );
@@ -328,7 +316,9 @@ class _Cells extends StatelessWidget {
             if (k != null) ...[
               // A false boolean is the row a person acts on: the artifact
               // exists and fails its need.
-              c(k.value, _wValue,
+              // The state of the number: value (with its unit), how many
+              // readings, how sure. Method and runs live in the report.
+              c(k.unit.isEmpty ? k.value : '${k.value} ${k.unit}', _wValue,
                   s: mono.copyWith(
                     fontWeight: FontWeight.w700,
                     fontSize: 14,
@@ -338,15 +328,12 @@ class _Cells extends StatelessWidget {
                   ),
                   a: TextAlign.right),
               const SizedBox(width: Sp.m),
-              c(k.unit, _wUnit),
-              c(k.type, _wType),
-              c('${k.n}', _wN, a: TextAlign.right),
+              c('n ${k.n}', _wN, a: TextAlign.right),
               const SizedBox(width: Sp.m),
               c(k.confidence, _wConf),
-              c(k.probes.join(', '), _wMethod, s: dimMono.copyWith(fontSize: 12)),
             ] else if (stamp != null)
               SizedBox(
-                width: _wValue + Sp.m + _wUnit + _wType + _wN + Sp.m + _wConf + _wMethod,
+                width: _wValue + Sp.m + _wN + Sp.m + _wConf,
                 child: Align(alignment: Alignment.centerLeft, child: stamp),
               ),
           ],
@@ -494,6 +481,88 @@ class _Report extends StatelessWidget {
               child: Text('No unknown cites this entry yet.', style: body),
             ),
         ],
+      ),
+    );
+  }
+}
+
+
+/// The map as threads: brief entries on the left, the readings that
+/// answer them in the middle, the work orders (task maps) that took them
+/// on the right. Colour is state — met, false, open, uncovered — and the
+/// value sits on the reading. Tap anything to follow its threads.
+class _Graph extends StatelessWidget {
+  const _Graph({required this.book, required this.selected, required this.onSelect});
+  final DataBook book;
+  final String? selected;
+  final ValueChanged<String?> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final ink = AppTheme.ink(context);
+    const met = 0, failed = 1, open = 2, uncovered = 3, order = 4;
+    final nodes = <LedgerNode>[];
+    final edges = <LedgerEdge>[];
+    final seenKnown = <String>{};
+    for (final e in book.entries) {
+      final id = '${e.kind}:${e.index}';
+      final tone = switch (e.state) { 'false' => failed, 'answered' => met, 'open' => open, _ => uncovered };
+      nodes.add(LedgerNode(
+        id: id,
+        layer: 0,
+        label: '${e.kind == 'need' ? 'N' : 'D'}${e.index}  ${e.text}',
+        tone: tone,
+        weight: 1.4,
+      ));
+      for (final k in e.answers) {
+        if (seenKnown.add(k.id)) {
+          final bad = k.type == 'boolean' && k.value == 'false';
+          nodes.add(LedgerNode(
+            id: 'k:${k.id}',
+            layer: 1,
+            label: k.id,
+            detail: '${k.unit.isEmpty ? k.value : '${k.value} ${k.unit}'} · n ${k.n} · ${k.confidence}',
+            tone: bad ? failed : met,
+          ));
+          if (k.adoptedFrom != null) {
+            nodes.add(LedgerNode(id: 'm:${k.adoptedFrom}', layer: 2, label: k.adoptedFrom!, tone: order));
+            edges.add(LedgerEdge(from: 'k:${k.id}', to: 'm:${k.adoptedFrom}', tone: bad ? failed : 0));
+          }
+        }
+        edges.add(LedgerEdge(from: id, to: 'k:${k.id}', tone: k.type == 'boolean' && k.value == 'false' ? failed : 0));
+      }
+      for (final u in e.open) {
+        nodes.add(LedgerNode(id: 'u:${u.id}', layer: 1, label: u.id, detail: u.status.toUpperCase(), tone: open));
+        edges.add(LedgerEdge(from: id, to: 'u:${u.id}', tone: open, dashed: true));
+      }
+    }
+    // One node per task map, whichever known first named it.
+    final unique = <String, LedgerNode>{};
+    for (final n in nodes) {
+      unique.putIfAbsent(n.id, () => n);
+    }
+    final style = LedgerGraphStyle(
+      tones: [ink, AppTheme.removed(context), cs.primary, cs.outline, cs.onSurfaceVariant],
+      labelStyle: theme.textTheme.bodyMedium!.copyWith(fontSize: 13, color: ink, height: 1.25),
+      detailStyle: AppTheme.mono.copyWith(fontSize: 11.5, color: cs.onSurfaceVariant),
+      headingStyle: opsLabelStyle(context),
+      edgeColor: cs.outline,
+      nodeFill: cs.surface,
+      nodeBorder: cs.outlineVariant,
+      nodeWidth: 250,
+      layerGap: 70,
+    );
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: LayeredLedgerGraph(
+        nodes: unique.values.toList(),
+        edges: edges,
+        headings: const ['BRIEF', 'READINGS', 'WORK ORDERS'],
+        style: style,
+        selected: selected,
+        onSelect: onSelect,
       ),
     );
   }
