@@ -101,6 +101,11 @@ def apply(config: dict[str, Any], name: str) -> dict[str, Any]:
     if venv.is_dir():
         env['PATH'] = ':'.join(p for p in [str(venv), env.get('PATH', '')] if p)
         env['VIRTUAL_ENV'] = str(Path(root)/'venv')
+        # Terra runs a probe with the engine's own interpreter, not the `python` on PATH: the base's packages
+        # must reach it too, or a probe that imports what the shell can (mido) fails (attempt 2, 2026-09-20).
+        sites = sorted((Path(root)/'venv'/'lib').glob('python3*/site-packages'))
+        if sites:
+            env['PYTHONPATH'] = ':'.join([str(sites[-1])]+([env['PYTHONPATH']] if env.get('PYTHONPATH') else []))
     for key, value in base['env'].items():
         env[key] = value.replace('$BASE', root)
     env['MIZPAH_BASE'] = root

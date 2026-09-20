@@ -52,6 +52,9 @@ def test_a_base_is_created_listed_and_applied_to_a_sandbox_config(data_home: Pat
     assert sandbox['environment']['PATH'] == str(folder/'venv'/'bin')+':/x/bin:/usr/bin'
     assert sandbox['environment']['SOUNDFONT'] == str(folder/'soundfonts'/'gm.sf2')
     assert sandbox['environment']['MIZPAH_BASE'] == str(folder)
+    (folder/'venv'/'lib'/'python3.12'/'site-packages').mkdir(parents=True)
+    bases.apply(config, 'orchestra')
+    assert config['mizpah']['sandbox']['environment']['PYTHONPATH'] == str(folder/'venv'/'lib'/'python3.12'/'site-packages')
     text = bases.enabler_text(config)
     assert 'base "orchestra"' in text and 'a synth and a soundfont' in text and 'read-only' in text
     assert bases.enabler_text({'mizpah': {}}) == ''
