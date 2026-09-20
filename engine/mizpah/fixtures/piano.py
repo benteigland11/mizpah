@@ -3,6 +3,9 @@
 Usage: python -m fixtures.piano make benchmark [attempt]|melody_bass|voice_leading|pedal_dynamics|rubato_phrase|nocturne_lh|voicing_touch
        python -m fixtures.piano score <project_dir>            readings off the MIDI the gym produced
 
+Practice gyms ask for piece.mid and notes.md only: the render pipeline (mp3, pdf) is a skill the library holds green,
+and re-drilling it cost a third to a half of every gym's turns (2026-09-20). The benchmark keeps the full set.
+
 The regime: the benchmark ("compose and perform a romantic piano piece, 90 s") runs cold, then again after each
 block of practice, its text never edited; the curve is turns, stops and the readings. Two blocks: the mechanics
 of playing (pedal and dynamics, rubato, voicing and touch), then composing (a melody over a left-hand figure,
@@ -102,9 +105,8 @@ def melody_bass() -> Path:
             'ending on the tonic).',
             'Performed: the melody is louder than the accompaniment by at least 15 velocity on average; each phrase '
             'has a velocity arc (rises then falls); the final bar has a ritardando of at least 10%.',
-            RENDER,
         ],
-        deliverables=['piece.mid', 'piece.mp3', 'piece.pdf', 'notes.md: the chord plan by bar and the phrase plan'],
+        deliverables=['piece.mid', 'notes.md: the chord plan by bar and the phrase plan'],
         budget=60, non_goals=NON_GOALS)
 
 
@@ -122,9 +124,8 @@ def voice_leading() -> Path:
             'two-hand span rule ('+PLAYABLE.split(': ', 1)[1]+')',
             'Performed: pedal changes on every chord change; the soprano is the loudest voice on average; the '
             'final cadence has a ritardando of at least 15%.',
-            RENDER,
         ],
-        deliverables=['piece.mid', 'piece.mp3', 'piece.pdf', 'notes.md: the roman-numeral plan and how each rule was checked'],
+        deliverables=['piece.mid', 'notes.md: the roman-numeral plan and how each rule was checked'],
         budget=60, non_goals=NON_GOALS)
 
 
@@ -141,9 +142,8 @@ def pedal_dynamics() -> Path:
             'Dynamics: velocities rise steadily over bars 1-4 (each bar louder than the last by at least 6), fall '
             'over bars 5-8 the same way, and the final bar is the softest.',
             'Timing: bars 1-8 at a steady tempo within 2%; the final bar at least 20% slower.',
-            RENDER,
         ],
-        deliverables=['piece.mid', 'piece.mp3', 'notes.md: the velocity and pedal plan per bar'],
+        deliverables=['piece.mid', 'notes.md: the velocity and pedal plan per bar'],
         budget=50, non_goals=NON_GOALS)
 
 
@@ -160,9 +160,8 @@ def rubato_phrase() -> Path:
             'Velocity: rises to its maximum at the highest note and falls to its minimum on the last note; the '
             'span is at least 30.',
             'The accompaniment never exceeds the melody in velocity in any bar.',
-            RENDER,
         ],
-        deliverables=['piece.mid', 'piece.mp3', 'piece.pdf', 'notes.md: the timing map (bar, beat, stretch) and the velocity arc'],
+        deliverables=['piece.mid', 'notes.md: the timing map (bar, beat, stretch) and the velocity arc'],
         budget=50, non_goals=NON_GOALS)
 
 
@@ -178,9 +177,9 @@ def nocturne_lh() -> Path:
             'otherwise moves in longer values; it stays above the left hand at every onset.',
             'Pedal changes with each harmony (at least twice per bar); the left-hand figure is at least 10 velocity '
             'softer than the melody on average.',
-            PLAYABLE, RENDER,
+            PLAYABLE,
         ],
-        deliverables=['piece.mid', 'piece.mp3', 'piece.pdf', 'notes.md: the harmony by bar and the figure\'s voicing'],
+        deliverables=['piece.mid', 'notes.md: the harmony by bar and the figure\'s voicing'],
         budget=60, non_goals=NON_GOALS)
 
 
@@ -198,9 +197,8 @@ def voicing_touch() -> Path:
             'Touch: in bars 1-7 each melody note overlaps the next by 20-60 ms (legato); in bar 8 every note ends '
             'at least 80 ms before the next begins (detached); the final chord is held for its full length.',
             'Pedal changes with every chord; the last bar has a ritardando of at least 15%.',
-            RENDER,
         ],
-        deliverables=['piece.mid', 'piece.mp3', 'notes.md: the voicings by chord and how the velocities were shaped'],
+        deliverables=['piece.mid', 'notes.md: the voicings by chord and how the velocities were shaped'],
         budget=50, non_goals=NON_GOALS)
 
 
