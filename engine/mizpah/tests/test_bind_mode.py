@@ -4,6 +4,7 @@ re-measurement runs detached with the cache read-only. Needs the real sandbox (b
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -162,7 +163,13 @@ def test_pack_workspace_drops_symlinks_that_leave_the_tree(tmp_path: Path) -> No
     (project/'venv-x'/'lib64').symlink_to('lib')
     (project/'src').mkdir()
     (project/'src'/'a.py').write_text('x = 1\n')
+    os.link(project/'src'/'a.py', project/'src'/'a_link.py')   # a hard link, as uv makes site-packages
+    (project/'env2').mkdir()
+    (project/'env2'/'pyvenv.cfg').write_text('home = /usr/bin\n')
+    (project/'env2'/'big.txt').write_text('x'*100)
     data = worker.pack_workspace(project)
     names = {m.name: m for m in tarfile.open(fileobj=io.BytesIO(data), mode='r:')}
     assert 'src/a.py' in names and 'venv-x/lib64' in names and names['venv-x/lib64'].issym()
     assert 'venv-x/bin/python' not in names
+    assert names['src/a_link.py'].isfile() and names['src/a_link.py'].size == 6   # regular, not a link entry
+    assert not any(n.startswith('env2') for n in names)   # a venv by any name is environment, not evidence

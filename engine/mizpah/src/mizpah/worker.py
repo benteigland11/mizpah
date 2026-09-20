@@ -391,14 +391,18 @@ def pack_workspace(project: Path, playbook_store: Path | None = None, *, only: t
     # The project's own sessions (loops, journals, tasks) never travel: they are the host's record, not the
     # worker's workspace, and they are large.
     excluded = tuple(PurePosixPath(e).parts for e in exclude)+((layout.dirname(project), layout.SESSIONS_DIRNAME),)
-    with tarfile.open(fileobj=buffer, mode='w:') as archive:
+    venvs: list[tuple[str, ...]] = []   # any directory holding pyvenv.cfg is an environment, whatever its name
+    with tarfile.open(fileobj=buffer, mode='w:', dereference=False) as archive:
         for path in sorted(project.rglob('*')):
             relative = path.relative_to(project)
             if any(part in PACK_EXCLUDE for part in relative.parts) or relative.parts[0] == PLAYBOOK_PREFIX:
                 continue
             if only and relative.parts[0] not in only:
                 continue
-            if any(tuple(relative.parts[:len(e)]) == e for e in excluded):
+            if any(tuple(relative.parts[:len(e)]) == e for e in excluded+tuple(venvs)):
+                continue
+            if path.is_dir() and not path.is_symlink() and (path/'pyvenv.cfg').exists():
+                venvs.append(tuple(relative.parts))
                 continue
             if path.is_symlink():
                 # A link that leaves the tree (a venv's bin/python -> the base interpreter) cannot travel: the
@@ -406,7 +410,17 @@ def pack_workspace(project: Path, playbook_store: Path | None = None, *, only: t
                 link = os.readlink(path)
                 if os.path.isabs(link) or '..' in link.split('/'):
                     continue
-            if path.is_symlink() or path.is_file() or path.is_dir():
+                archive.add(path, arcname=relative.as_posix(), recursive=False)
+            elif path.is_file():
+                # Stored as an independent regular file even when hard-linked (uv links site-packages from its
+                # cache): tarfile would write a link entry, which the sandbox refuses.
+                info = archive.gettarinfo(str(path), arcname=relative.as_posix())
+                info.type = tarfile.REGTYPE
+                info.linkname = ''
+                info.size = path.stat().st_size   # gettarinfo gives a hard link size 0
+                with path.open('rb') as handle:
+                    archive.addfile(info, handle)
+            elif path.is_dir():
                 archive.add(path, arcname=relative.as_posix(), recursive=False)
         if playbook_store is not None and playbook_store.is_dir():
             # Retired procedures (use it or lose it) do not travel: a worker cannot find what it does not have.
