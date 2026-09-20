@@ -181,6 +181,11 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
     if ledger:
         lines.append('Deliverable files (what must exist before it can be read — route the builder first, readers depend on it):')
         lines += ['  '+line for line in ledger]
+        unbuilt = [line.split(' — ')[0] for line in ledger if line.endswith('NOBODY BUILDS IT YET')]
+        if len(unbuilt) > 1:
+            lines.append('  Several are unbuilt: mint a builder for EACH of them in this reply (one unknown per file, or one '
+                         'unknown per candidate set), not one per eval — each eval you spend on a single file is a worker '
+                         'turn nobody needed.')
     if brief.get('budget_points') is not None:
         lines.append('Budget points: '+str(brief['budget_points']))
     proposals = brief.get('proposals') or []
