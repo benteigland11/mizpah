@@ -375,11 +375,23 @@ def _count(items: Any) -> dict[str, int]:
     return out
 
 
+_REFUSALS_CACHE: dict[str, tuple[tuple[int, int], list[dict[str, Any]]]] = {}
+
+
 def _refusals(root: Path) -> dict[str, list[dict[str, Any]]]:
     """Every tool call a guard refused, per task, from the session journals: rejected shell commands (paths,
-    patterns, oversized arguments) and refused writes to protected records."""
+    patterns, oversized arguments) and refused writes to protected records. Cached per journal by (mtime,
+    size): the report is rebuilt after every task and eval, and re-parsing every finished task's journal each
+    time was gigabytes of JSON per report on a long run."""
     out: dict[str, list[dict[str, Any]]] = {}
     for journal in sorted(root.glob('tasks/*/events/session.jsonl')):
+        stat = journal.stat()
+        stamp = (int(stat.st_mtime), stat.st_size)
+        cached = _REFUSALS_CACHE.get(str(journal))
+        if cached and cached[0] == stamp:
+            if cached[1]:
+                out[journal.parts[-3]] = cached[1]
+            continue
         rows = []
         for line in journal.read_text().splitlines():
             try:
@@ -396,6 +408,7 @@ def _refusals(root: Path) -> dict[str, list[dict[str, Any]]]:
             if guard:
                 reason = detail.split('.')[0].removeprefix('refused: ')[:160] or str(payload.get('code') or status)
                 rows.append(dict(reason=reason, at=event.get('created_at')))
+        _REFUSALS_CACHE[str(journal)] = (stamp, rows)
         if rows:
             out[journal.parts[-3]] = rows
     return out

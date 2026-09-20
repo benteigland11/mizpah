@@ -77,7 +77,7 @@ def checkpoint_retention(root,events,packet_reads,packets):
         for n,text in packets.items()}
     snapshots={}
     for event in events:
-        if event.event_type!='checkpoint': continue
+        if event.event_type!='checkpoint' or 'state' not in event.payload: continue
         state=event.payload['state']; turn=state['controller_progress']['turns']
         if not turn or turn in snapshots or state['active_turn'] is not None: continue
         digest=state['workspace']; assert re.fullmatch('[0-9a-f]{64}',digest)

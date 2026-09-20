@@ -9,6 +9,7 @@ import fcntl
 import fnmatch
 import hashlib
 import json
+import os
 import shlex
 from pathlib import Path
 from typing import Any, Iterator
@@ -162,6 +163,10 @@ class ReviewLimitExceeded(RuntimeError):
 
 class ContextCapacityExceeded(ValueError):
     """The request cannot fit after preserving its fixed inputs and output headroom."""
+
+
+def _state_digest(state: dict[str, Any]) -> str:
+    return hashlib.sha256(json.dumps(state, sort_keys=True, allow_nan=False).encode()).hexdigest()
 
 
 class GenerationRetryExceeded(RuntimeError):
@@ -447,32 +452,69 @@ class FocusedSession:
     def _event(self, kind: str, payload: dict[str, Any]) -> None:
         self.journal.append(session_id='session', event_type=kind, payload=payload)
 
+    # How many committed revisions the session store keeps. Restore reads the newest; the rest were
+    # identical snapshots of every save (176 MB per long task) that nothing read back.
+    revisions_kept = 2
+
+    @property
+    def _wal(self) -> Path:
+        return self.root/'events'/'checkpoint.wal.json'
+
     def _save(self) -> None:
+        """Write-ahead, then commit, then a one-line journal record. The write-ahead copy is one rolling
+        file overwritten each save (atomic rename), not a journal entry: journalling the whole state every
+        turn cost 278 KB a turn (182 MB on one 172-turn task) and the store kept every revision besides
+        (176 MB more) — for a recovery that only ever needs the newest copy."""
         self.state['session'] = self.session.export_state()
         self.state['controller_progress'] = self.progress.export_state()
         snapshot = deepcopy(self.state)
-        event = self.journal.append(session_id='session', event_type='checkpoint',
-            payload=dict(revision=self.revision+1, state=snapshot))
-        committed = self.store.commit(self.revision, lambda _: dict(checkpoint=event.event_id, state=snapshot))
+        digest = _state_digest(snapshot)
+        wal = dict(revision=self.revision+1, checkpoint=digest, state=snapshot)
+        self._wal.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._wal.with_suffix('.tmp')
+        tmp.write_text(json.dumps(wal, allow_nan=False))
+        os.replace(tmp, self._wal)
+        committed = self.store.commit(self.revision, lambda _: dict(checkpoint=digest, state=snapshot))
         self.revision = committed['revision']
+        self.journal.append(session_id='session', event_type='checkpoint',
+            payload=dict(revision=self.revision, state_sha256=digest))
+        self.store.prune(self.revisions_kept)
 
     def _restore(self) -> None:
         saved = self.store.read()
         checkpoints = [event for event in self.journal.read_strict('session') if event.event_type == 'checkpoint']
-        if not checkpoints:
+        wal = None
+        if self._wal.exists():
+            try:
+                wal = json.loads(self._wal.read_text())
+            except ValueError:
+                wal = None   # a torn write-ahead file is no checkpoint; the store stands
+        if not checkpoints and not saved['revision'] and wal is None:
             raise ValueError('No saved session')
         if [event.payload['revision'] for event in checkpoints] != list(range(1, len(checkpoints)+1)):
             raise ValueError('Nonconsecutive checkpoint journal')
-        if saved['revision'] > len(checkpoints):
+        legacy = [event for event in checkpoints if 'state' in event.payload]
+        if legacy and saved['revision'] < len(legacy):
+            # A session saved by the earlier harness carried every state in the journal: replay what the
+            # store lacks, exactly as before.
+            for event in legacy[saved['revision']:]:
+                saved = self.store.commit(saved['revision'], lambda _, event=event:
+                    dict(checkpoint=event.event_id, state=event.payload['state']))
+        if wal is not None and wal.get('revision') == saved['revision']+1:
+            # A complete write-ahead checkpoint finishes an interrupted commit.
+            saved = self.store.commit(saved['revision'], lambda _: dict(checkpoint=wal['checkpoint'], state=wal['state']))
+        if saved['revision'] > len(checkpoints)+1:
             raise ValueError('Revision store extends beyond its journal')
-        if saved['revision'] and saved['data'] != dict(
-                checkpoint=checkpoints[saved['revision']-1].event_id,
-                state=checkpoints[saved['revision']-1].payload['state']):
+        if saved['revision'] == len(checkpoints)+1:
+            # Committed, then interrupted before the journal line: the line is derivable, so write it.
+            self.journal.append(session_id='session', event_type='checkpoint',
+                payload=dict(revision=saved['revision'], state_sha256=_state_digest(saved['data']['state'])))
+        elif saved['revision'] < len(checkpoints):
+            raise ValueError('Journal extends beyond its revision store')
+        last = checkpoints[-1].payload if checkpoints else {}
+        if last.get('state_sha256') and saved['revision'] == len(checkpoints) \
+                and last['state_sha256'] != _state_digest(saved['data']['state']):
             raise ValueError('Revision store differs from its journal')
-        # A complete write-ahead checkpoint can safely finish an interrupted DB commit.
-        for event in checkpoints[saved['revision']:]:
-            saved = self.store.commit(saved['revision'], lambda _, event=event:
-                dict(checkpoint=event.event_id, state=event.payload['state']))
         self.revision = saved['revision']
         self.state = deepcopy(saved['data']['state'])
         if self.state['schema'] != 2:

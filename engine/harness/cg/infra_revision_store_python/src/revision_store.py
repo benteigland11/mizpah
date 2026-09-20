@@ -38,6 +38,25 @@ class RevisionStore:
             raise ValueError("Revision does not exist")
         return {"revision": row[0], "data": json.loads(row[1])}
 
+    def prune(self, keep: int = 1) -> int:
+        """Drop every revision but the newest ``keep``; returns how many rows went. Revisions are immutable
+        while they exist, but a store whose history is never read (a session checkpoint, a workspace
+        snapshot) need not keep every one: the harness's session store grew to 176 MB of identical
+        snapshots per long task before this."""
+        if type(keep) is not int or keep < 1:
+            raise ValueError("keep must be a positive integer")
+        if not self.path.exists():
+            return 0
+        with closing(sqlite3.connect(self.path, timeout=self.timeout)) as db:
+            row = db.execute("SELECT MAX(revision) FROM revisions").fetchone()
+            if row is None or row[0] is None:
+                return 0
+            cursor = db.execute("DELETE FROM revisions WHERE revision <= ?", (row[0] - keep,))
+            db.commit()
+            if cursor.rowcount:
+                db.execute("VACUUM")
+            return cursor.rowcount
+
     def commit(self, expected: int, transform: Callable[[dict], dict]) -> dict:
         if type(expected) is not int or expected < 0:
             raise ValueError("Expected revision must be a nonnegative integer")
