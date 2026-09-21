@@ -1,10 +1,11 @@
 ## Probes
 
-- A probe is a measurement of one source: it declares the quantities it reads and reports exactly those, `{"<quantity>": value}` each. One run links to every unknown it measures.
-- A reading comes from the source through code that reads it — never a constant, a guess, or a value chosen to pass. A reading that would come out the same for a wrong artifact resolves nothing.
+- A probe is an instrument, like a multimeter on a bench: put on one source, it reads out the quantities it is built to read — voltage, current, resistance; duration, peak, silence. It declares those quantities and reports exactly them, `{"<quantity>": value}` each. It knows nothing of what the readings are for.
+- The readings are what get composed into evidence. One run links to every unknown whose quantity it reports; the same instrument serves a different question tomorrow. Build the instrument general and put the question in the unknown.
+- A reading comes from the source through the instrument — never a constant, a guess, or a value chosen to pass. An instrument that would read the same on a wrong artifact is not measuring it.
 - The reviewer's bar does not move; among the readings that clear it, the one the pipeline gives cheapest is the one to take.
 
-One probe, several quantities, one source. Create it declaring what it measures, then `measure.py` returns exactly those:
+Create the instrument declaring what it reads; `measure.py` returns exactly those:
 
 ```
 terra probe create audio_render --purpose "what the rendered audio is like" --measure duration_s,peak_dbfs,is_silent
