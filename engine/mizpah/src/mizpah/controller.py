@@ -1611,12 +1611,13 @@ def decide_through_outages(client: Any, config: dict[str, Any], system: str, use
         except ModelTransportError as error:
             outages += 1
             run_root = Path(config['mizpah'].get('run_root') or '.')
-            ops.record_outage(run_root, 'controller', config['controller'], error, outages, task='briefing',
-                              action='the briefing is asked for again' if outages <= 5 else 'the sixth in a row: the step fails')
+            delay = ops.backoff_seconds(outages, cap=wait_seconds)
+            ops.record_outage(run_root, 'controller', config['controller'], error, outages, task='briefing', waited_seconds=delay,
+                              action='the briefing is asked for again after '+str(int(delay))+' s' if outages <= 5 else 'the sixth in a row: the step fails')
             if outages > 5:
                 raise
             checker = health or ops.Health(config, run_root)
-            if not checker.wait_for_model((config['controller'].get('endpoint') or {}).get('base_url'), wait_seconds=wait_seconds):
+            if not checker.wait_for_model((config['controller'].get('endpoint') or {}).get('base_url'), wait_seconds=wait_seconds, attempt=outages):
                 raise
 
 

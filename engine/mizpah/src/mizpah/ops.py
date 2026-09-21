@@ -68,6 +68,14 @@ def outage_kind(error: BaseException | str) -> tuple[str, str]:
     return 'transport', 'the transport failed'
 
 
+BACKOFF_BASE_SECONDS = 15.0
+
+
+def backoff_seconds(attempt: int, *, cap: float = 300.0) -> float:
+    """The wait before retry `attempt` (1-based): 15, 30, 60, 120, 240 … capped."""
+    return float(min(cap, BACKOFF_BASE_SECONDS * (2 ** max(0, int(attempt) - 1))))
+
+
 def record_outage(root: Path, role: str, spec: dict[str, Any], error: BaseException | str, outage: int, *,
                   task: str | None = None, turn: int | None = None, waited_seconds: float | None = None,
                   action: str | None = None) -> None:
@@ -110,12 +118,14 @@ class Health:
     def _record(self, **fields: Any) -> None:
         self.log.open('a').write(json.dumps(dict(at=time.time(), **fields))+'\n')
 
-    def wait_for_model(self, base_url: str | None, *, wait_seconds: float) -> bool:
+    def wait_for_model(self, base_url: str | None, *, wait_seconds: float, attempt: int = 1) -> bool:
         """True when the server answers within wait_seconds; starts its unit once it has been down long enough.
 
-        A subscription client (no base_url) is waited for with plain backoff: nothing here can restart it."""
+        A subscription client (no base_url) is waited for with exponential backoff — 15 s, 30 s, 60 s, 120 s,
+        240 s, capped at wait_seconds — so a blip costs a quarter minute and a real outage gets minutes to
+        recover before the retries are spent; a flat minute did neither. Nothing here can restart it."""
         if not base_url:
-            time.sleep(min(60.0, wait_seconds))
+            time.sleep(backoff_seconds(attempt, cap=wait_seconds))
             return True
         down_since = time.time()
         deadline = down_since+wait_seconds

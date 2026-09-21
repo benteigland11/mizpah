@@ -2066,17 +2066,19 @@ def run_through_outages(session: FocusedSession, config: dict[str, Any], root: P
                 turn = session.status()['completed_worker_turns']
             except Exception:  # noqa: BLE001
                 turn = None
+            delay = ops.backoff_seconds(outages, cap=wait_seconds)
             ops.record_outage(root, 'worker', config['worker'], error, outages, task=root.name, turn=turn,
+                              waited_seconds=None if too_big else delay,
                               action=('the reply is discarded and the worker is asked again with a warning' if too_big
-                                      else 'the torn call is discarded and the worker asks again' if outages <= 5
+                                      else 'the torn call is discarded; the worker asks again after '+str(int(delay))+' s' if outages <= 5
                                       else 'the sixth in a row: the task fails'))
             if outages > 5:
                 raise
             if not too_big:
-                # A server that went away is waited for; a reply that was too big is the worker's own doing and
-                # the server is fine.
+                # A server that went away is waited for, with backoff; a reply that was too big is the worker's own
+                # doing and the server is fine.
                 checker = health or ops.Health(config, root)
-                if not checker.wait_for_model((config['worker'].get('endpoint') or {}).get('base_url'), wait_seconds=wait_seconds):
+                if not checker.wait_for_model((config['worker'].get('endpoint') or {}).get('base_url'), wait_seconds=wait_seconds, attempt=outages):
                     raise
             discarded = session.discard_pending()
             if discarded:
