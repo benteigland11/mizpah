@@ -636,9 +636,10 @@ def open_procedure(procedure_id: str, purpose: str, target_dir: str | Path = "."
         lines += [str(document["description"]).strip(), ""]
     if document.get("tags"):
         lines += ["tags: " + ", ".join(str(t) for t in document["tags"]), ""]
-    lines += ["Follow the steps in order. Tick each box before you finish: `[x]` done, `[-]` not needed here — "
-              "`playbook tick <this file> --done 1,3 --skip 2` marks several in one call; `playbook skip <this file> "
-              "--because ...` marks everything left `[-]` when the walk does not apply. "
+    lines += ["Follow the steps in order, and tick as you go — in the same command as the step's work: "
+              "`playbook tick <this file> --done N` when a step is done, `--skip N` when it does not apply here "
+              "(several at once when several closed together); `playbook skip <this file> --because ...` marks "
+              "everything left `[-]` when the whole walk does not apply. A box ticked at the end records nothing. "
               "Improve the procedure afterwards with `playbook edit-step` / `add-step` where a step fell short.", ""]
     for i, step in enumerate(steps, 1):
         lines += [f"- [ ] **{i}. {step.get('title', '')}**", "", f"  {str(step.get('do', '')).strip()}", ""]
