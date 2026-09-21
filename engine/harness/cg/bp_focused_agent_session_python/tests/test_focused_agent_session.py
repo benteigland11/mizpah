@@ -1773,3 +1773,20 @@ def test_a_continuation_and_an_interjection_journal_their_text(tmp_path):
     events = [json.loads(line) for line in (root/'events'/'session.jsonl').read_text().splitlines()]
     [cont] = [e for e in events if e['event_type'] == 'continued']
     assert cont['payload']['label'] == 'gate red: repair round' and cont['payload']['text'].startswith('Gate red. Missing:')
+
+
+def test_stream_progress_lands_beside_the_journal_not_in_it(tmp_path):
+    # The transport reports progress to `on_progress`; the session points that at its own observer (the loop's,
+    # handed at construction, never saw `model_stream`) and keeps only the latest in events/stream.json.
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, total=1, enabled=False, rollover=False)
+    wt.on_progress = None
+    worker = ModelClient(worker.config, transport=wt, observer=lambda kind, payload: None)
+    root = tmp_path/'session'
+    session = FocusedSession.create(root, settings, worker=worker, shell=shell)
+    session._client(worker)   # what every call goes through
+    assert wt.on_progress is not None
+    wt.on_progress(dict(bytes=4096, last_event='response.output_text.delta', at=1.5))
+    wt.on_progress(dict(bytes=8192, last_event='response.completed', at=2.5))
+    assert json.loads((root/'events'/'stream.json').read_text())['bytes'] == 8192
+    events = SessionEventLog(root/'events').read_strict('session')
+    assert not [e for e in events if e.event_type == 'model_stream']

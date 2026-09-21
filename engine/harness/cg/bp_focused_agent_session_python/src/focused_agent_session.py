@@ -765,6 +765,11 @@ class FocusedSession:
         copy = object.__new__(type(original))
         copy.__dict__.update(original.__dict__)
         copy.observer = observer
+        # The transport reports stream progress to whatever it was handed at construction — the loop's
+        # observer, which never saw `model_stream`. The copy shares the transport, so point it here.
+        transport = copy.__dict__.get('transport')
+        if transport is not None and hasattr(transport, 'on_progress'):
+            transport.on_progress = lambda info: observer('model_stream', info)
         return copy
 
     def _delta_request(self, payload: dict[str, Any]) -> dict[str, Any]:
