@@ -2468,3 +2468,304 @@ Ensure the MIDI makes downbeats louder than beats and offbeats
 beats downbeat louder offbeats passage subdivisions
 the downbeat of every bar is louder than subdivisions  and beats are louder than offbeats in the passage 
 Compare meters.md's three section counts, groupings, and accent onsets against piece.mid onset for onset
+accented agree beat documented grouping melody meter meters onset piece positions section
+for every section documented in meters md  the stated meter  beat grouping  accented onset positions  and melody onset count agree with piece mid onset for onset 
+Compare every count.md onset with piece.mid
+beat matching names onset order others piece spoken syllable
+count md names every onset in piece mid and no others  in order  with matching bar  beat  and spoken syllable 
+names onset piece others order midi reading claim
+Compare rhythm.md with every melody event in piece.mid
+accounts agrees document melody midi onset order piece rest rhythm
+rhythm md accounts for every melody onset  rest  and tie in piece mid in order with its count  and the document agrees with the midi 
+meters says section what meter beats group which onsets accented writes melody piece onset reading claim
+meter audible section accented beats louder others groups twos where threes same pulses
+Inspect piece.mid velocities and onset grouping to verify audible accents and the 3/4 versus 6/8 grouping distinction
+accented beats documented groups louder other piece pulse same section span threes
+in each section of piece mid the documented accented beats are louder than the other beats  and the 6 8 section groups the same six pulse span in twos while the 3 4 section groups it in threes 
+onset piece order beat syllable spoken trip
+onset piece order beat syllable spoken trip
+onset piece order beat syllable spoken trip
+syncopation audible beat melody notes played louder ones left hand pulse stays even time velocity underneath
+piece
+rhythm melody onset rest marked
+Measure syncopation loudness and even left-hand pulse in piece.mid
+beat even hand left louder melody notes piece pulse remains time underneath
+in piece mid  off beat melody notes are louder than on beat melody notes  while the left hand pulse remains even in time and velocity underneath 
+Validate rhythm.md bar structure, onset and rest counts, and tie markings against piece.mid
+melody piece rhythm correct gives across barlines eight marks onset passage presents
+rhythm md presents the melody rhythm bar by bar for the eight bar passage in piece mid 
+rhythm md gives the correct count under every melody onset in piece mid 
+rhythm md gives the correct count for every melody rest in piece mid 
+rhythm md marks every melody tie represented across barlines in piece mid 
+onset piece order beat syllable spoken trip
+onset piece order beat syllable spoken trip
+meters says section what meter beats group which onsets accented writes melody piece onset reading claim
+syncopation audible beat melody notes played louder ones left hand pulse stays even time velocity underneath
+piece
+meters says section what meter beats group which onsets accented writes melody piece onset reading claim
+onset piece order beat syllable spoken trip
+solo piano piece romantic idiom singing melody moving accompaniment expressive harmony least secondary dominants borrowed chords between seconds performed tempo
+form phrases bars least three distinct opening material returns before close relative return reading claim
+tonal stated home piece ends tonic chord after cadence least note onsets belong secondary dominants named notes
+performed quantised note velocities span least piece onset velocity sustain pedal cc64 changes once average never held down across more bars
+rubato performed tempo constant onset timing deviates grid ritardando least final bars
+playable hands simultaneous notes hand span more semitones most sound once left stays below right above least onsets
+Compose the original romantic solo-piano performance and build `piece.mid`
+containing data expressive file form hand midi original performance piano piece playable
+ piece mid  is a standard midi file containing the requested original romantic solo piano performance  with the required form  tonality  expressive performance data  playable two hand voicing  and program 0 
+solo piano piece romantic idiom singing melody moving accompaniment expressive harmony least secondary dominants borrowed chords between seconds performed tempo
+form phrases bars least three distinct opening material returns before close relative return reading claim
+tonal stated home piece ends tonic chord after cadence least note onsets belong secondary dominants named notes
+performed quantised note velocities span least piece onset velocity sustain pedal cc64 changes once average never held down across more bars
+rubato performed tempo constant onset timing deviates grid ritardando least final bars
+playable hands simultaneous notes hand span more semitones most sound once left stays below right above least onsets
+Write `notes.md` documenting the key, form, tempo plan, and performance shaping for `piece.mid`
+composition does form home notes numbered performance piece plan shaping states tempo
+ notes md  states the piece s home key  bar numbered form  tempo plan  and what the performance shaping does and why  agreeing with the composition in  piece mid  
+solo piano piece romantic idiom singing melody moving accompaniment expressive harmony least secondary dominants borrowed chords between seconds performed tempo
+form phrases bars least three distinct opening material returns before close relative return reading claim
+tonal stated home piece ends tonic chord after cadence least note onsets belong secondary dominants named notes
+performed quantised note velocities span least piece onset velocity sustain pedal cc64 changes once average never held down across more bars
+rubato performed tempo constant onset timing deviates grid ritardando least final bars
+playable hands simultaneous notes hand span more semitones most sound once left stays below right above least onsets
+Compose the original romantic solo-piano performance in piece.mid
+complete expressive form hand midi original performance phrase piano piece playability requested
+ piece mid  is a complete original solo piano midi performance that satisfies the requested 80 100 second romantic piece  phrase form  tonal  expressive performance  rubato  and two hand playability requirements 
+Write notes.md documenting the completed piece's key, form, tempo plan, and expressive shaping
+documents form notes numbered performance piece plan reasons shaping tempo
+ notes md  documents the key  bar numbered form  tempo plan  and the performance shaping and reasons for  piece mid  
+solo piano piece romantic idiom singing melody moving accompaniment expressive harmony least secondary dominants borrowed chords between seconds performed tempo
+form phrases bars least three distinct opening material returns before close relative return reading claim
+tonal stated home piece ends tonic chord after cadence least note onsets belong secondary dominants named notes
+performed quantised note velocities span least piece onset velocity sustain pedal cc64 changes once average never held down across more bars
+rubato performed tempo constant onset timing deviates grid ritardando least final bars
+playable hands simultaneous notes hand span more semitones most sound once left stays below right above least onsets
+Compose and build piece.mid
+agrees behavior cadence constraints dynamics exists file final form hand home like
+ piece mid  exists as a standard midi file with program 0 and agrees with the requested 80 100 second romantic solo piano piece  its 4  or 8 bar a b a like form  home key cadence and onset proportion  performed dynamics and sustain pedal behavior  rubato with a final two bar ritardando  and two hand playability constraints 
+Render piece.mid to piece.mp3
+audio duration exists ffmpeg fluidsynth midi piece produced rendered seconds within
+ piece mp3  exists as the rendered audio of  piece mid  produced with fluidsynth and ffmpeg  and its duration is within 2 seconds of the midi duration 
+Document the MIDI piece in notes.md
+documents effect exists form home notes numbered performance piece plan purpose shaping
+ notes md  exists and documents the piece s home key  bar numbered form  tempo plan  and the purpose and effect of its performance shaping 
+Engrave piece.mid as piece.pdf
+engraving exists lilypond piano piece represented solo
+ piece pdf  exists as the lilypond engraving of the solo piano piece represented by  piece mid  
+Verify that piece.pdf exists as a valid PDF and is the LilyPond engraving of the piano piece represented by piece.mid.
+exists file piece readable
+piece pdf exists and is a readable pdf file 
+a solo piano piece in a romantic idiom  singing melody over a moving accompaniment  expressive harmony with at least two secondary dominants or borrowed chords   between 80 and 100 seconds at its perf
+form  phrases of 4 or 8 bars  at least three distinct phrases  and the opening material returns before the end  a b a or a close relative   the return is a reading  not a claim 
+tonal  a stated home key  the piece ends on a tonic chord after a cadence  at least 85  of note onsets belong to the home key or to the secondary dominants named in notes md 
+performed  not quantised  note velocities span at least 40  of 127  over the piece and no bar has every onset at one velocity  the sustain pedal  cc64  changes at least once per bar on average and is 
+rubato  the performed tempo is not constant   a tempo map or onset timing deviates from the grid  with a ritardando of at least 10  over the final two bars 
+playable by two hands  no simultaneous notes in one hand span more than 14 semitones  at most 5 notes sound at once per hand  the left hand stays below c5 and the right above c3 for at least 90  of on
+the piece is rendered   fluidsynth  ni   soundfont  piece mid  f piece wav  then ffmpeg to  piece mp3   and engraved to  piece pdf  with lilypond  the audio duration is within 2 s of the midi duration
+piece mid
+piece mp3
+piece pdf
+notes md  key  form with bar numbers  tempo plan  what the performance shaping does and why
+a solo piano piece in a romantic idiom  singing melody over a moving accompaniment  expressive harmony with at least two secondary dominants or borrowed chords   between 80 and 100 seconds at its perf
+form  phrases of 4 or 8 bars  at least three distinct phrases  and the opening material returns before the end  a b a or a close relative   the return is a reading  not a claim 
+tonal  a stated home key  the piece ends on a tonic chord after a cadence  at least 85  of note onsets belong to the home key or to the secondary dominants named in notes md 
+performed  not quantised  note velocities span at least 40  of 127  over the piece and no bar has every onset at one velocity  the sustain pedal  cc64  changes at least once per bar on average and is 
+rubato  the performed tempo is not constant   a tempo map or onset timing deviates from the grid  with a ritardando of at least 10  over the final two bars 
+playable by two hands  no simultaneous notes in one hand span more than 14 semitones  at most 5 notes sound at once per hand  the left hand stays below c5 and the right above c3 for at least 90  of on
+the piece is rendered   fluidsynth  ni   soundfont  piece mid  f piece wav  then ffmpeg to  piece mp3   and engraved to  piece pdf  with lilypond  the audio duration is within 2 s of the midi duration
+piece mid
+piece mp3
+piece pdf
+notes md  key  form with bar numbers  tempo plan  what the performance shaping does and why
+solo piano piece romantic idiom singing melody moving accompaniment expressive harmony least secondary dominants borrowed chords between seconds performed tempo
+form phrases bars least three distinct opening material returns before close relative return reading claim
+tonal stated home piece ends tonic chord after cadence least note onsets belong secondary dominants named notes
+performed quantised note velocities span least piece onset velocity sustain pedal cc64 changes once average never held down across more bars
+rubato performed tempo constant onset timing deviates grid ritardando least final bars
+playable hands simultaneous notes hand span more semitones most sound once left stays below right above least onsets
+a solo piano piece in a romantic idiom  singing melody over a moving accompaniment  expressive harmony with at least two secondary dominants or borrowed chords   between 80 and 100 seconds at its perf
+form  phrases of 4 or 8 bars  at least three distinct phrases  and the opening material returns before the end  a b a or a close relative   the return is a reading  not a claim 
+tonal  a stated home key  the piece ends on a tonic chord after a cadence  at least 85  of note onsets belong to the home key or to the secondary dominants named in notes md 
+performed  not quantised  note velocities span at least 40  of 127  over the piece and no bar has every onset at one velocity  the sustain pedal  cc64  changes at least once per bar on average and is 
+rubato  the performed tempo is not constant   a tempo map or onset timing deviates from the grid  with a ritardando of at least 10  over the final two bars 
+playable by two hands  no simultaneous notes in one hand span more than 14 semitones  at most 5 notes sound at once per hand  the left hand stays below c5 and the right above c3 for at least 90  of on
+the piece is rendered   fluidsynth  ni   soundfont  piece mid  f piece wav  then ffmpeg to  piece mp3   and engraved to  piece pdf  with lilypond  the audio duration is within 2 s of the midi duration
+piece mid
+piece mp3
+piece pdf
+notes md  key  form with bar numbers  tempo plan  what the performance shaping does and why
+a solo piano piece in a romantic idiom  singing melody over a moving accompaniment  expressive harmony with at least two secondary dominants or borrowed chords   between 80 and 100 seconds at its perf
+form  phrases of 4 or 8 bars  at least three distinct phrases  and the opening material returns before the end  a b a or a close relative   the return is a reading  not a claim 
+tonal  a stated home key  the piece ends on a tonic chord after a cadence  at least 85  of note onsets belong to the home key or to the secondary dominants named in notes md 
+performed  not quantised  note velocities span at least 40  of 127  over the piece and no bar has every onset at one velocity  the sustain pedal  cc64  changes at least once per bar on average and is 
+rubato  the performed tempo is not constant   a tempo map or onset timing deviates from the grid  with a ritardando of at least 10  over the final two bars 
+playable by two hands  no simultaneous notes in one hand span more than 14 semitones  at most 5 notes sound at once per hand  the left hand stays below c5 and the right above c3 for at least 90  of on
+the piece is rendered   fluidsynth  ni   soundfont  piece mid  f piece wav  then ffmpeg to  piece mp3   and engraved to  piece pdf  with lilypond  the audio duration is within 2 s of the midi duration
+piece mid
+piece mp3
+piece pdf
+notes md  key  form with bar numbers  tempo plan  what the performance shaping does and why
+solo piano piece romantic idiom singing melody moving accompaniment expressive harmony least secondary dominants borrowed chords between seconds performed tempo
+form phrases bars least three distinct opening material returns before close relative return reading claim
+tonal stated home piece ends tonic chord after cadence least note onsets belong secondary dominants named notes
+performed quantised note velocities span least piece onset velocity sustain pedal cc64 changes once average never held down across more bars
+rubato performed tempo constant onset timing deviates grid ritardando least final bars
+playable hands simultaneous notes hand span more semitones most sound once left stays below right above least onsets
+a solo piano piece in a romantic idiom  singing melody over a moving accompaniment  expressive harmony with at least two secondary dominants or borrowed chords   between 80 and 100 seconds at its perf
+form  phrases of 4 or 8 bars  at least three distinct phrases  and the opening material returns before the end  a b a or a close relative   the return is a reading  not a claim 
+tonal  a stated home key  the piece ends on a tonic chord after a cadence  at least 85  of note onsets belong to the home key or to the secondary dominants named in notes md 
+performed  not quantised  note velocities span at least 40  of 127  over the piece and no bar has every onset at one velocity  the sustain pedal  cc64  changes at least once per bar on average and is 
+rubato  the performed tempo is not constant   a tempo map or onset timing deviates from the grid  with a ritardando of at least 10  over the final two bars 
+playable by two hands  no simultaneous notes in one hand span more than 14 semitones  at most 5 notes sound at once per hand  the left hand stays below c5 and the right above c3 for at least 90  of on
+the piece is rendered   fluidsynth  ni   soundfont  piece mid  f piece wav  then ffmpeg to  piece mp3   and engraved to  piece pdf  with lilypond  the audio duration is within 2 s of the midi duration
+piece mid
+piece mp3
+piece pdf
+notes md  key  form with bar numbers  tempo plan  what the performance shaping does and why
+a solo piano piece in a romantic idiom  singing melody over a moving accompaniment  expressive harmony with at least two secondary dominants or borrowed chords   between 80 and 100 seconds at its perf
+form  phrases of 4 or 8 bars  at least three distinct phrases  and the opening material returns before the end  a b a or a close relative   the return is a reading  not a claim 
+tonal  a stated home key  the piece ends on a tonic chord after a cadence  at least 85  of note onsets belong to the home key or to the secondary dominants named in notes md 
+performed  not quantised  note velocities span at least 40  of 127  over the piece and no bar has every onset at one velocity  the sustain pedal  cc64  changes at least once per bar on average and is 
+rubato  the performed tempo is not constant   a tempo map or onset timing deviates from the grid  with a ritardando of at least 10  over the final two bars 
+playable by two hands  no simultaneous notes in one hand span more than 14 semitones  at most 5 notes sound at once per hand  the left hand stays below c5 and the right above c3 for at least 90  of on
+the piece is rendered   fluidsynth  ni   soundfont  piece mid  f piece wav  then ffmpeg to  piece mp3   and engraved to  piece pdf  with lilypond  the audio duration is within 2 s of the midi duration
+piece mid
+piece mp3
+piece pdf
+notes md  key  form with bar numbers  tempo plan  what the performance shaping does and why
+solo piano piece romantic idiom singing melody moving accompaniment expressive harmony least secondary dominants borrowed chords between seconds performed tempo
+form phrases bars least three distinct opening material returns before close relative return reading claim
+tonal stated home piece ends tonic chord after cadence least note onsets belong secondary dominants named notes
+performed quantised note velocities span least piece onset velocity sustain pedal cc64 changes once average never held down across more bars
+rubato performed tempo constant onset timing deviates grid ritardando least final bars
+playable hands simultaneous notes hand span more semitones most sound once left stays below right above least onsets
+a solo piano piece in a romantic idiom  singing melody over a moving accompaniment  expressive harmony with at least two secondary dominants or borrowed chords   between 80 and 100 seconds at its perf
+form  phrases of 4 or 8 bars  at least three distinct phrases  and the opening material returns before the end  a b a or a close relative   the return is a reading  not a claim 
+tonal  a stated home key  the piece ends on a tonic chord after a cadence  at least 85  of note onsets belong to the home key or to the secondary dominants named in notes md 
+performed  not quantised  note velocities span at least 40  of 127  over the piece and no bar has every onset at one velocity  the sustain pedal  cc64  changes at least once per bar on average and is 
+rubato  the performed tempo is not constant   a tempo map or onset timing deviates from the grid  with a ritardando of at least 10  over the final two bars 
+playable by two hands  no simultaneous notes in one hand span more than 14 semitones  at most 5 notes sound at once per hand  the left hand stays below c5 and the right above c3 for at least 90  of on
+the piece is rendered   fluidsynth  ni   soundfont  piece mid  f piece wav  then ffmpeg to  piece mp3   and engraved to  piece pdf  with lilypond  the audio duration is within 2 s of the midi duration
+piece mid
+piece mp3
+piece pdf
+notes md  key  form with bar numbers  tempo plan  what the performance shaping does and why
+a solo piano piece in a romantic idiom  singing melody over a moving accompaniment  expressive harmony with at least two secondary dominants or borrowed chords   between 80 and 100 seconds at its perf
+form  phrases of 4 or 8 bars  at least three distinct phrases  and the opening material returns before the end  a b a or a close relative   the return is a reading  not a claim 
+tonal  a stated home key  the piece ends on a tonic chord after a cadence  at least 85  of note onsets belong to the home key or to the secondary dominants named in notes md 
+performed  not quantised  note velocities span at least 40  of 127  over the piece and no bar has every onset at one velocity  the sustain pedal  cc64  changes at least once per bar on average and is 
+rubato  the performed tempo is not constant   a tempo map or onset timing deviates from the grid  with a ritardando of at least 10  over the final two bars 
+playable by two hands  no simultaneous notes in one hand span more than 14 semitones  at most 5 notes sound at once per hand  the left hand stays below c5 and the right above c3 for at least 90  of on
+the piece is rendered   fluidsynth  ni   soundfont  piece mid  f piece wav  then ffmpeg to  piece mp3   and engraved to  piece pdf  with lilypond  the audio duration is within 2 s of the midi duration
+piece mid
+piece mp3
+piece pdf
+notes md  key  form with bar numbers  tempo plan  what the performance shaping does and why
+solo piano piece romantic idiom singing melody moving accompaniment expressive harmony least secondary dominants borrowed chords between seconds performed tempo
+form phrases bars least three distinct opening material returns before close relative return reading claim
+tonal stated home piece ends tonic chord after cadence least note onsets belong secondary dominants named notes
+performed quantised note velocities span least piece onset velocity sustain pedal cc64 changes once average never held down across more bars
+rubato performed tempo constant onset timing deviates grid ritardando least final bars
+playable hands simultaneous notes hand span more semitones most sound once left stays below right above least onsets
+a solo piano piece in a romantic idiom  singing melody over a moving accompaniment  expressive harmony with at least two secondary dominants or borrowed chords   between 80 and 100 seconds at its perf
+form  phrases of 4 or 8 bars  at least three distinct phrases  and the opening material returns before the end  a b a or a close relative   the return is a reading  not a claim 
+tonal  a stated home key  the piece ends on a tonic chord after a cadence  at least 85  of note onsets belong to the home key or to the secondary dominants named in notes md 
+performed  not quantised  note velocities span at least 40  of 127  over the piece and no bar has every onset at one velocity  the sustain pedal  cc64  changes at least once per bar on average and is 
+rubato  the performed tempo is not constant   a tempo map or onset timing deviates from the grid  with a ritardando of at least 10  over the final two bars 
+playable by two hands  no simultaneous notes in one hand span more than 14 semitones  at most 5 notes sound at once per hand  the left hand stays below c5 and the right above c3 for at least 90  of on
+the piece is rendered   fluidsynth  ni   soundfont  piece mid  f piece wav  then ffmpeg to  piece mp3   and engraved to  piece pdf  with lilypond  the audio duration is within 2 s of the midi duration
+piece mid
+piece mp3
+piece pdf
+notes md  key  form with bar numbers  tempo plan  what the performance shaping does and why
+the composition is at the level of a published character piece in the romantic repertoire   the kind a conservatory pianist would be given to learn 
+the performance is at the level of that pianist playing it  a musician listening to  piece mp3  hears a person at the instrument  not a sequencer 
+the score is at the level of a publisher s edition  a pianist reading  piece pdf  would play it as written and find nothing to correct 
+piece mid
+piece mp3
+piece pdf
+composition level published character piece romantic repertoire kind conservatory pianist would given learn
+performance level pianist playing musician listening piece hears person instrument sequencer
+score level publisher edition pianist reading piece would play written find nothing correct
+piece
+piece
+piece
+the composition is at the level of a published character piece in the romantic repertoire   the kind a conservatory pianist would be given to learn 
+the performance is at the level of that pianist playing it  a musician listening to  piece mp3  hears a person at the instrument  not a sequencer 
+the score is at the level of a publisher s edition  a pianist reading  piece pdf  would play it as written and find nothing to correct 
+piece mid
+piece mp3
+piece pdf
+composition level published character piece romantic repertoire kind conservatory pianist would given learn
+performance level pianist playing musician listening piece hears person instrument sequencer
+score level publisher edition pianist reading piece would play written find nothing correct
+piece
+piece
+piece
+Compose original romantic piano piece as piece.mid, piece.mp3 and piece.pdf
+exists piece original piano sequencer character correct edition engraved find fluidsynth hears
+ piece mid  exists as an original short romantic piano midi performance  gm piano  at the level of a published character piece  with humanized timing  velocity and pedal rather than quantized sequencer output 
+ piece mp3  exists as the fluidsynth gm soundfont render of piece mid so a musician listening hears a person at the instrument  not a sequencer 
+ piece pdf  exists as a lilypond engraved publisher edition piano score of the same original piece  such that a pianist reading it would play it as written and find nothing to correct 
+the composition is at the level of a published character piece in the romantic repertoire   the kind a conservatory pianist would be given to learn 
+the performance is at the level of that pianist playing it  a musician listening to  piece mp3  hears a person at the instrument  not a sequencer 
+the score is at the level of a publisher s edition  a pianist reading  piece pdf  would play it as written and find nothing to correct 
+piece mid
+piece mp3
+piece pdf
+composition level published character piece romantic repertoire kind conservatory pianist would given learn
+performance level pianist playing musician listening piece hears person instrument sequencer
+score level publisher edition pianist reading piece would play written find nothing correct
+piece
+piece
+piece
+Compose and perform an original short romantic piano character piece into `piece.mid` (GM piano, no quotation of an existing work, no notes or plan files).
+character existing level like midi original performed pianist piano piece published quotes
+ piece mid  is an original short romantic piano character piece at the level of published repertoire  performed in midi so it can sound like a pianist rather than a sequencer  and it quotes no existing piece 
+the composition is at the level of a published character piece in the romantic repertoire   the kind a conservatory pianist would be given to learn 
+the performance is at the level of that pianist playing it  a musician listening to  piece mp3  hears a person at the instrument  not a sequencer 
+the score is at the level of a publisher s edition  a pianist reading  piece pdf  would play it as written and find nothing to correct 
+piece mid
+piece mp3
+piece pdf
+composition level published character piece romantic repertoire kind conservatory pianist would given learn
+performance level pianist playing musician listening piece hears person instrument sequencer
+score level publisher edition pianist reading piece would play written find nothing correct
+piece
+piece
+piece
+the composition is at the level of a published character piece in the romantic repertoire   the kind a conservatory pianist would be given to learn 
+the performance is at the level of that pianist playing it  a musician listening to  piece mp3  hears a person at the instrument  not a sequencer 
+the score is at the level of a publisher s edition  a pianist reading  piece pdf  would play it as written and find nothing to correct 
+piece mid
+piece mp3
+piece pdf
+the composition is at the level of a published character piece in the romantic repertoire   the kind a conservatory pianist would be given to learn 
+the performance is at the level of that pianist playing it  a musician listening to  piece mp3  hears a person at the instrument  not a sequencer 
+the score is at the level of a publisher s edition  a pianist reading  piece pdf  would play it as written and find nothing to correct 
+piece mid
+piece mp3
+piece pdf
+the composition is at the level of a published character piece in the romantic repertoire   the kind a conservatory pianist would be given to learn 
+the performance is at the level of that pianist playing it  a musician listening to  piece mp3  hears a person at the instrument  not a sequencer 
+the score is at the level of a publisher s edition  a pianist reading  piece pdf  would play it as written and find nothing to correct 
+piece mid
+piece mp3
+piece pdf
+composition level published character piece romantic repertoire kind conservatory pianist would given learn
+performance level pianist playing musician listening piece hears person instrument sequencer
+score level publisher edition pianist reading piece would play written find nothing correct
+piece
+piece
+Render `piece.mid` with fluidsynth and the GM soundfont to `piece.mp3` so the performance can be heard.
+exists fluidsynth hearable piano piece render soundfont through
+ piece mp3  exists and is a hearable fluidsynth render of  piece mid  through the gm piano soundfont 
+the composition is at the level of a published character piece in the romantic repertoire   the kind a conservatory pianist would be given to learn 
+the performance is at the level of that pianist playing it  a musician listening to  piece mp3  hears a person at the instrument  not a sequencer 
+the score is at the level of a publisher s edition  a pianist reading  piece pdf  would play it as written and find nothing to correct 
+piece mid
+piece mp3
+piece pdf
+Engrave the same piece as a publisher-level piano score in LilyPond and write `piece.pdf`.
+exists lilypond piece same score
+ piece pdf  exists and is a lilypond score of the same piece as  piece mid  

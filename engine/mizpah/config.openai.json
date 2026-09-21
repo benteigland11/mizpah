@@ -23,7 +23,7 @@
   },
   "gate_rounds": 3,
   "agent": "mizpah-worker",
-  "checkin_policy_file": "../../prompts/wip/checkin_policy.md",
+  "checkin_policy_file": "../../prompts/reviewer_policy.md",
   "repeated_failure_rollover": 3,
   "repeated_success_rollover": 5,
   "cartograph": "/home/Vinscen/mizpah/.venv/bin/cartograph",

@@ -178,15 +178,15 @@ def test_pack_workspace_drops_symlinks_that_leave_the_tree(tmp_path: Path) -> No
 
 
 def test_focus_globs_put_the_tasks_own_measures_first():
-    """The check-in reads this task's measures before anything else, then its artifacts, then widget sources —
-    never every probe in the project (the changing-meter gym's reviewer saw twenty probes and a widget cut mid-line)."""
+    """The reviewer reads this task's measures before anything else, then its artifacts, and nothing else — never
+    every probe in the project, and not the widgets or the walks (theirs are the library's and Playbook's)."""
     from mizpah.worker import focus_globs
     unknowns = [dict(id='notes_md_built', notes='cites out:1; creates notes.md'), dict(id='piece_mid_built')]
     globs = focus_globs(unknowns)
     assert globs[0].endswith('/map/probes/notes_md_built_probe/measure.py')
     assert any(g.endswith('/map/probes/piece_mid_built_probe/measure.py') for g in globs)
     assert not any('probes/*/' in g for g in globs)
-    assert globs.index('notes.md') < globs.index('cg/*/src/*.py')
+    assert 'notes.md' in globs and not any(g.startswith('cg/') or '/open/' in g for g in globs)
 
 
 def test_package_installs_are_refused_with_the_way_out():

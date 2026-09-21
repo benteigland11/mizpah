@@ -1865,9 +1865,9 @@ def focus_globs(unknowns: list[dict[str, Any]]) -> tuple[str, ...]:
         if creates:
             globs.append(creates)
             globs.append(creates.rstrip('/')+'/*')
-    # The walks it ticked: a skipped step's reason is a claim about the artifact, judged like a probe.
-    globs.append(PLAYBOOK_PREFIX+'/open/*.md')
-    globs.append('cg/*/src/*.py')
+    # Not the walks and not the widgets: walk honesty is Playbook's (route complete refuses unticked steps) and
+    # the controller's; a widget's honesty is the library's (validate, its tests, the next bench that installs
+    # it). The reviewer answers one question from two kinds of file — did the worker game the probes.
     return tuple(dict.fromkeys(globs))
 
 
