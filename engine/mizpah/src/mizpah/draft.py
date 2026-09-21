@@ -89,10 +89,21 @@ def environments() -> list[dict[str, str]]:
     return [dict(name=b['name'], note=b['note']) for b in bases.list_bases()]
 
 
+BARE = 'none'
+
+
 def new(slug: str, title: str, mission: str, environment: str = '') -> dict[str, Any]:
+    """A gym is a training ground, and the environment it is set up with is the point of making one: the choice is
+    made here, out loud — a saved environment by name, or `none` for a bare gym (Python and a shell) — never left
+    to default."""
     project = draft_dir(slug)
     if project.exists():
         raise SystemExit(json.dumps(dict(status='error', error='a gym named '+slug+' exists; discard it or pick another slug')))
+    if not environment.strip():
+        raise SystemExit(json.dumps(dict(status='error', error='a gym is set up in an environment: name a saved one, or '
+                                         +repr(BARE)+' for a bare gym (Python and a shell only)',
+                                         environments=environments())))
+    environment = '' if environment.strip() == BARE else environment.strip()
     if environment and not environment_exists(environment):
         raise SystemExit(json.dumps(dict(status='error', error='no saved environment named '+repr(environment),
                                          environments=[e['name'] for e in environments()])))
@@ -168,6 +179,8 @@ def authorize(project: Path, repo: Path | None = None, engine_config: Path | Non
     if not (target/layout.STATE_DIRNAME/'route.json').exists():
         terra(target, 'route', 'init')
     furnished = init_module.furnish(target, brief.get('title') or project.name)
+    if environment:
+        init_module.set_base(target, environment)   # the gym says what it was set up with, beside the brief
     crew = init_module.pin_crew(target, engine_config) if engine_config else {}
     if target != project:
         shutil.rmtree(project)
@@ -186,7 +199,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument('slug')
     p.add_argument('--title', required=True)
     p.add_argument('--mission', required=True)
-    p.add_argument('--environment', default='', help='the saved gym environment this project runs in (see `environments`)')
+    p.add_argument('--environment', default='', help='the saved environment this gym is set up in (see `environments`), or `none` for a bare gym; required')
     p = sub.add_parser('discard', help='Remove a draft and everything in it')
     p.add_argument('slug')
     p = sub.add_parser('show', help='Pull a draft up on the desk for the Administrator to look at')

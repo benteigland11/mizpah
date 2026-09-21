@@ -24,7 +24,7 @@ def gyms(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_a_new_draft_is_a_terra_project_in_draft_status(gyms: Path) -> None:
-    out = draft.new('ornith-landing', 'Ornith landing page', 'Build a page and prove it.')
+    out = draft.new('ornith-landing', 'Ornith landing page', 'Build a page and prove it.', 'none')
     assert out['status'] == 'ok' and out['brief_status'] == 'draft' and out['title'] == 'Ornith landing page'
     brief = json.loads((gyms/'ornith-landing'/'.mizpah'/'brief.json').read_text())
     assert brief['status'] == 'draft' and brief['mission'] == 'Build a page and prove it.'
@@ -33,16 +33,16 @@ def test_a_new_draft_is_a_terra_project_in_draft_status(gyms: Path) -> None:
 
 def test_slug_rule_and_duplicates_are_refused(gyms: Path) -> None:
     with pytest.raises(SystemExit) as refused:
-        draft.new('Ornith Landing', 't', 'm')
+        draft.new('Ornith Landing', 't', 'm', 'none')
     assert 'slug' in str(refused.value)
-    draft.new('ornith-landing', 't', 'm')
+    draft.new('ornith-landing', 't', 'm', 'none')
     with pytest.raises(SystemExit) as again:
-        draft.new('ornith-landing', 't', 'm')
+        draft.new('ornith-landing', 't', 'm', 'none')
     assert 'exists' in str(again.value)
 
 
 def test_show_and_discard(gyms: Path) -> None:
-    draft.new('ornith-landing', 't', 'm')
+    draft.new('ornith-landing', 't', 'm', 'none')
     assert draft.show('ornith-landing')['showing'] == dict(draft='ornith-landing')
     with pytest.raises(SystemExit) as missing:
         draft.show('nope')
@@ -52,14 +52,14 @@ def test_show_and_discard(gyms: Path) -> None:
 
 
 def test_a_draft_is_a_gym_with_a_route_and_no_furnishing_yet(gyms: Path) -> None:
-    draft.new('ornith-landing', 't', 'm')
+    draft.new('ornith-landing', 't', 'm', 'none')
     state = gyms/'ornith-landing'/'.mizpah'
     assert (gyms/'ornith-landing'/'.git').is_dir() and (state/'route.json').exists()
     assert not (state/'config.json').exists()   # furnishing (config, sessions, registry) is the host's, on signature
 
 
 def test_issued_gyms_are_read_roots_and_drafts_are_not(gyms: Path) -> None:
-    draft.new('ornith-landing', 't', 'm')
+    draft.new('ornith-landing', 't', 'm', 'none')
     (gyms/'issued-20260920T000000Z'/'.mizpah').mkdir(parents=True)
     (gyms/'issued-20260920T000000Z'/'.mizpah'/'brief.json').write_text(json.dumps(dict(status='active', title='x')))
     (gyms/'.home').mkdir()
@@ -70,14 +70,14 @@ def test_issued_gyms_are_read_roots_and_drafts_are_not(gyms: Path) -> None:
 
 def test_authorize_in_place_furnishes_and_keeps_the_directory(gyms: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr('mizpah.init.register_project', lambda *a, **k: None)
-    draft.new('ornith-landing', 't', 'm')
+    draft.new('ornith-landing', 't', 'm', 'none')
     out = draft.authorize(gyms/'ornith-landing')
     assert out['status'] == 'ok' and out['gym'] and out['project'] == str(gyms/'ornith-landing')
     assert (gyms/'ornith-landing'/'.mizpah'/'config.json').exists() and (gyms/'ornith-landing'/'.mizpah'/'sessions').is_dir()
 
 
 def test_authorize_with_the_engine_config_locks_the_crew_in(gyms: Path, homes: Path) -> None:
-    draft.new('ornith-landing', 't', 'm')
+    draft.new('ornith-landing', 't', 'm', 'none')
     harness = homes/'harness.json'
     harness.write_text(json.dumps(dict(worker=dict(provider='subscription', subscription='openai_chatgpt', generation=dict(model='gpt-5.6-luna', reasoning_effort='high')),
                                        controller=dict(provider='llama_client', generation=dict(model='gemma-4-26b')))))
@@ -95,7 +95,7 @@ def test_authorize_with_the_engine_config_locks_the_crew_in(gyms: Path, homes: P
 
 
 def test_an_issued_brief_is_not_discardable(gyms: Path) -> None:
-    draft.new('ornith-landing', 't', 'm')
+    draft.new('ornith-landing', 't', 'm', 'none')
     path = gyms/'ornith-landing'/'.mizpah'/'brief.json'
     path.write_text(json.dumps(json.loads(path.read_text()) | dict(status='active')))
     with pytest.raises(SystemExit) as refused:
@@ -138,7 +138,7 @@ def test_turn_log_round_trips(tmp_path: Path) -> None:
 def test_the_sandbox_owns_the_gyms_with_issued_ones_read_only(gyms: Path, tmp_path: Path) -> None:
     from mizpah.worker import load_config
     config = load_config(ROOT/'config.luna.json')
-    draft.new('ornith-landing', 't', 'm')
+    draft.new('ornith-landing', 't', 'm', 'none')
     (gyms/'issued-20260920T000000Z'/'.mizpah').mkdir(parents=True)
     (gyms/'issued-20260920T000000Z'/'.mizpah'/'brief.json').write_text(json.dumps(dict(status='active', title='x')))
     shell = deputy.shell_for(config, tmp_path/'root')
@@ -160,7 +160,7 @@ def homes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_authorize_in_place_makes_the_draft_a_project_where_it_is(gyms: Path, homes: Path) -> None:
-    draft.new('ornith-landing', 'Ornith landing page', 'm')
+    draft.new('ornith-landing', 'Ornith landing page', 'm', 'none')
     (gyms/'ornith-landing'/'content').mkdir()
     (gyms/'ornith-landing'/'content'/'pitch.md').write_text('# Ornith\n')
     out = draft.authorize(gyms/'ornith-landing')
@@ -181,7 +181,7 @@ def test_authorize_into_a_repository_keeps_its_files(gyms: Path, homes: Path) ->
     repo.mkdir()
     subprocess.run(['git', 'init', '-q'], cwd=repo, check=True)
     (repo/'README.md').write_text('theirs\n')
-    draft.new('ornith-landing', 'Ornith', 'm')
+    draft.new('ornith-landing', 'Ornith', 'm', 'none')
     (gyms/'ornith-landing'/'README.md').write_text('deputy\n')
     out = draft.authorize(gyms/'ornith-landing', repo)
     assert out['project'] == str(repo) and out['kept'] == ['README.md'] and not out['gym']
@@ -194,7 +194,7 @@ def test_authorize_into_a_repository_keeps_its_files(gyms: Path, homes: Path) ->
 
 
 def test_authorize_refuses_a_repository_that_is_not_a_git_top_or_already_a_project(gyms: Path, homes: Path) -> None:
-    draft.new('ornith-landing', 'Ornith', 'm')
+    draft.new('ornith-landing', 'Ornith', 'm', 'none')
     plain = homes/'plain'
     plain.mkdir()
     with pytest.raises(SystemExit) as refused:
@@ -218,3 +218,32 @@ def test_the_prompt_is_composed_from_the_folder_in_order(tmp_path: Path) -> None
     (tmp_path/'x').mkdir()
     (tmp_path/'x'/'prompt').symlink_to(tmp_path)
     assert deputy.policy_text(cfg) == 'Only this.\n'
+
+
+def test_a_gym_is_set_up_in_an_environment_chosen_out_loud(gyms: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from mizpah import bases
+    monkeypatch.setattr(bases, 'bases_root', lambda: tmp_path/'bases')
+    (tmp_path/'bases').mkdir()
+    bases.create('piano', note='a piano studio')
+    with pytest.raises(SystemExit) as unsaid:
+        draft.new('quiet', 'Quiet', 'm')
+    refusal = json.loads(str(unsaid.value))
+    assert 'name a saved one' in refusal['error'] and [e['name'] for e in refusal['environments']] == ['piano']
+    assert not (gyms/'quiet').exists()
+    with pytest.raises(SystemExit) as unknown:
+        draft.new('quiet', 'Quiet', 'm', 'organ')
+    assert 'no saved environment' in str(unknown.value)
+    out = draft.new('etude', 'Etude', 'm', 'piano')
+    assert out['environment'] == 'piano'
+    bare = draft.new('quiet', 'Quiet', 'm', 'none')
+    assert bare['environment'] == ''
+
+
+def test_signing_records_the_environment_on_the_gym_itself(gyms: Path, homes: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from mizpah import bases, init as init_module
+    monkeypatch.setattr(bases, 'bases_root', lambda: tmp_path/'bases')
+    (tmp_path/'bases').mkdir()
+    bases.create('piano', note='a piano studio')
+    draft.new('etude', 'Etude', 'm', 'piano')
+    out = draft.authorize(gyms/'etude')
+    assert init_module.project_config(Path(out['project']))['base'] == 'piano'

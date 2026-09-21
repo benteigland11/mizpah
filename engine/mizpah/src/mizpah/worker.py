@@ -280,16 +280,22 @@ def prior_readings(project: Path, unknowns: list[dict[str, Any]]) -> dict[str, d
 
 def render_assignment(task: dict[str, Any], unknowns: list[dict[str, Any]], map_id: str,
                       inputs: dict[str, list[str]] | None = None, state_dirname: str = layout.STATE_DIRNAME,
-                      prior: dict[str, dict[str, Any]] | None = None) -> str:
-    """The task, its unknowns and the map: nothing about method and nothing from the brief.
-    `inputs` maps an unknown id to the knowns its probe declares; the worker reads them from ctx["inputs"].
+                      prior: dict[str, dict[str, Any]] | None = None, brief: dict[str, Any] | None = None) -> str:
+    """The task, its unknowns and the map: nothing about method, and of the brief only the entries each unknown
+    cites. `inputs` maps an unknown id to the knowns its probe declares; the worker reads them from ctx["inputs"].
     `prior` maps an unknown id to what it last read, when this task is a repair or a re-measure: the delta is
     put in front of the worker on its first turn (a repair task was told "make it pass" and not what failed,
-    2026-09-20)."""
+    2026-09-20). `brief` supplies the cited entries' text: a builder told to make "the requested three-section
+    piano passage" had never been told what was requested (changing-meter gym, 2026-09-21) — the request lives
+    in the need the unknown cites, and the worker gets that line, not the brief."""
     lines = ['Route task `'+task['id']+'` (bucket '+task['bucket']+': '+BUCKET_MODES.get(task['bucket'], '')+'): '+task['title'],
              'It resolves '+('one unknown' if len(unknowns) == 1 else str(len(unknowns))+' unknowns')+':']
     for unknown in unknowns:
         lines += describe_unknown(unknown)
+        cited = cited_entries(brief, unknown) if brief else []
+        if cited:
+            lines.append('  what the brief asks for, in its words (the entries this unknown serves):')
+            lines += ['    '+ref+' — '+text for ref, text in cited]
         last = (prior or {}).get(unknown['id'])
         if last:
             value = last.get('value')
@@ -302,6 +308,11 @@ def render_assignment(task: dict[str, Any], unknowns: list[dict[str, Any]], map_
                             'what it counted, change the thing it reads so the count passes, then take the reading again. '
                             'Do not change the probe to make it pass.' if verdict == 'false' else
                             '. The thing it reads has changed since: take the reading again with the same probe.'))
+    non_goals = [str(n) for n in ((brief or {}).get('non_goals') or []) if str(n).strip()]
+    if non_goals:
+        # Every work order carries the brief's non-goals: the lines the work must not cross, whatever the task.
+        lines.append('Not asked for, by the brief (do not build, render or spend turns on these):')
+        lines += ['  - '+n for n in non_goals]
     acceptance = [a for a in task.get('acceptance') or [] if not str(a).startswith('unknown:')]
     if acceptance:
         lines.append('Acceptance: '+'; '.join(acceptance))
@@ -352,9 +363,23 @@ def unknown_notes(unknown: dict[str, Any]) -> dict[str, str]:
     result: dict[str, str] = {}
     for part in (unknown.get('notes') or '').split(';'):
         key, _, value = part.strip().partition(' ')
-        if key in ('cites', 'source', 'creates') and value.strip():
+        if key in ('cites', 'source', 'creates', 'also') and value.strip():
             result[key] = value.strip()
     return result
+
+
+def cited_entries(brief: dict[str, Any], unknown: dict[str, Any]) -> list[tuple[str, str]]:
+    """(ref, text) for every brief entry the unknown cites — the primary cite and the `also` list — in order,
+    skipping references the brief no longer has."""
+    notes = unknown_notes(unknown)
+    refs = [notes.get('cites', '')]+[r.strip() for r in re.split(r'[|,]', notes.get('also', '')) if r.strip()]
+    out: list[tuple[str, str]] = []
+    for ref in refs:
+        kind, _, index = ref.partition(':')
+        entries = brief.get({'need': 'needs', 'deliverable': 'deliverables', 'non_goal': 'non_goals'}.get(kind, '')) or []
+        if index.isdigit() and 1 <= int(index) <= len(entries) and (ref, str(entries[int(index)-1])) not in out:
+            out.append((ref, str(entries[int(index)-1])))
+    return out
 
 
 def describe_unknown(unknown: dict[str, Any]) -> list[str]:
@@ -1996,8 +2021,12 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         task = pick_task(config, project, task_id)
         map_id = open_task_map(config, project, task)
         unknowns = [read_unknown(project, uid, map_id) for uid in task_unknown_ids(task)]
+        try:
+            brief = json.loads((project/layout.dirname(project)/'brief.json').read_text())
+        except (OSError, ValueError):
+            brief = {}
         assignment = render_assignment(task, unknowns, map_id, probe_inputs(project, task), layout.dirname(project),
-                                       prior=prior_readings(project, unknowns))
+                                       prior=prior_readings(project, unknowns), brief=brief)
         parts = library_parts(config, project, unknowns)
         if parts:
             assignment += ('The library already has parts near this work; install and extend one where it nearly fits '

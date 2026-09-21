@@ -54,16 +54,18 @@ def deputy_root() -> Path:
 
 # The Deputy's verbs, typed because they are new and undiscoverable; everything else is bash and `terra --help`.
 DEPUTY_TOOLS: tuple[dict[str, Any], ...] = (
-    dict(name='draft_new', description='Start a draft: a gym under /work with an empty brief (title and mission set, '
-         'status draft). Then add needs, deliverables, non-goals and the budget with `terra brief set` from inside '
-         '/work/<slug> in bash, a few entries per call, and name the environment it runs in with `terra brief set '
-         '--environment <name>` — `python -m mizpah.draft environments` lists the saved ones and what each provides; '
-         'without one the run has Python and a shell and nothing else.',
-         command='python -m mizpah.draft new {slug} --title {title} --mission {mission}',
+    dict(name='draft_new', description='Set up a gym: a training ground under /work in a named environment, with an '
+         'empty brief (title and mission set, status draft). The environment is the point of the gym and is chosen '
+         'here — a saved one by name (`python -m mizpah.draft environments` lists them and what each provides) or '
+         '`none` for a bare gym with Python and a shell only; settle it with the Administrator first. Then add needs, '
+         'deliverables, non-goals and the budget with `terra brief set` from inside /work/<slug> in bash, a few '
+         'entries per call.',
+         command='python -m mizpah.draft new {slug} --title {title} --mission {mission} --environment {environment}',
          parameters=dict(type='object', properties=dict(slug=string('kebab-case name, e.g. ornith-landing'),
                                                         title=string('the brief title, a few words'),
-                                                        mission=string('one or two sentences: what is built or found out, and how it is proved')),
-                         required=['slug', 'title', 'mission'])),
+                                                        mission=string('one or two sentences: what is built or found out, and how it is proved'),
+                                                        environment=string('a saved environment name, or "none" for a bare gym')),
+                         required=['slug', 'title', 'mission', 'environment'])),
     dict(name='draft_show', description='Pull a draft up on the desk beside the conversation so the Administrator reads '
          'the sheet itself. Do it after every change to a draft.',
          command='python -m mizpah.draft show {slug}',

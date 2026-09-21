@@ -198,3 +198,28 @@ def test_package_installs_are_refused_with_the_way_out():
         assert any(re.search(pat, cmd) for pat, _ in REFUSED_PATTERNS), cmd
     for cmd in ('python -m pip --version', 'pip list', 'cartograph install data-x-python'):
         assert not any(re.search(pat, cmd) and 'route block' in msg for pat, msg in REFUSED_PATTERNS), cmd
+
+
+def test_the_assignment_carries_the_brief_entries_an_unknown_cites():
+    """The worker never sees the brief; it sees the entries its unknowns cite, in the brief's words. A builder
+    told to make 'the requested three-section piano passage' had never been shown the request (changing-meter
+    gym, 2026-09-21)."""
+    from mizpah.worker import render_assignment, cited_entries
+    brief = dict(needs=['A solo piano passage in three sections: 3/4, then 6/8, then 5/4, one shared pulse.',
+                        'meters.md agrees with piece.mid onset for onset.'],
+                 deliverables=['piece.mid', 'meters.md: per section, its meter and grouping'])
+    unknown = dict(id='piece_mid_built', type='boolean', claim='`piece.mid` holds the requested passage',
+                   evidence_needed='parse it', notes='cites deliverable:1; also need:1; source piece.mid; creates piece.mid')
+    assert cited_entries(brief, unknown) == [('deliverable:1', 'piece.mid'), ('need:1', brief['needs'][0])]
+    text = render_assignment(dict(id='build_piece_mid', bucket='low', title='Build it'), [unknown], 't_build', brief=brief)
+    assert 'what the brief asks for, in its words' in text
+    assert 'need:1 — A solo piano passage in three sections' in text and 'deliverable:1 — piece.mid' in text
+    assert 'meters.md agrees' not in text   # only the entries this unknown cites, never the rest of the brief
+    # The brief's non-goals ride on every work order.
+    with_non_goals = dict(brief, non_goals=['Rendered mp3'])
+    text = render_assignment(dict(id='build_piece_mid', bucket='low', title='Build it'), [unknown], 't_build', brief=with_non_goals)
+    assert 'Not asked for, by the brief' in text and '  - Rendered mp3' in text
+    # A cite the brief no longer has is skipped; no brief, no section.
+    dangling = dict(unknown, notes='cites need:9')
+    assert cited_entries(brief, dangling) == []
+    assert 'what the brief asks for' not in render_assignment(dict(id='b', bucket='low', title='t'), [unknown], 't')
