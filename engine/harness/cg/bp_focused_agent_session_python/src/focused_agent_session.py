@@ -410,7 +410,11 @@ def _identity(client: ModelClient | None) -> dict[str, Any] | None:
     return result
 
 
-HOST_SHELL_KEYS = ('refused_patterns', 'scratch_root')
+# Host policy, not the binding: what the sandbox refuses, where the host spills, and how much a command may use
+# (limits: output caps, memory, cpu, seconds). A saved session reopens under any of these; the binding is the tree,
+# the binds, the environment and the network — what gives the saved state its meaning. Lowering the inline output
+# cap between two runs (2026-09-21) blocked a task the same way a refusal-wording change had.
+HOST_SHELL_KEYS = ('refused_patterns', 'scratch_root', 'limits')
 EVENT_TEXT = 4000   # a continuation's or interjection's text rides in its journal event, so a trace can say why the host spoke
 
 
