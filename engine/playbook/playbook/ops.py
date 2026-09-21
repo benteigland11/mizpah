@@ -650,7 +650,11 @@ _PLAN_RANGE = re.compile(r"\bsteps?\s+(\d+)(?:\s*[-–]\s*(\d+))?((?:\s*,\s*(?:a
 
 
 def _plan_path(walk: Path) -> Path:
-    return walk.with_name(walk.name[:-3] + ".plan.md") if walk.name.endswith(".md") else walk.with_name(walk.name + ".plan.md")
+    """`x.plan.md` beside the walk `x.md`; `x.md.plan.md` is taken too (a worker read "<this file's name>.plan.md"
+    as append and wrote a good plan under the wrong name)."""
+    canonical = walk.with_name(walk.name[:-3] + ".plan.md") if walk.name.endswith(".md") else walk.with_name(walk.name + ".plan.md")
+    appended = walk.with_name(walk.name + ".plan.md")
+    return appended if (appended.is_file() and not canonical.is_file()) else canonical
 
 
 def _plan_coverage(plan: Path) -> set[int]:
@@ -874,7 +878,7 @@ def _cut(entries: list[dict[str, Any]], start: int, limit: int) -> int:
 
 _GUIDANCE = ("This procedure is the validation of your work: each step is a check or a change someone found necessary, "
              "written down so the next piece gets it too. Read every step first. Then, before anything else, write the plan "
-             "beside this file — `<this file's name>.plan.md` (the walk `x.md` has the plan `x.plan.md`): a numbered list of the "
+             "at the path named as `plan:` at the top of this file: a numbered list of the "
              "actions this artifact needs, each line naming the steps it covers and what it will do here (\"steps 12-15: voice "
              "each harmony as LH root+fifth under a RH melody in sustained thirds\"), and a line for the steps that do not apply "
              "with why (\"steps 9-11: that gym's 12/8 probe; this piece is 4/4\"). Every step number lands somewhere; nothing "
@@ -922,7 +926,17 @@ def open_procedure(procedure_id: str, purpose: str, target_dir: str | Path = "."
                              "second walk for a second thing.")}
     document = read_document(store.procedure_path(procedure_id))
     _require_valid(document, procedure_id)
-    lines = [f"# {document.get('title') or procedure_id}", "", f"procedure: `{procedure_id}`", f"for: {purpose}", ""]
+    out_dir = Path(target_dir) / OPEN_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    slug = re.sub(r"[^a-z0-9]+", "-", purpose.lower()).strip("-")[:48] or "walk"
+    path = out_dir / f"{procedure_id}--{slug}.md"
+    n = 2
+    while path.exists():
+        path = out_dir / f"{procedure_id}--{slug}-{n}.md"
+        n += 1
+    plan_path = path.with_name(path.name[:-3] + ".plan.md")
+    lines = [f"# {document.get('title') or procedure_id}", "", f"procedure: `{procedure_id}`", f"for: {purpose}",
+             f"plan: `{plan_path}` — write it before the first tick (see below)", ""]
     if document.get("description"):
         lines += [str(document["description"]).strip(), ""]
     if document.get("tags"):
@@ -966,14 +980,6 @@ def open_procedure(procedure_id: str, purpose: str, target_dir: str | Path = "."
                       + f" — next walk: `playbook open {procedure_id} --from {start + len(chosen)} --for \"...\"`; "
                       "the route carries it (`terra route block` naming it when it is more than this task holds)", ""]
         count = len(chosen)
-    out_dir = Path(target_dir) / OPEN_DIR
-    out_dir.mkdir(parents=True, exist_ok=True)
-    slug = re.sub(r"[^a-z0-9]+", "-", purpose.lower()).strip("-")[:48] or "walk"
-    path = out_dir / f"{procedure_id}--{slug}.md"
-    n = 2
-    while path.exists():
-        path = out_dir / f"{procedure_id}--{slug}-{n}.md"
-        n += 1
     path.write_text("\n".join(lines))
     nxt = _render_walk(path) if not nested else None
     result = {"ok": True, "id": procedure_id, "title": document.get("title"), "for": purpose, "steps": count, "path": str(path)}
