@@ -167,6 +167,7 @@ def init(repo: Path, *, title: str, mission: str, terra: str, require_git: bool 
     out = furnish(repo, title)
     if base is not None:
         set_base(repo, base)
+        run('brief', 'set', '--environment', base)   # the brief says where the run happens; the config is how
         out['base'] = base
     return out
 
