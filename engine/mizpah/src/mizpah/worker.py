@@ -155,6 +155,12 @@ def pick_task(config: dict[str, Any], project: Path, task_id: str | None = None)
         mine = [t for t in tasks if t.get('status') == 'in_progress' and t.get('owner_agent') == config['mizpah']['agent']]
         if mine:
             return mine[0]
+        # Done on the route but its session never finished (killed after `route complete`, in the review or
+        # the write-up): resumed too, so the write-up lands; `route next` does not list done tasks.
+        done = [t for t in terra(config, project, 'route', 'status')['tasks'] if t['id'] == task_id and t.get('status') == 'done'
+                and t.get('owner_agent') == config['mizpah']['agent']]
+        if done:
+            return done[0]
     pickable = [task for task in tasks if task.get('pickable')]
     if not pickable:
         raise RuntimeError('No pickable route task'+(' '+task_id if task_id else ''))
@@ -591,6 +597,7 @@ class _store_lock:
 
 
 PLAYBOOK_BASE = 'playbook_base'   # under the task root: the store as the task received it, for three-way merges
+WRITEUP_MARK = 'writeup.started'   # under the task root: the green message went out; a resume harvests, never re-asks
 
 
 def merge_procedure(base: dict[str, Any], theirs: dict[str, Any], yours: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
@@ -2240,7 +2247,10 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         session.continue_with(red_message(gate, project, map_id, task_unknown_ids(task)),
                               label='gate red: '+('tick the walks you opened' if evidence_ok else 'repair round'))
     budget = cap
-    if gate['ok'] and budget-status['completed_worker_turns'] > 0:
+    # The write-up is asked for once: the marker survives a pause, and a resume inside the write-up (the session
+    # above ran to its end) goes straight to the harvest rather than asking a second time.
+    if gate['ok'] and budget-status['completed_worker_turns'] > 0 and not (root/WRITEUP_MARK).exists():
+        (root/WRITEUP_MARK).write_text(str(status['completed_worker_turns']))
         # Only after green: the method goes into the library, and only through the harvest.
         followed = procedures_used(root)
         # The reviewer's question changes with the phase: the probes are done; now it reads the procedures the
@@ -2259,6 +2269,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
                               label='gate green: write up the method')
 
         status = run_through_outages(session, config, root, maximum_worker_turns=budget-status['completed_worker_turns'])
+    if gate['ok'] and (root/WRITEUP_MARK).exists():
         session.prune_workspaces()
         widgets = harvest_widgets(evidence(session), root, config, project)
         playbook = harvest_playbook(evidence(session), store, config,

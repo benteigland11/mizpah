@@ -47,6 +47,13 @@ def pickable(config: dict[str, Any], project: Path, root: Path | None = None) ->
     tasks = terra(config, project, 'route', 'next')['tasks']
     resumable = [t for t in tasks if root is not None and t.get('status') == 'in_progress'
                  and t.get('owner_agent') == config['mizpah']['agent'] and (root/'tasks'/t['id']/'state.sqlite3').exists()]
+    if root is not None:
+        # Done on the route with a session that never reported (killed after `route complete`, in the review or
+        # the write-up): resumed first, so the write-up lands instead of being skipped for the next task.
+        unreported = [t for t in terra(config, project, 'route', 'status')['tasks'] if t.get('status') == 'done'
+                      and t.get('owner_agent') == config['mizpah']['agent'] and (root/'tasks'/t['id']/'state.sqlite3').exists()
+                      and not (root/'tasks'/t['id']/'result.json').exists()]
+        resumable = unreported+resumable
     return resumable+controller.ready_order(project, tasks)
 
 
