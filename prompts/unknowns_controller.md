@@ -2,7 +2,7 @@
 
 ## Parts
 
-- **id** — a slug. Its probe is `<id>_probe`; the probe returns `{"<id>": value}`.
+- **id** — a slug; the quantity a probe reports for it.
 - **type** — one of the five below; it decides what a resolved reading is.
 - **claim** — the sentence a reading of this quantity makes true or false.
 - **evidence** — the reading a probe takes, and from which source. The source is the artifact or data the probe reads or runs; never a file written to say the answer.

@@ -16,7 +16,7 @@ The words every seat in this loop uses, with one meaning each. A term below is u
 - **Map** — Evidence map to provide confidence in the state of the project. The way to make a non verifiable project have confidence by collecting verifiable chunks and composing them. Every task includes 1 global map, while sub maps are allowed for more focused work and exploration.
 - **Unknown** — A named exploratative driver that the work shall resolve. Used as vehicles to provide evidence for knowns in the map through verifiable work.
 - **Quantity** — Typed value the unknown can be mapped to. Probes will provide these as evidence to the known. Types: number, boolean, label, formula, relation.
-- **Probe** — Instrument that provides evidence towards an unknown's quantity to graduate it to a known by producing a reading.
+- **Probe** — Instrument that measures a source and reports the quantities it declares; one run of it is evidence for every unknown it measures.
 - **Reading** — Values produced by probes that get accepted to a map through quantities.
 - **Run** — Stamped execution of a probe which is the pointer used to provide evidence to graduate an unknown.
 - **Known** — An unknown that has been provided with enough evidence from probes to be considered useful to prove the design attached with a confidence rating.
