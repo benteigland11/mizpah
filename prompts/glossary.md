@@ -30,42 +30,37 @@ The words every seat in this loop uses, with one meaning each. A term below is u
 
 ## Playbook
 
-- **Procedure** — a method in the playbook: a named checklist of steps a worker walks. `playbook search`, `load`, `create`, `add-step`, `edit-step`, `validate`.
-- **Step** — one item of a procedure: a title and what to do. A step may link another procedure.
-- **Walk** — a procedure opened for one task as a checklist file under `.playbook/open/`, flattened with everything it links (`playbook open <id> --for …`).
-- **Plan** — the walk's plan file, the worker's placement of every step before any tick.
-- **Tick** — marking one step of a walk `[x]` done with a note, or `[-]` skipped with a reason, on the command that did the step's work (`playbook tick`).
-- **Reach** — how long a method really is through its links.
-- **Gravity** — how many procedures link into one.
-- **Improve** — changing the procedure that was walked so its next walk is better: a step added, edited or reordered. Allowed after green.
+- **Procedure** — Unit stored in Playbook that holds the information for how things are carried out to the best of Mizpah's knowledge. A constant WIP.
+- **Step** — One sequential item in a procedure that describes how to carry how the work or what procedure to use. Each gets checked off as the work has completed.
+- **Plan** — File based on workers reading of the procedure. Used as the filter to select what is relevant for the current work at hand.
+- **Tick** — Marking a step as done [x] or skipped [-] after the work has carried out.
+- **Reach** — Total steps if the entire chain of procedures was carried out. Used as a feedback signal to break down work orders and provide task work estimates.
+- **Gravity** — Measurement of procedural linking to help determine the LCD procedure. This is so we can identify best entry points.
 
 ## Cartograph
 
-- **Widget** — an instrument in the Cartograph library: general code with an API, tests, examples and a README, installed under `cg/<domain>-<name>-<language>/`. A widget takes the thing it acts on as an argument; it never carries the project's material. `cartograph search`, `install`, `create`, `validate`.
-- **Check-in** — a widget entering the library. Done by the host after green, never by the worker.
-- **Blueprint** — several widgets behind one API.
-- **Glue** — the short project-specific script that calls widgets with this project's material. Glue is not a widget and does not transfer.
+- **Widget** — Mini library in 1 language that gets stored, resused, and improved over time with work. Carry metadata, src, tests, and examples that all must pass through a langauge native validation gate. Stores general methods and not hardcoded project specific ones.
+- **Check-in** — Widget passing validation gets checked in to the registry where it can be found, improved, and used again.
+- **Blueprint** — Composition of multiple widgets into 1 library which also runs through similar validation gates.
+- **Glue** — Code written outside of the widgets and blueprints that is project specific and calls the widgets and blueprints.
+- **Custom Rules** — Addition validation gates that can be added by the client to meet their specific validation needs per language. Runs alongside the Cartograph validation engine.
 
 ## Mizpah
 
 - **Task** — The combination of environments, work orders, propsals, and daily briefs that perform the job handed down by the Brief performed by the controller, worker, and reviewer.
 - **Work Order** — A route entry that includes the unknowns it resolves, bucket, dependencies that is handed to the worker and is the main unit of progress.
-- **Library** — what persists across projects: the playbook (procedures) and the widget library (widgets). Nothing else transfers.
-- **Instrument** — a probe or a widget: a thing that measures or acts. An instrument is never itself a finding.
-- **Base** — a saved environment a gym mounts read-only (toolchain, venv, data). What is needed beyond it is installed in the project.
+- **Library** — Units of knowledge persisting across all projects. Includes widgets, blueprints, and procedures.
+- **Instrument** — Items that get checked in to the library and can be reused and improved.
+- **Repo** — the requestor's own project: a repository the team works in, where the deliverables are theirs.
+- **Gym** — a sandboxed, pre-configured environment the team is dropped into to get better at something, apart from any repo. Its deliverables are practice; only what reaches the library transfers.
 - **Harvest** — at green, the host's collection of what the worker minted while working: widgets validated and checked in, procedures created or improved merged to the store.
 - **Controller** — owns brief, unknowns, route. Never uses the playbook; never sees the worker's transcript; never instructs the worker.
 - **Worker** — owns procedures, widgets, probes, knowns, map writes. Works one work order in a sandbox with `bash`, `read`, `write`, `edit` and the tools' commands.
 - **Reviewer** — the controller's look over the worker's shoulder at a completion claim: are the probes honest — does the reading come from the named source, and would a wrong artifact fail it. It never judges execution, order, or turns.
 - **Correction** — the reviewer's one instruction to the worker: the delta — what the files show is missing and what to keep — never a restated requirement, a tool, a method or a source by name. Held until the reviewer looks again; withdrawn when the files no longer show it.
-- **Guidance** — the correction as the worker sees it, dated with the turn it was issued and standing until the next look.
 - **Claim** — the worker's `done` after `terra route complete` succeeded. The reviewer's look happens here.
-- **Departure** — what the reviewer names: a probe or artifact that does not do what the brief entry or unknown says.
 - **Turn** — one worker model call and the tool results it caused. Turns are cost, not score.
-- **Window** — the worker's context. **Rollover** — the window reaching its threshold. **Handoff** — the memory the worker writes for the next window.
-- **Session** — one worker's saved state for one work order: journal, windows, workspace. A paused session reopens where it was.
+- **Handoff** — the memory the worker writes for the next window when its context rolls over: what is established, what is unfinished, where to continue.
 - **Workspace** — the worker's tree under `/work`: the project, its `.mizpah` state, its playbook walks, its `cg/`.
 - **Sandbox** — where every command runs: the workspace bound in, the base read-only, no network beyond the allowed hosts, the toolchain and the engine invisible.
-- **Green / red** — the gate's verdict on a work order. Only after green may the worker write or improve a procedure.
 - **Estimate** — the bucket's turns; past it the worker is asked whether to continue, and decides.
-- **Nudge** — a note from the requestor to a running worker, delivered once at the next turn boundary.
