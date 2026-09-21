@@ -2289,6 +2289,19 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             status_now = session.status()
             if status_now['phase'] == 'worker' and status_now['pending_io'] is None:
                 session.interject(note, label='resumed: done tool added')
+        # The person's word to this worker, left as `nudge.md` in the task root while the loop was paused: put
+        # before it once, as the next user message, then kept as `nudge.delivered.md` for the record. The only
+        # way in a person had was the controller's note; a worker an hour into decoding a PDF had nobody to say
+        # "there is a cheaper reading".
+        nudge = root/'nudge.md'
+        if nudge.exists() and nudge.read_text().strip():
+            status_now = session.status()
+            text = 'From the person running this loop:\n'+nudge.read_text().strip()+'\n'
+            if status_now['phase'] == 'complete':
+                session.continue_with(text, label='the person')
+            elif status_now['phase'] == 'worker' and status_now['pending_io'] is None:
+                session.interject(text, label='the person')
+            nudge.rename(root/'nudge.delivered.md')
         if continued:
             if bind_mode(config):
                 # The adopted session's project state is the route and map as of its first task; the host has
