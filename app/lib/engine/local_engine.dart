@@ -280,10 +280,20 @@ class LocalEngine implements Engine {
     final r = _runs[id];
     final brief = _briefs[id];
     if (r == null || brief == null) throw StateError('no project listed as $id');
-    if (brief['status'] != 'draft') throw StateError('the brief of $id is issued; an issued brief is not discarded');
     if (r.session.isNotEmpty) throw StateError('$id has run; delete its sessions first');
     final gyms = RunDiscovery.gymsRoot().path;
-    if (r.project.startsWith('$gyms/')) {
+    if (brief['status'] != 'draft') {
+      // An issued brief is never discarded through the Deputy — but a gym whose
+      // every session was deleted is a remnant of a run, not a draft, and the
+      // only thing left to do with it is remove the folder.
+      if (!r.project.startsWith('$gyms/')) throw StateError('the brief of $id is issued; an issued brief is not discarded');
+      final folder = Directory(r.project);
+      if (folder.existsSync()) folder.deleteSync(recursive: true);
+      for (final side in ['${r.project}.out', '${r.project}.err']) {
+        final f = File(side);
+        if (f.existsSync()) f.deleteSync();
+      }
+    } else if (r.project.startsWith('$gyms/')) {
       final name = r.project.substring(gyms.length + 1).split('/').first;
       final res = await runTool(_pythonExecutable, ['-m', 'mizpah.draft', 'discard', name], workingDirectory: engine.mizpahDir);
       if (res.exitCode != 0) {
