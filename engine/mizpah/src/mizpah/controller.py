@@ -1045,25 +1045,26 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         # A budget ask is its own patch — the points, nothing else. Every budget CR today was smuggled into a
         # need ("provide five more points"), which an acceptance then wrote into the brief as a requirement
         # while the budget stayed where it was (attempt 3, 2026-09-20).
-        if item.get('budget_points') is not None:
+        if item.get('budget_points') is not None and item.get('budget_delta') is None:
+            refusals.append(label+': the budget is never written as a number; ask for more with "budget_delta": +N (the '
+                            'points beyond the current '+str(observation['brief'].get('budget_points'))+')'); continue
+        if item.get('budget_delta') is not None:
+            # A budget ask is a delta, on its own: added to the budget as it stands when the person accepts. The
+            # changing-meter gym's CR-001 carried `budget_points: 3` (the price of the task it added) beside a need
+            # and a deliverable, was accepted for those, and cut a 120-point budget to 3 (2026-09-21).
             try:
-                points = int(item['budget_points'])
+                delta = int(item['budget_delta'])
             except (TypeError, ValueError):
-                refusals.append(label+': budget_points is a whole number of points'); continue
-            if points < 0:
-                refusals.append(label+': budget_points is a whole number of points'); continue
-            # The number is the new total, and a proposal only ever asks for more: the changing-meter gym's
-            # CR-001 carried budget_points 3 (the price of the task it added) beside a need and a deliverable,
-            # was accepted for those, and cut the budget from 120 to 3. A cut is the person's alone, in the app.
-            current = observation['brief'].get('budget_points')
-            if current is not None and points <= int(current):
-                refusals.append(label+': budget_points is the new total and a proposal asks for more than the current '
-                                +str(current)+' (a task\'s price is its bucket, not a budget); to cut the budget is the person\'s, not yours'); continue
-            if any(k != 'budget_points' for k in fields):
-                refusals.append(label+': a budget change is budget_points alone; carry the need, deliverable or non-goal in a proposal of its own'); continue
-            fields['budget_points'] = str(points)
-        if fields.get('budget_points') and any(re.search(r'\b(points?|budget)\b', v, re.I) for k, v in fields.items() if k != 'budget_points'):
-            refusals.append(label+': a budget change is budget_points alone; do not also add a need or deliverable about points'); continue
+                refusals.append(label+': budget_delta is a whole number of points, +N'); continue
+            if delta <= 0:
+                refusals.append(label+': budget_delta asks for more points (+N); giving points back is the person\'s call, not yours'); continue
+            if observation['brief'].get('budget_points') is None:
+                refusals.append(label+': the brief has no budget to add to'); continue
+            if fields:
+                refusals.append(label+': a budget change is budget_delta alone; carry the need, deliverable or non-goal in a proposal of its own'); continue
+            fields['budget_delta'] = '+'+str(delta)
+        if any(re.search(r'\b(points?|budget)\b', v, re.I) for k, v in fields.items() if k != 'budget_delta'):
+            refusals.append(label+': points are asked for with budget_delta, never as a need or deliverable about points'); continue
         if any(re.fullmatch(r'(need|deliverable):?\s*\d+', v) for v in fields.values()):
             refusals.append(label+': "need"/"deliverable" add an entry and carry its new text; to change or drop an '
                             'existing one use "edit": {"need": N, "text": "..."} or "remove": {"need": N}'); continue
@@ -1094,7 +1095,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         if bad:
             refusals.append(bad); continue
         if not fields:
-            refusals.append(label+': changes nothing (need, deliverable, non_goal, mission, edit, remove or budget_points)'); continue
+            refusals.append(label+': changes nothing (need, deliverable, non_goal, mission, edit, remove or budget_delta)'); continue
         if str(item['summary']).strip().lower() in open_summaries:
             refusals.append(label+': an open proposal already says this; wait for the person to decide'); continue
         rejected = [p for p in observation['brief'].get('decided') or [] if p.get('status') == 'rejected'
@@ -1248,9 +1249,9 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
         args = ['brief', 'propose', '--summary', ('[blocking] ' if p.get('blocking') else '')+p['summary']+' — evidence: '+p['evidence']]
         for key in ('need', 'deliverable', 'non_goal', 'mission',
                     'edit_need', 'edit_deliverable', 'edit_non_goal', 'remove_need', 'remove_deliverable', 'remove_non_goal',
-                    'budget_points'):
+                    'budget_delta'):
             if p.get(key):
-                args += ['--'+key.replace('_', '-'), p[key]]
+                args += ['--'+key.replace('_', '-')+('='+p[key] if key == 'budget_delta' else ''), *([] if key == 'budget_delta' else [p[key]])]
         terra(config, project, *args)
         done['proposals'].append(p['summary'])
     for r in accepted.get('rebucket') or []:

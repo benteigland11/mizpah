@@ -11,6 +11,7 @@ from terra.brief import (
     brief_summary,
     init_brief,
     load_brief,
+    save_brief,
     propose_change,
     set_brief_fields,
 )
@@ -67,9 +68,10 @@ def test_the_same_ask_is_decided_once(tmp_path: Path, monkeypatch):
     from terra.brief import reject_proposal, same_ask
     monkeypatch.chdir(tmp_path)
     init_brief(tmp_path, title="Piece", mission="m")
-    a = propose_change(tmp_path, summary="six more points: readings", budget_points=72)
-    b = propose_change(tmp_path, summary="six more points: the live checks", budget_points=72)
-    c = propose_change(tmp_path, summary="nine more", budget_points=75)
+    set_brief_fields(tmp_path, budget_points=66)
+    a = propose_change(tmp_path, summary="six more points: readings", budget_delta=6)
+    b = propose_change(tmp_path, summary="six more points: the live checks", budget_delta=6)
+    c = propose_change(tmp_path, summary="nine more", budget_delta=9)
     assert b["same_as"] == a["id"] and "same_as" not in a and "same_as" not in c
     rec = accept_proposal(tmp_path, b["id"], reason="fine", signed_by="Ben, Administrator")
     by_id = {p["id"]: p for p in rec["proposals"]}
@@ -77,7 +79,7 @@ def test_the_same_ask_is_decided_once(tmp_path: Path, monkeypatch):
     assert by_id[a["id"]]["decision_reason"] == "decided with " + b["id"] + ": fine"
     assert by_id[a["id"]]["signed_by"] == "Ben, Administrator"
     assert by_id[c["id"]]["status"] == "open"
-    assert rec["budget_points"] == 72 and rec["version"] == 2   # applied once
+    assert rec["budget_points"] == 72 and rec["version"] == 3   # applied once
     n1 = propose_change(tmp_path, summary="x", need="The two outstanding phrase-structure readings run against the current artifacts.")
     n2 = propose_change(tmp_path, summary="y", need="The two outstanding phrase-structure readings must run against the current artifacts")
     n3 = propose_change(tmp_path, summary="z", need="A tempo map with rubato.")
@@ -408,3 +410,32 @@ def test_brief_names_its_environment(tmp_path: Path) -> None:
     assert brief_summary(load_brief(tmp_path))["environment"] == "piano"
     set_brief_fields(tmp_path, environment="")
     assert load_brief(tmp_path)["environment"] == ""
+
+
+def test_a_budget_change_is_a_delta_added_at_accept(tmp_path: Path, monkeypatch):
+    """No number is ever written over the budget: a proposal carries ±N, added to the budget as it stands when
+    accepted — two accepted asks add up, and an ask does not reset what another one set."""
+    monkeypatch.chdir(tmp_path)
+    init_brief(tmp_path, title="Piece", mission="m")
+    with pytest.raises(ValueError, match="no budget"):
+        propose_change(tmp_path, summary="more", budget_delta=6)
+    set_brief_fields(tmp_path, budget_points=120)
+    with pytest.raises(ValueError, match="non-zero"):
+        propose_change(tmp_path, summary="none", budget_delta=0)
+    a = propose_change(tmp_path, summary="six more", budget_delta=6)
+    assert a["patch"] == {"budget_delta": 6, "was_budget_points": 120}
+    b = propose_change(tmp_path, summary="ten fewer", budget_delta=-10)
+    rec = accept_proposal(tmp_path, b["id"], reason="ok")
+    assert rec["budget_points"] == 110
+    rec = accept_proposal(tmp_path, a["id"], reason="ok")   # added to 110, not to the 120 it was asked against
+    assert rec["budget_points"] == 116
+    by_id = {p["id"]: p for p in rec["proposals"]}
+    assert by_id[a["id"]]["patch"]["budget_before"] == 110 and by_id[a["id"]]["patch"]["was_budget_points"] == 120
+    # A pre-delta proposal on an old brief still applies as it was written.
+    old = propose_change(tmp_path, summary="legacy", need="n")
+    rec = load_brief(tmp_path)
+    for p in rec["proposals"]:
+        if p["id"] == old["id"]:
+            p["patch"] = {"budget_points": 90, "was_budget_points": 116}
+    save_brief(tmp_path, rec)
+    assert accept_proposal(tmp_path, old["id"], reason="ok")["budget_points"] == 90

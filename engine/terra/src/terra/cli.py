@@ -449,7 +449,7 @@ def cmd_brief_propose(args: argparse.Namespace) -> int:
             remove_need=args.remove_need,
             remove_deliverable=args.remove_deliverable,
             remove_non_goal=args.remove_non_goal,
-            budget_points=getattr(args, "budget_points", None),
+            budget_delta=getattr(args, "budget_delta", None),
         )
     except (FileNotFoundError, ValueError, OSError) as e:
         return emit(error(str(e), code="brief_propose"))
@@ -4937,8 +4937,8 @@ def build_parser() -> argparse.ArgumentParser:
             f"--remove-{kind}", default=None, type=int, dest=f"remove_{kind.replace('-', '_')}", metavar="N",
             help=f"Propose removing {kind} N; later entries renumber, phases and map cites follow",
         )
-    p_bp.add_argument("--budget-points", default=None, type=int, dest="budget_points", metavar="N",
-                      help="Propose a new effort budget (the ask for more or less, on its own; no need is added for it)")
+    p_bp.add_argument("--budget-delta", default=None, type=int, dest="budget_delta", metavar="±N",
+                      help="Propose more (+N) or less (-N) effort, added to the budget as it stands when accepted; on its own, no need is added for it")
     p_bp.set_defaults(func=cmd_brief_propose)
 
     p_ba = br_sub.add_parser("accept", help="Accept a proposal (bumps version)")

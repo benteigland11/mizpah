@@ -533,14 +533,15 @@ def same_ask(a: dict[str, Any], b: dict[str, Any]) -> bool:
     same index (and the same new text), an added entry or a mission when the text is the same as above. A
     note-only proposal is the same as another when the notes read the same."""
     pa, pb = a.get("patch") or {}, b.get("patch") or {}
-    keys = {k for k in pa if not k.startswith("was_") and not k.startswith("removed_")}
-    if keys != {k for k in pb if not k.startswith("was_") and not k.startswith("removed_")}:
+    record = lambda k: k.startswith("was_") or k.startswith("removed_") or k == "budget_before"   # noqa: E731
+    keys = {k for k in pa if not record(k)}
+    if keys != {k for k in pb if not record(k)}:
         return False
     if not keys:
         return False
     for key in keys:
         va, vb = pa[key], pb[key]
-        if key == "budget_points":
+        if key in ("budget_points", "budget_delta"):
             if int(va) != int(vb):
                 return False
         elif key.startswith("remove_"):
@@ -593,7 +594,7 @@ def propose_change(
     remove_need: int | None = None,
     remove_deliverable: int | None = None,
     remove_non_goal: int | None = None,
-    budget_points: int | None = None,
+    budget_delta: int | None = None,
 ) -> dict[str, Any]:
     """Queue a change; does not apply until accept.
 
@@ -630,12 +631,17 @@ def propose_change(
     for key, index in (("remove_need", remove_need), ("remove_deliverable", remove_deliverable), ("remove_non_goal", remove_non_goal)):
         if index is not None:
             patch[key] = _check_index(rec, key[7:], int(index))
-    if budget_points is not None:
-        # A budget change is its own patch: the ask for more (or less) effort, with nothing smuggled into a need.
-        if isinstance(budget_points, bool) or int(budget_points) < 0:
-            raise ValueError("budget_points must be an int >= 0")
-        patch["budget_points"] = int(budget_points)
-        patch["was_budget_points"] = rec.get("budget_points")
+    if budget_delta is not None:
+        # A budget change is a delta, never a number written over the budget: +N asks for more, -N gives back.
+        # It is added to whatever the budget is when the proposal is accepted, so two accepted asks add up and
+        # an accepted ask never resets what another one set (a CR carrying `budget_points: 3` — the price of the
+        # task it added — was accepted for its need and cut a 120-point budget to 3, 2026-09-21).
+        if isinstance(budget_delta, bool) or int(budget_delta) == 0:
+            raise ValueError("budget_delta is a non-zero whole number of points: +N for more, -N for less")
+        if rec.get("budget_points") is None:
+            raise ValueError("the brief has no budget to change; set one with `terra brief set --budget-points N`")
+        patch["budget_delta"] = int(budget_delta)
+        patch["was_budget_points"] = rec.get("budget_points")   # what it was when asked, for the reader; not what accept adds to
     if not patch:
         patch["note"] = summary.strip()
     # The same ask again (open or already decided): the record says so, and the app shows the open ones as one
@@ -738,7 +744,14 @@ def accept_proposal(
         rec["enablers"] = list(by_id.values())
     if "mission" in patch:
         rec["mission"] = patch["mission"]
-    if patch.get("budget_points") is not None:
+    if patch.get("budget_delta") is not None:
+        current = rec.get("budget_points")
+        if current is None:
+            raise ValueError("the brief has no budget to add to")
+        patch["budget_before"] = int(current)   # the record: what accept added to, which may differ from was_budget_points
+        rec["budget_points"] = max(0, int(current) + int(patch["budget_delta"]))
+    elif patch.get("budget_points") is not None:
+        # Proposals made before deltas (2026-09-21) carry the number; applied as written, once, as they were.
         rec["budget_points"] = int(patch["budget_points"])
     for kind in ("need", "deliverable", "non_goal"):
         edit = patch.get("edit_" + kind)

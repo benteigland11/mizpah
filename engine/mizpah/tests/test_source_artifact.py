@@ -169,27 +169,23 @@ def test_a_task_on_a_false_reading_reopens_it(gym: Path) -> None:
 
 
 def test_a_budget_ask_is_its_own_patch(gym: Path) -> None:
-    """A proposal for more points carries budget_points and nothing else; one that also adds a need about points
-    is refused (every budget CR on 2026-09-20 was smuggled into a need, and an acceptance wrote it into the brief)."""
+    """A proposal for more points carries budget_delta (+N) and nothing else, and the budget is never written as a
+    number: every budget CR on 2026-09-20 was smuggled into a need, and one carrying budget_points 3 beside a
+    need was accepted for the need and cut 120 to 3."""
     observation = controller.observe(CONFIG, gym)
     ok = dict(proposals=[dict(summary='six more points for the two outstanding readings', evidence='0 of 60 unallocated, two low tasks owed',
-                              budget_points=66, blocking=True)])
+                              budget_delta=6, blocking=True)])
     accepted, refusals = controller.guard(ok, observation, gym)
-    assert not refusals and accepted['proposals'][0]['budget_points'] == '66'
-    smuggled = dict(proposals=[dict(summary='more points', evidence='x', budget_points=66, need='Provide six more budget points.')])
+    assert not refusals and accepted['proposals'][0]['budget_delta'] == '+6'
+    smuggled = dict(proposals=[dict(summary='more points', evidence='x', budget_delta=6, need='Provide six more budget points.')])
     accepted, refusals = controller.guard(smuggled, observation, gym)
-    assert not accepted['proposals'] and any('budget_points alone' in r for r in refusals)
-    # The number is the new total and only ever more: budget 3 beside a need (the changing-meter gym's CR-001,
-    # accepted for the need, cut 120 to 3) and a plain cut are both refused.
-    cut = dict(proposals=[dict(summary='name the procedure file', evidence='x', budget_points=3,
-                               need='Improve the named procedure in a project file.', deliverable='An updated procedure file.')])
-    accepted, refusals = controller.guard(cut, observation, gym)
-    assert not accepted['proposals'] and any('new total' in r and 'more than the current 60' in r for r in refusals)
-    accepted, refusals = controller.guard(dict(proposals=[dict(summary='less', evidence='x', budget_points=30)]), observation, gym)
-    assert not accepted['proposals'] and any('new total' in r for r in refusals)
-    same = dict(proposals=[dict(summary='more', evidence='x', budget_points=66, deliverable='report.md')])
-    accepted, refusals = controller.guard(same, observation, gym)
-    assert not accepted['proposals'] and any('budget_points alone' in r for r in refusals)
+    assert not accepted['proposals'] and any('budget_delta alone' in r for r in refusals)
+    absolute = dict(proposals=[dict(summary='name the procedure file', evidence='x', budget_points=3,
+                                    need='Improve the named procedure in a project file.')])
+    accepted, refusals = controller.guard(absolute, observation, gym)
+    assert not accepted['proposals'] and any('never written as a number' in r for r in refusals)
+    accepted, refusals = controller.guard(dict(proposals=[dict(summary='less', evidence='x', budget_delta=-10)]), observation, gym)
+    assert not accepted['proposals'] and any("person's call" in r for r in refusals)
     controller.apply(CONFIG, gym, controller.guard(ok, observation, gym)[0])
     brief = json.loads((gym/'.terra'/'brief.json').read_text())
-    assert brief['proposals'][-1]['patch'] == {'budget_points': 66, 'was_budget_points': 60}
+    assert brief['proposals'][-1]['patch'] == {'budget_delta': 6, 'was_budget_points': 60}

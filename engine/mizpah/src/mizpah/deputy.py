@@ -187,8 +187,22 @@ def open_or_create(config: dict[str, Any], root: Path, text: str) -> tuple[Focus
     generation = dict(deputy_spec(config)['generation'])
     if (root/'state.sqlite3').exists():
         before = _model_on_record(root)
-        session = FocusedSession.rebind(root, worker=worker, shell=shell, generation=generation,
-                                        worker_system=policy_text(config))
+        try:
+            session = FocusedSession.rebind(root, worker=worker, shell=shell, generation=generation,
+                                            worker_system=policy_text(config))
+        except ValueError as refused:
+            if 'pending' not in str(refused):
+                raise
+            # A model call torn by an outage was never discarded: open under the old bindings, drop it (the
+            # rest of the turn is the person's to say again), then rebind.
+            torn = FocusedSession.open(root, worker=worker, shell=shell) if not _bindings_changed(root, worker, shell) else None
+            if torn is None:
+                raise
+            discarded = torn.discard_pending()
+            if discarded:
+                (root/'discarded.jsonl').open('a').write(json.dumps(discarded)+'\n')
+            session = FocusedSession.rebind(root, worker=worker, shell=shell, generation=generation,
+                                            worker_system=policy_text(config))
         now = generation.get('model') or ''
         if before and now and before != now:
             _turn(root, 'system', 'Now on '+now+' (was '+before+'); the Deputy carries its memory over.')
@@ -196,6 +210,15 @@ def open_or_create(config: dict[str, Any], root: Path, text: str) -> tuple[Focus
         return session, False
     _note_model(root, generation.get('model') or '')
     return FocusedSession.create(root, settings_for(config, text), worker=worker, shell=shell), True
+
+
+def _bindings_changed(root: Path, worker: Any, shell: Any) -> bool:
+    """Whether a plain `open` would refuse: the saved model or sandbox bindings differ from these."""
+    try:
+        FocusedSession.open(root, worker=worker, shell=shell)
+        return False
+    except ValueError:
+        return True
 
 
 def _model_on_record(root: Path) -> str:
@@ -271,6 +294,9 @@ def say(config: dict[str, Any], text: str, *, turn_cap: int | None = None) -> di
     except ModelTransportError as error:
         from . import ops
         ops.record_outage(root, 'deputy', deputy_spec(config), error, 1)
+        discarded = session.discard_pending()   # the torn call is not replayed; the next turn starts clean
+        if discarded:
+            (root/'discarded.jsonl').open('a').write(json.dumps(discarded)+'\n')
         line = _turn(root, 'system', 'The Deputy\'s model did not answer: '+str(error)[:300], error=True)
         return dict(status='error', error=str(error), turn=line)
     except (ContextCapacityExceeded, GenerationRetryExceeded) as error:
