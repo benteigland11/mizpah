@@ -17,7 +17,7 @@ name per line.
 
 The reviewer is a different kind of seat: it reads files and answers one question. Nothing reaches it by
 default. Its prompt is `order_reviewer.txt`, an explicit list of exactly what it gets (the glossary, unknowns,
-probes, `probes_reviewer.md`, its policy) — a `_reviewer` tag marks a piece written for it, and only that list
+probes, `probes_reviewer.md`, `policy_reviewer.md`) — a `_reviewer` tag marks a piece written for it, and only that list
 includes it. Both order files are written when the pieces are.
 
 Terms are used in the glossary's sense and no other, by every seat. A block explains; a policy instructs; the

@@ -2,4 +2,4 @@ glossary
 unknowns
 probes
 probes_reviewer
-reviewer_policy
+policy_reviewer
