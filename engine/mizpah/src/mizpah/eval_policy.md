@@ -58,6 +58,12 @@ readings that name it.
 
 ## A need about the library
 
+The worker carries a library you never see directly and never write: the playbook — procedures, each a named
+checklist of steps a worker walks (`playbook search`, `open`, ticks the steps, improves it after green) — and the
+Cartograph widget library, the instruments a probe calls. Both persist across projects; nothing else does. When a
+brief says *procedure* it means a playbook procedure, not a file, a document or a section of one in this project;
+when it says *widget* or *instrument* it means a Cartograph widget. The worker's task text may name them by id.
+
 A need that asks for the method to improve — "improve existing compositional procedures to fold in rhythm work" —
 is about the playbook, not about a file in the project. Its reading is the procedure itself: one boolean unknown
 whose source is the named or found procedure (`playbook load <id>` inside the task shows its steps) and whose
