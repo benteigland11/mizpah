@@ -100,9 +100,11 @@ These came out of ten single-seed campaigns on a 26B MoE model in a 60K window
 
 ## Where things live
 
-- `prompts/` — the seats' instructions as small Markdown files composed into prompts: the
-  glossary (`glossary.md`), blocks that say how one thing works (`gate.md`, `unknowns.md`,
+- `prompts/` — what the seats are fed, as small Markdown files composed into prompts: the
+  glossary (`glossary.md`), blocks that say how one thing works (`unknowns.md`,
   `terra_philosophy.md`), and each seat's policy. One file, one thing; see its README.
+- `design/` — our notes on how a mechanism is meant to work (`gate.md`, `handoff.md`), for
+  the people designing the loop; never fed to a seat.
 - `engine/terra`, `engine/cartograph`, `engine/playbook` — forks (source, `cg/` widgets,
   tests). Upstream commits in `UPSTREAM.txt`. MCP servers and plugin manifests were
   dropped; the harness couples the tools directly in Python.
