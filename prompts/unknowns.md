@@ -6,7 +6,7 @@
 - **type** — one of the five below; it decides what a resolved reading is.
 - **claim** — the sentence a reading of this quantity makes true or false.
 - **evidence** — the reading a probe takes, and from which source. The source is the artifact or data the probe reads or runs; never a file written to say the answer.
-- **served** — what the unknown is evidence for: a brief need or deliverable (the controller's), or the unknown it decomposes (the worker's, on its task map). One that cites nothing is refused.
+- **served** — the brief need or deliverable the unknown is evidence for. One that cites nothing is refused.
 
 ## The five types
 
