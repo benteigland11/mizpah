@@ -115,6 +115,7 @@ def _build_parser() -> argparse.ArgumentParser:
     tick.add_argument("--done", nargs="*", default=[], help="step numbers done: --done 1,3 or --done 1 3")
     tick.add_argument("--skip", nargs="*", default=[], help="one step that does not apply here, with --because")
     tick.add_argument("--because", default="", help="why the skipped step does not apply (written under it)")
+    tick.add_argument("--note", default="", help="with --done: what the step found or changed, one line (written under it)")
     tick.add_argument("--dir", default=".", help="working tree the walk is under (default: .)")
     tick.set_defaults(handler=_cmd_tick)
 
@@ -257,7 +258,7 @@ def _cmd_tick(args: argparse.Namespace) -> dict[str, Any]:
     def numbers(tokens: list[str]) -> list[int]:
         # `--done 1,3` and `--done 1 3` both: the first worker to tick wrote the numbers with spaces and was refused.
         return [int(x) for token in tokens for x in token.replace(" ", "").split(",") if x]
-    return ops.tick_walk(args.target, numbers(args.done), numbers(args.skip), args.dir, because=args.because)
+    return ops.tick_walk(args.target, numbers(args.done), numbers(args.skip), args.dir, because=args.because, note=args.note)
 
 
 def _cmd_start(args: argparse.Namespace) -> dict[str, Any]:

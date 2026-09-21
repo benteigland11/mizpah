@@ -330,7 +330,7 @@ def test_open_hands_back_an_unfinished_walk_and_steps_skip_one_at_a_time(tmp_pat
     # Nothing unfinished: a plain open makes a fresh walk.
     assert main(["open", "tune-pedal", "--for", "a third piece", "--dir", str(tmp_path)]) == 0
     assert "already_open" not in json.loads(capsys.readouterr().out)
-    assert main(["tick", "no-such", "--done", "1", "--dir", str(tmp_path)]) == 1
+    assert main(["tick", "no-such", "--done", "1", "--note", "found it", "--dir", str(tmp_path)]) == 1
 
 
 def test_search_lists_open_walks_here_first(tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -361,14 +361,14 @@ def test_tick_marks_several_steps_in_one_call(tmp_path: Path, monkeypatch, capsy
     capsys.readouterr()
     assert main(["open", "tune-pedal", "--for", "the piece", "--dir", str(tmp_path)]) == 0
     path = json.loads(capsys.readouterr().out)["path"]
-    assert main(["tick", "tune-pedal", "--done", "1,3", "--skip", "2", "--because", "no second thing here", "--dir", str(tmp_path)]) == 0
+    assert main(["tick", "tune-pedal", "--done", "1,3", "--skip", "2", "--because", "no second thing here", "--note", "found it", "--dir", str(tmp_path)]) == 0
     reply = json.loads(capsys.readouterr().out)
     assert reply["marked"] == [1, 2, 3] and reply["unticked"] == []
     text = Path(path).read_text()
     assert "- [x] **1." in text and "- [-] **2." in text and "- [x] **3." in text
-    assert main(["tick", path, "--done", "9", "--dir", str(tmp_path)]) == 1
+    assert main(["tick", path, "--done", "9", "--note", "found it", "--dir", str(tmp_path)]) == 1
     assert "no such step" in capsys.readouterr().out
-    assert main(["tick", path, "--done", "1", "--skip", "1", "--dir", str(tmp_path)]) == 1
+    assert main(["tick", path, "--done", "1", "--skip", "1", "--note", "found it", "--dir", str(tmp_path)]) == 1
 
 
 def test_a_linked_step_ticks_only_after_its_procedure_is_walked(tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -384,7 +384,7 @@ def test_a_linked_step_ticks_only_after_its_procedure_is_walked(tmp_path: Path, 
     capsys.readouterr()
     assert main(["open", "compose", "--for", "the piece", "--dir", str(tmp_path), "--nested"]) == 0
     parent = json.loads(capsys.readouterr().out)["path"]
-    assert main(["tick", parent, "--done", "1", "2", "--dir", str(tmp_path)]) == 1
+    assert main(["tick", parent, "--done", "1", "2", "--note", "found it", "--dir", str(tmp_path)]) == 1
     refusal = capsys.readouterr().out
     assert "step(s) 2 are other procedures" in refusal and "playbook open pedal-per-harmony" in refusal
     assert "- [ ] **2." in Path(parent).read_text()   # nothing ticked, not even step 1
@@ -392,7 +392,7 @@ def test_a_linked_step_ticks_only_after_its_procedure_is_walked(tmp_path: Path, 
     assert "open it before deciding" in capsys.readouterr().out
     assert main(["open", "pedal-per-harmony", "--for", "the piece: Pedal", "--dir", str(tmp_path), "--nested"]) == 0
     child = json.loads(capsys.readouterr().out)["path"]
-    assert main(["tick", parent, "--done", "2", "--dir", str(tmp_path)]) == 1   # opened but not finished: not done
+    assert main(["tick", parent, "--done", "2", "--note", "found it", "--dir", str(tmp_path)]) == 1   # opened but not finished: not done
     capsys.readouterr()
     # Opened is enough to skip it with a reason (the library's links run in circles; a closed-walk rule on both
     # sides deadlocks), and the reason goes under the step.
@@ -402,7 +402,7 @@ def test_a_linked_step_ticks_only_after_its_procedure_is_walked(tmp_path: Path, 
     capsys.readouterr()
     assert main(["tick", child, "--skip", "1", "--because", "the widget applies it", "--dir", str(tmp_path)]) == 0
     capsys.readouterr()
-    assert main(["tick", parent, "--done", "1", "2", "--dir", str(tmp_path)]) == 0
+    assert main(["tick", parent, "--done", "1", "2", "--note", "found it", "--dir", str(tmp_path)]) == 0
     assert json.loads(capsys.readouterr().out)["unticked"] == []
 
 
@@ -456,14 +456,14 @@ def test_a_flat_walk_inlines_links_cuts_at_a_boundary_and_edits_write_through(tm
     assert "→ this step is another procedure" not in text
     # Only the step you are on shows its text; the rest open as you tick, and a tick out of order is refused.
     assert "write them" in text and "do pedal 1" not in text and "(opens when the steps before it are ticked)" in text
-    assert main(["tick", str(path), "--done", "3", "--dir", str(tmp_path)]) == 1
+    assert main(["tick", str(path), "--done", "3", "--note", "found it", "--dir", str(tmp_path)]) == 1
     assert "the walk is on step 1" in capsys.readouterr().out
-    assert main(["tick", str(path), "--done", "1", "2", "--dir", str(tmp_path)]) == 0   # in order from the current step
+    assert main(["tick", str(path), "--done", "1", "2", "--note", "found it", "--dir", str(tmp_path)]) == 0   # in order from the current step
     reply = _json.loads(capsys.readouterr().out)
     assert reply["next"]["number"] == 3 and reply["next"]["do"] == "do pedal 1"
     text = path.read_text()
     assert "do pedal 1" in text and "do pedal 2" not in text and "- [x] **1. Notes**" in text
-    assert main(["tick", str(path), "--done", "3", "--dir", str(tmp_path)]) == 0
+    assert main(["tick", str(path), "--done", "3", "--note", "found it", "--dir", str(tmp_path)]) == 0
     capsys.readouterr()
     text = path.read_text()
     assert "do pedal 2" in text
@@ -473,7 +473,7 @@ def test_a_flat_walk_inlines_links_cuts_at_a_boundary_and_edits_write_through(tm
     doc = _json.loads((tmp_path/"playbook"/"procedures"/"pedal.json").read_text())
     assert doc["steps"][1]["do"] == "release before the next harmony"
     assert "release before the next harmony" in path.read_text() and "- [ ] **4. pedal 2**" in path.read_text()
-    assert main(["tick", str(path), "--done", "4", "--dir", str(tmp_path)]) == 0
+    assert main(["tick", str(path), "--done", "4", "--note", "found it", "--dir", str(tmp_path)]) == 0
     capsys.readouterr()
     # add after walk step 3 (pedal 1): goes into pedal after step 1; the walk renumbers and later sources shift
     assert main(["add-step", "--walk", str(path), "--after", "3", "--title", "pedal 1b", "--do", "half pedal"]) == 0

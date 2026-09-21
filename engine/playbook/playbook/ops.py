@@ -632,7 +632,7 @@ def _walk_closed(procedure_id: str, target_dir: str | Path) -> bool:
 
 
 def tick_walk(target: str, done: list[int] | None = None, not_needed: list[int] | None = None,
-              target_dir: str | Path = ".", because: str = "") -> dict[str, Any]:
+              target_dir: str | Path = ".", because: str = "", note: str = "") -> dict[str, Any]:
     """Mark steps of an open walk in one call: `done` get `[x]`, `not_needed` get `[-]`. A worker ticking by
     hand spent thirteen turns of grep, read and edit on seven boxes.
 
@@ -659,8 +659,12 @@ def tick_walk(target: str, done: list[int] | None = None, not_needed: list[int] 
             raise ValueError(f"the walk is on step {current}: tick that one (and only the steps right after it that closed "
                              f"with the same work), not {asked}")
     because = str(because or "").strip()
+    note = str(note or "").strip()
     if not_needed and not because:
         raise ValueError("--skip needs --because: why this step does not apply to what is in front of you (one line; it goes under the step)")
+    if done and not note:
+        raise ValueError("--done needs --note: what the step found or changed, one line with the value or the file (it goes under "
+                         "the step, and the reviewer reads it against the artifact) — a box without what it found is a box")
     if set(done) & set(not_needed):
         raise ValueError("a step is done or not needed, not both: " + ", ".join(str(n) for n in sorted(set(done) & set(not_needed))))
     path = _walk_file(target, target_dir)
@@ -692,6 +696,8 @@ def tick_walk(target: str, done: list[int] | None = None, not_needed: list[int] 
             lines[i] = re.sub(r"^- \[( |x|-)\]", f"- [{mark}]", line, count=1)
             if mark == "-":
                 lines[i] += f"\n\n  not needed here: {because}"
+            elif mark == "x":
+                lines[i] += f"\n\n  done: {note}"
             marked.append(n)
     missing = sorted((set(done) | set(not_needed)) - seen)
     if missing:
@@ -770,7 +776,7 @@ def _cut(entries: list[dict[str, Any]], start: int, limit: int) -> int:
 _GUIDANCE = ("This procedure is the validation of your work: each step is a check or a change someone found necessary, "
              "written down so the next piece gets it too. Do the steps in order, against what is in front of you, and tick "
              "as you go — in the same command as the step's work: `playbook tick <this file> --done N` when a step is done "
-             "(several when several closed together). A step that does not apply here is `--skip N --because \"...\"`, one "
+             "(several when several closed together), with `--note \"...\"`: what it found or changed, the value or the file. A step that does not apply here is `--skip N --because \"...\"`, one "
              "per call, the reason written under it — \"already done\" and \"covered by the probe\" are not reasons: do the "
              "step and show what it found. There is no way to close a walk whole. The steps are knowledge earned on another "
              "task: adapt their specifics (names, keys, counts, the probe they mention) to what is in front of you, and do "
@@ -960,7 +966,7 @@ def _render_walk(path: Path) -> dict[str, Any] | None:
             block = _step_block(b["number"], entry)
             block[0] = head
             # a skipped step keeps the reason written under it
-            reason = next((ln for ln in lines[b["start"]:b["end"]] if ln.strip().startswith("not needed here:")), None)
+            reason = next((ln for ln in lines[b["start"]:b["end"]] if ln.strip().startswith(("not needed here:", "done:"))), None)
             if reason:
                 block.insert(len(block) - 1, reason)
                 block.insert(len(block) - 1, "")
@@ -969,6 +975,9 @@ def _render_walk(path: Path) -> dict[str, Any] | None:
                 block.insert(len(block) - 1, "")
             if i == first_open:
                 nxt = dict(number=b["number"], title=entry["title"], do=entry["do"])
+        elif b["mark"] != " ":
+            kept = next((ln for ln in lines[b["start"]:b["end"]] if ln.strip().startswith(("not needed here:", "done:"))), None)
+            block = [head, "", f"  source: `{entry['source']}` · step {entry['step']}", ""] + ([kept, ""] if kept else [])
         else:
             block = [head, "", f"  source: `{entry['source']}` · step {entry['step']}", "", "  (opens when the steps before it are ticked)", ""]
         body += block
