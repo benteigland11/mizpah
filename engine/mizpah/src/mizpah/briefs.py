@@ -109,7 +109,7 @@ def prune(config: dict[str, Any]) -> list[str]:
     return gone
 
 
-def related(config: dict[str, Any], brief: dict[str, Any], *, limit: int = 2) -> list[dict[str, Any]]:
+def related(config: dict[str, Any], brief: dict[str, Any], *, limit: int = 5) -> list[dict[str, Any]]:
     """The stored briefs nearest this one: ranked by shared stems across mission, needs and deliverables,
     excluding the same project; each with the unknowns it minted."""
     here = _stems(_words(' '.join([str(brief.get('mission') or '')]+list(brief.get('needs') or [])+list(brief.get('deliverables') or []))))
@@ -148,6 +148,4 @@ def render(briefs: list[dict[str, Any]], *, max_unknowns: int = 8) -> list[str]:
         # controller's to write for its own brief, and the section was the largest thing it read.
         unknowns = sorted(doc.get('unknowns') or [], key=lambda u: not u.get('resolved'))[:max_unknowns]
         lines.append('    '+'; '.join(str(u['id'])+' ['+str(u.get('type'))[:3]+', '+str(u.get('cites') or '?')+']' for u in unknowns))
-        if doc.get('proposals'):
-            lines.append('    proposed: '+' | '.join(p[:80] for p in doc['proposals'][:2]))
     return lines
