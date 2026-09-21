@@ -1790,3 +1790,24 @@ def test_stream_progress_lands_beside_the_journal_not_in_it(tmp_path):
     assert json.loads((root/'events'/'stream.json').read_text())['bytes'] == 8192
     events = SessionEventLog(root/'events').read_strict('session')
     assert not [e for e in events if e.event_type == 'model_stream']
+
+
+def test_focus_files_follow_the_widgets_a_probe_names(tmp_path):
+    # A probe that inserts cg/<widget> on its path has that widget's src read after it; a widget no probe
+    # names is not read.
+    from src.focused_agent_session import write_workspace_file
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, total=1, enabled=True, rollover=False)
+    settings = replace(settings, review_focus_globs=('probes/*/measure.py', 'piece.mid'),
+                       review_focus_characters=20000, review_focus_file_characters=4000)
+    root = tmp_path/'session'
+    session = FocusedSession.create(root, settings, worker=worker, shell=shell, controller=controller)
+    ws = session.workspace()
+    opts = dict(byte_limit=10**7, file_limit=1000)
+    ws = write_workspace_file(ws, 'probes/p/measure.py', b'import sys\nsys.path.insert(0, "cg/data-x-python")\nfrom src.x import f\n', **opts)
+    ws = write_workspace_file(ws, 'cg/data-x-python/src/x.py', b'def f(p): return 1\n', **opts)
+    ws = write_workspace_file(ws, 'cg/data-y-python/src/y.py', b'def g(p): return 2\n', **opts)
+    session.state['workspace'] = session._put_workspace(ws)
+    focus = session._focus_files()
+    assert 'probes/p/measure.py' in focus and 'cg/data-x-python/src/x.py' in focus
+    assert 'cg/data-y-python/src/y.py' not in focus
+    assert list(focus)[0] == 'probes/p/measure.py'

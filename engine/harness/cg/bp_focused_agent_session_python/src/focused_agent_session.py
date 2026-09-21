@@ -11,6 +11,7 @@ import hashlib
 import io
 import json
 import os
+import re
 from types import SimpleNamespace
 import shlex
 import tarfile
@@ -1297,6 +1298,22 @@ class FocusedSession:
         ordered: list[str] = []
         for pattern in globs:
             ordered += [name for name in names if fnmatch.fnmatch(name, pattern) and name not in ordered]
+        # The chain: a widget a probe names (`cg/<widget>` in its text — the path every probe inserts before it
+        # imports) has its sources read too, after the probes and artifacts. Only those widgets, only for the
+        # files matched by the first glob; a full call tree across languages is fragile, a named directory is not.
+        if ordered and globs:
+            probes = [name for name in ordered if fnmatch.fnmatch(name, globs[0])]
+            named: list[str] = []
+            for name in probes:
+                try:
+                    text = read_workspace_file(snapshot, name, **options).decode('utf-8', errors='replace')
+                except Exception:  # noqa: BLE001 — a probe that cannot be read names nothing
+                    continue
+                for widget in re.findall(r'cg/([A-Za-z0-9_-]+)', text):
+                    if widget not in named:
+                        named.append(widget)
+            for widget in named:
+                ordered += [name for name in names if name.startswith('cg/'+widget+'/src/') and name not in ordered]
         result: dict[str, str] = {}
         budget = self.settings.review_focus_characters
         cap = self.settings.review_focus_file_characters
