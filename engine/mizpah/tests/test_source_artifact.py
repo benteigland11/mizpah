@@ -189,3 +189,20 @@ def test_a_budget_ask_is_its_own_patch(gym: Path) -> None:
     controller.apply(CONFIG, gym, controller.guard(ok, observation, gym)[0])
     brief = json.loads((gym/'.terra'/'brief.json').read_text())
     assert brief['proposals'][-1]['patch'] == {'budget_delta': 6, 'was_budget_points': 60}
+
+
+def test_a_claim_that_is_the_whole_spec_is_cautioned(gym: Path) -> None:
+    """One reading per quantity is a method rule, so a boolean that is the specification itself is minted with a
+    caution on the next briefing, never refused (counting-a-bar's build task spent forty turns after Terra had it
+    done because one probe had to carry the whole need, 2026-09-21)."""
+    observation = controller.observe(CONFIG, gym)
+    def decide(uid, claim):
+        return dict(unknowns=[dict(id=uid, cites='deliverable:1', type='boolean', claim=claim, evidence_needed='parse piece.mid')],
+                    tasks=[dict(id='build_piece', unknowns=[uid], bucket='low', title='compose')])
+    for uid, claim in (('piece_mid_meets_passage_spec', '`piece.mid` meets the passage spec'),
+                       ('piece_mid_built', '`piece.mid` holds a steady-tempo passage, in 4/4, four sections, each in one subdivision, and a bar of rest between them')):
+        accepted, refusals = controller.guard(decide(uid, claim), observation, gym)
+        assert [x['id'] for x in accepted['unknowns']] == [uid] and not refusals
+        assert any('whole specification' in c for c in accepted.get('cautions') or []), (uid, accepted.get('cautions'))
+    accepted, _ = controller.guard(decide('piece_mid_built', '`piece.mid` exists and parses as a MIDI file'), observation, gym)
+    assert not any('whole specification' in c for c in accepted.get('cautions') or [])

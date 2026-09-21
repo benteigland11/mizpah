@@ -575,6 +575,11 @@ def uncovered_deliverable_terms(observation: dict[str, Any], extra_unknowns: lis
 RETRY_SUFFIX = re.compile(r'(_v\d+|_current|_again|_fix(ed)?|_retry|_redo|_\d+)+$')
 
 
+SPEC_CLAIM = re.compile(r'\b(meets|satisf(?:y|ies)|fulfil+s?|conforms? to|matches?|honou?rs?)\b[^.]{0,40}\b(spec|specification|brief|requirements?|request(?:ed)?)\b'
+                        r'|\b(is|are) (valid|correct|complete|acceptable|as requested|as specified)\b|\bas (requested|specified|described)\b',
+                        re.I)
+
+
 def _same_reading(a: str, b: str) -> bool:
     """Two claims are one reading when their content words (stemmed) overlap almost entirely."""
     wa, wb = briefs._stems(briefs._words(a)), briefs._stems(briefs._words(b))
@@ -725,6 +730,14 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         creates = str(item.get('creates') or '').strip()
         if not claim:
             refusals.append('unknown '+uid+': claim is required'); continue
+        if SPEC_CLAIM.search(claim) or (item.get('type') == 'boolean' and claim.count(',')+claim.count(' and ')+claim.count(';') >= 3):
+            # A caution, not a refusal (the guard is hard only for brief integrity): a boolean that is the spec
+            # itself makes one probe carry the whole need, and the check-in then keeps finding a clause it does
+            # not measure — the worker spent forty turns after Terra had the task done (counting-a-bar, 2026-09-21).
+            cautions.append('unknown '+uid+': the claim reads as the whole specification in one boolean ('+claim[:80]+'). One '
+                            'reading per quantity: the builder\'s unknown is that the file exists and parses; each thing the '
+                            'entry says about it (tempo, meter, sections, spacing) is an unknown of its own, cited to the '
+                            'need that says it, so no single probe has to check everything')
         if not evidence_needed or evidence_needed.lower() in ('true', 'false', 'none', 'yes', 'no'):
             if item.get('type') == 'boolean':
                 # Small models write the expected answer here; for a boolean the reading is derivable.
