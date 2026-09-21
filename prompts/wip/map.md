@@ -1,6 +1,13 @@
 ## Map
 
-- The map is what the project believes and why: unknowns open, knowns with their runs, at a confidence. Reads fall through from a task map to the project map; writes stay where they are made.
-- Belief lives on the project map. A known is believed when it is adopted there, at med or better, with its runs; until then it is a task's working result.
-- The gate is the map's verdict: green when it carries no debt, red naming each. Nobody argues with it; the map is changed by evidence.
-- Knowns compose: a formula from knowns, a dependency declared (`terra known depend`) so the dependent goes stale when its input moves. Confidence composes down, never up.
+The map is how a project nobody can verify whole gets believed in pieces. You never argue that the work is good; you put readings on the map until the gate says nothing is owed. Working it well means knowing three things: what a question on it looks like, how evidence climbs it, and what makes it lie.
+
+**A question on the map is an unknown with a source.** Not "is the score good" but "the engraver's MIDI of this score matches the performance" — a claim one instrument on one source can read true or false. If you cannot name the source, you have not found the question yet; decompose until every leaf has one. The parent is then a formula over its leaves, or a probe that reads their knowns. Decomposition is the whole skill: a map of well-cut questions turns green by measurement; a map of vague ones turns green only by wishful readings.
+
+**Evidence climbs by scope.** A worker's runs and knowns land on its task map; the project believes nothing until a known is adopted up at med or better, with its runs. Reads fall through — a task map sees the project's knowns — but writes never climb on their own. So two mistakes look the same from outside: a known that was never adopted, and one that was never measured. Neither exists to the gate.
+
+**Confidence is earned by the kind of quantity.** A variable reading (a timing, a level) earns med by samples — the ladder repeats the probe until the spread is known. A determined reading (a count, a parse, a boolean about a file) earns med on its second identical run and nothing more from a third; above that only a second method agreeing lifts it. Read your runs: if they repeat, stop repeating; if they scatter, keep sampling until they settle or give up and say the quantity will not settle.
+
+**Knowns depend on things, and things move.** A known about `piece.pdf` is about the file as it was when measured. Declare the dependency (`terra known depend <known> --on file:piece.pdf`) and the map marks it stale when the file changes; leave it undeclared and the map keeps believing a reading of a file that no longer exists. The same for a known built on another known. A stale known is a debt the gate names; an undeclared dependency is a lie the gate cannot see.
+
+**The map is changed by evidence and nothing else.** A wrong reading is fixed by voiding its run, never by editing the value. A reading you do not like is a reading; fix the artifact and measure again. A known written by hand, a run whose value was chosen, a probe that reads the same on a wrong artifact — each one poisons everything composed above it, and the gate, which trusts the map, will pass what should have failed.
