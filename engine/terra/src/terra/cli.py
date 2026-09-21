@@ -1176,6 +1176,18 @@ def cmd_route_unblock(args: argparse.Namespace) -> int:
     return emit(success(t, meta={"surface": "terra.route.unblock"}))
 
 
+def cmd_route_reopen(args: argparse.Namespace) -> int:
+    from .agent_io import emit, error, success
+    from .route import reopen_task
+
+    try:
+        root = require_project_root()
+        t = reopen_task(root, args.id, reason=args.reason)
+    except (ValueError, FileNotFoundError, OSError) as e:
+        return emit(error(str(e), code="route_reopen"))
+    return emit(success(t))
+
+
 def cmd_map_status(args: argparse.Namespace) -> int:
     """Map board — agent-first (JSON default, like cartograph status).
 
@@ -5591,6 +5603,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_rub = rt_sub.add_parser("unblock", help="Unblock a task")
     p_rub.add_argument("id")
     p_rub.set_defaults(func=cmd_route_unblock)
+
+    p_rro = rt_sub.add_parser("reopen", help="A done task back to ready: its reading no longer stands and the same work order is owed again")
+    p_rro.add_argument("id")
+    p_rro.add_argument("--reason", required=True, help="what no longer stands (kept on the task)")
+    p_rro.set_defaults(func=cmd_route_reopen)
 
     return p
 

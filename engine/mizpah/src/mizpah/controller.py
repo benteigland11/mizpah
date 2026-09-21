@@ -1403,6 +1403,21 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         if not why:
             refusals.append('cancel '+tid+': say why'); continue
         cancel.append(dict(task=tid, why=why))
+    reopen: list[dict[str, str]] = []
+    for item in decision.get('reopen') or []:
+        # A done work order owed again: its known went stale or the gate names its reading. The same work order
+        # reopens and its worker picks up where it left off — never a new one continuing it.
+        if not isinstance(item, dict):
+            refusals.append('reopen entry is not an object'); continue
+        tid, why = str(item.get('task') or ''), str(item.get('why') or '').strip()
+        current = by_id.get(tid)
+        if current is None:
+            refusals.append('reopen '+repr(tid)+': no such task'); continue
+        if current['status'] != 'done':
+            refusals.append('reopen '+tid+': only a done work order reopens ('+str(current['status'])+'; a blocked one is unblocked)'); continue
+        if not why:
+            refusals.append('reopen '+tid+': say what no longer stands'); continue
+        reopen.append(dict(task=tid, why=why))
     for item in decision.get('unblock') or []:
         if not isinstance(item, dict):
             refusals.append('unblock entry is not an object'); continue
@@ -1466,13 +1481,13 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             refusals.append('done refused: '+'; '.join(uncovered)+' — mint one unknown per named thing (with `creates`), '
                             'each claim naming it and the known it must agree with')
     return dict(unknowns=unknowns, tasks=tasks, proposals=proposals, rebucket=rebucket, unblock=unblock, retype=retype, noted=noted,
-                cancel=cancel, reopen=sorted(reopened), cautions=cautions, done=done, why=str(decision.get('why') or '')), refusals
+                cancel=cancel, reopen_unknowns=sorted(reopened), reopen=reopen, cautions=cautions, done=done, why=str(decision.get('why') or '')), refusals
 
 
-def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> dict[str, list[str]]:
+def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any], root: Path | None = None) -> dict[str, list[str]]:
     """Write the accepted decision through Terra; proposals are queued, never accepted here."""
     done = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[], cancel=[])
-    for uid in accepted.get('reopen') or []:
+    for uid in accepted.get('reopen_unknowns') or []:
         # A resolved reading to be taken again: open on the map, so its task is routable and its known is replaced.
         try:
             terra(config, project, 'unknown', 'status', uid, 'open', '--notes', 'reopened by the controller: measure again after the artifact changed')
@@ -1548,6 +1563,20 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
         terra(config, project, 'route', 'set-effort', r['task'], '--bucket', r['bucket'])
         terra(config, project, 'route', 'unblock', r['task'])
         done['rebucket'].append(r['task']+'→'+r['bucket'])
+    for r in accepted.get('reopen') or []:
+        try:
+            terra(config, project, 'route', 'reopen', r['task'], '--reason', r['why'])
+            from .worker import task_unknown_ids
+            task = next((t for t in terra(config, project, 'route', 'status')['tasks'] if t['id'] == r['task']), {})
+            for uid in task_unknown_ids(task):
+                terra(config, project, 'unknown', 'status', uid, 'open', '--notes', 'reopened: '+r['why'][:300])
+            # The reason reaches the worker when its session reopens (worker.py delivers <task root>/reopen.md).
+            if root is not None:
+                (root/'tasks'/r['task']).mkdir(parents=True, exist_ok=True)
+                (root/'tasks'/r['task']/'reopen.md').write_text(r['why'])
+            done.setdefault('reopen', []).append(r['task'])
+        except RuntimeError as error:
+            done.setdefault('refused', []).append('reopen '+r['task']+': '+str(error)[:200])
     for r in accepted.get('unblock') or []:
         terra(config, project, 'route', 'unblock', r['task'])
         record_release(project, r['task'], r['after'])
@@ -1732,7 +1761,7 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
             break
         if any(accepted[k] for k in ('unknowns', 'tasks', 'proposals', 'rebucket', 'unblock', 'retype')):
             # Keep what passed; ask only about what did not.
-            applied = apply(config, project, accepted)
+            applied = apply(config, project, accepted, root=journal.parent)
             record.setdefault('applied', dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[]))
             for key in applied:   # `refused` appears only when Terra refused a create; it is not in the template
                 record['applied'].setdefault(key, [])
@@ -1743,7 +1772,7 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
                 observation['looked'] = looked
             observation['applied_so_far'] = {k: [str(x) for x in v] for k, v in record['applied'].items() if k in ('unknowns', 'tasks')}
             accepted = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[], done=accepted.get('done'), why=accepted['why'])
-    applied = apply(config, project, accepted)
+    applied = apply(config, project, accepted, root=journal.parent)
     record.setdefault('applied', dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[]))
     for key in applied:
         record['applied'].setdefault(key, [])

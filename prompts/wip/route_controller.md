@@ -12,6 +12,17 @@
   
 - Order by dependency: the work order that makes a file before the one that reads it; readers of one artifact after its builder, on the builder's workspace.
 - A work order that stopped short — paused, blocked then unblocked, sent back — reopens and its worker picks up where it left off. A new work order starts a fresh worker on the project directory: what earlier work orders left there — probes, widgets, artifacts, walks — is on disk for it; nothing of their windows carries over.
-- A blocked work order is a report. Read the reason: a decomposition ("resolves into a, b, c") means split it — mint the pieces, cancel it, route them; a bucket mismatch means re-bucket; a source that cannot be read as asked means the unknown was wrong, not the worker.
-- Cancel what red no longer names: a work order superseded, wrong, or whose unknown a new one carries. Never mint a second work order for the same unknown to get around a stuck one — cancel, then route.
-- Budget is the brief's: each work order draws its bucket's points; Terra refuses one the budget cannot cover. Spend on red, in dependency order, cheapest sufficient bucket first.
+- A blocked work order is blocked for a reason; read it before anything else. Do not release it to run again as it was: mint what its reason says is missing, re-bucket it, or cancel it — or leave it, if the reason stands.
+- Adjust on the fly: when a landed work order obsoletes one still queued — its unknown now carried elsewhere, its premise gone — cancel the queued one before issuing the next.
+
+Reopening. A done work order whose reading no longer stands — the gate names its known stale, the artifact it read has changed — is reopened, not re-routed: the same worker picks up where it left off, with its probes in hand, and takes the reading again.
+
+```
+"reopen": [{"task": "engrave_piece_pdf", "why": "piece.mid changed after the score was engraved; piece_pdf_built is stale"}]
+```
+
+A blocked one, once what it lacked exists, is unblocked the same way, naming the work order that supplied it:
+
+```
+"unblock": [{"task": "judge_score_level", "after": "engrave_piece_pdf"}]
+```

@@ -2319,6 +2319,18 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         # before it once, as the next user message, then kept as `nudge.delivered.md` for the record. The only
         # way in a person had was the controller's note; a worker an hour into decoding a PDF had nobody to say
         # "there is a cheaper reading".
+        # The controller reopened this work order: its reading no longer stands. The reason is the first thing the
+        # worker hears, as a continuation of the session it finished — the same window, its probes in hand.
+        reopen = root/'reopen.md'
+        if reopen.exists() and reopen.read_text().strip():
+            status_now = session.status()
+            text = ('This work order is reopened: '+reopen.read_text().strip()+'\nYour earlier reading no longer stands; '
+                    'take it again from the artifact as it is now, adopt, and `terra route complete` again.\n')
+            if status_now['phase'] == 'complete':
+                session.continue_with(text, label='reopened')
+            elif status_now['phase'] == 'worker' and status_now['pending_io'] is None:
+                session.interject(text, label='reopened')
+            reopen.rename(root/'reopen.delivered.md')
         nudge = root/'nudge.md'
         if nudge.exists() and nudge.read_text().strip():
             status_now = session.status()

@@ -17,6 +17,7 @@ If the project-files section is not enough to route or bucket well, look first: 
  "rebucket": [{"task": "<id>", "bucket": "medium|high", "why": "..."}],
  "unblock": [{"task": "<id>", "after": "<done task that built what was missing>"}],
  "cancel": [{"task": "<id>", "why": "..."}],
+ "reopen": [{"task": "<id>", "why": "what no longer stands"}],
  "retype": [{"unknown": "<id>", "type": "number|boolean|label", "claim": "<optional sharper claim>", "why": "..."}],
  "done": false, "why": "one sentence"}
 Ids match ^[a-z][a-z0-9_]*$. Unknowns that already exist are not listed again; a task lists only the unknowns it resolves.

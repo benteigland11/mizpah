@@ -1228,6 +1228,25 @@ def unblock_task(project_root: Path, task_id: str) -> dict[str, Any]:
     return _get_task(load_route(project_root), task_id)
 
 
+def reopen_task(project_root: Path, task_id: str, *, reason: str) -> dict[str, Any]:
+    """A done task back to ready: its reading no longer stands (the artifact moved, the known went stale, the gate
+    names it again) and the same work order is owed again — not a new one continuing where it left off. The
+    reason is mandatory and kept on the task; the completion it had stays in the log as history."""
+    if not reason or not str(reason).strip():
+        raise ValueError("reason required — a reopened route must say what no longer stands")
+    rec = load_route(project_root)
+    t = _get_task(rec, task_id)
+    if t.get("status") != "done":
+        raise ValueError(f"only a done task reopens (this one is {t.get('status')!r}; a blocked one is unblocked)")
+    for task in rec["tasks"]:
+        if task["id"] == task_id:
+            task["status"] = "ready"
+            task.setdefault("reopened", []).append(dict(at=_now(), reason=reason.strip()))
+            task["updated_at"] = _now()
+    save_route(project_root, rec)
+    return _get_task(load_route(project_root), task_id)
+
+
 def set_task_priority(
     project_root: Path,
     task_ids: list[str],

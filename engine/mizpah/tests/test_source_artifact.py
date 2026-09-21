@@ -120,7 +120,7 @@ def test_a_resolved_reading_minted_again_is_reopened_not_refused(gym: Path) -> N
     ], tasks=[dict(id='revalidate_pedal', unknowns=['pedal_timing_valid_after_fix'], bucket='low', title='revalidate')])
     accepted, refusals = controller.guard(again, observation, gym)
     assert not refusals, refusals
-    assert accepted['unknowns'] == [] and accepted['reopen'] == ['pedal_timing_valid']
+    assert accepted['unknowns'] == [] and accepted['reopen_unknowns'] == ['pedal_timing_valid']
     assert accepted['tasks'][0]['unknowns'] == ['pedal_timing_valid'], accepted['tasks']
     applied = controller.apply(CONFIG, gym, accepted)
     assert applied.get('reopen') == ['pedal_timing_valid'] and 'revalidate_pedal' in applied['tasks']
@@ -165,7 +165,7 @@ def test_a_task_on_a_false_reading_reopens_it(gym: Path) -> None:
     again = dict(unknowns=[], tasks=[dict(id='repair_lh', unknowns=['left_hand_rolls'], bucket='medium', title='repair the left hand')])
     accepted, refusals = controller.guard(again, observation, gym)
     assert not refusals, refusals
-    assert accepted['reopen'] == ['left_hand_rolls'] and accepted['tasks'][0]['unknowns'] == ['left_hand_rolls']
+    assert accepted['reopen_unknowns'] == ['left_hand_rolls'] and accepted['tasks'][0]['unknowns'] == ['left_hand_rolls']
 
 
 def test_a_budget_ask_is_its_own_patch(gym: Path) -> None:
@@ -327,7 +327,7 @@ def test_a_reading_newer_than_its_artifact_is_not_reopened_for_a_duplicate(gym: 
                  tasks=[dict(id='revalidate_piece', unknowns=['piece_mid_valid_again'], bucket='low', title='again')])
     accepted, refusals = controller.guard(again, observation, gym)
     assert not refusals, refusals
-    assert accepted['unknowns'] == [] and accepted['reopen'] == [] and accepted['tasks'] == []
+    assert accepted['unknowns'] == [] and accepted['reopen_unknowns'] == [] and accepted['tasks'] == []
     assert json.loads(path.read_text())['status'] == 'resolved'
 
 

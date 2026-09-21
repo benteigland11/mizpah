@@ -12,6 +12,7 @@ If the project-files section is not enough to route or bucket well, look first: 
 {"unknowns": [{"id": "snake_case", "claim": "...", "evidence_needed": "...", "type": "number|boolean|label", "unit": "...", "cites": "need:1 | deliverable:1 (one, or several joined by |; the first is primary)"}],
  "tasks": [{"id": "snake_case", "title": "...", "unknowns": ["..."], "bucket": "low|medium|high", "deps": [], "continue_from": "<task id, optional>", "walk": "<procedure id, optional>", "walk_from": 0}],
  "cancel": [{"task": "<id>", "why": "..."}],
+ "reopen": [{"task": "<id>", "why": "what no longer stands"}],
  "proposals": [{"summary": "...", "need": "new need text", "deliverable": "...", "non_goal": "...", "edit": {"need|deliverable|non_goal": N, "text": "..."}, "remove": {"need|deliverable|non_goal": N}, "budget_delta": +N, "evidence": "...", "blocking": false}],
  "why": "one sentence on what the map owes the brief"}
 Ids match ^[a-z][a-z0-9_]*$.
