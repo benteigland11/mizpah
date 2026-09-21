@@ -17,9 +17,3 @@ What the controller decides when it mints one.
 - **label** — a name the data answers with (a category, a verdict word). Runs must agree.
 - **formula** — an expression over named variables, each bound to a run quantity or a live known. Composed from evidence already on the map, not measured directly.
 - **relation** — a curve F(x): the x quantity and its unit are named; readings are points along it.
-
-## What is not an unknown
-
-- A file written to describe the work (notes, plan, write-up): a file never reaches another project; the library does.
-- A need about the method ("improve the procedure"): its reading is the procedure itself — one boolean whose source is the named procedure.
-- An instrument. A probe or a widget measures; it is never itself a finding.
