@@ -408,11 +408,20 @@ def _identity(client: ModelClient | None) -> dict[str, Any] | None:
     return result
 
 
+HOST_SHELL_KEYS = ('refused_patterns', 'scratch_root')
+
+
+def _shell_binding(saved: dict[str, Any] | None) -> dict[str, Any]:
+    return {k: v for k, v in (saved or {}).items() if k not in HOST_SHELL_KEYS}
+
+
 def _shell_identity(shell: SandboxedShell) -> dict[str, Any]:
     # Compared against the saved JSON, so tuples must already be lists. The refusal patterns are host policy
-    # text, not the sandbox binding: a wording change between two runs left a saved session unopenable
-    # ("Reopen requires the saved model and shell bindings") and its task blocked.
-    return {k: v for k, v in json.loads(json.dumps(asdict(shell.config))).items() if k != 'refused_patterns'}
+    # text and the scratch root is where the host keeps this task's spill files: neither is the sandbox binding.
+    # A wording change between two runs left a saved session unopenable ("Reopen requires the saved model and
+    # shell bindings") and its task blocked; a session adopted into another task's root (continue_from) carried
+    # the first task's scratch root and was refused the same way.
+    return _shell_binding(json.loads(json.dumps(asdict(shell.config))))
 
 
 def _settings(value: dict[str, Any]) -> SessionSettings:
@@ -483,7 +492,7 @@ class FocusedSession:
             if result.journal.drop_torn_tail('session'):
                 result.journal.append(session_id='session', event_type='torn_tail_dropped', payload={})
             result._restore()
-            saved_shell = {k: v for k, v in (result.state['shell_config'] or {}).items() if k != 'refused_patterns'}
+            saved_shell = _shell_binding(result.state['shell_config'])
             if (result.state['worker_identity'] != _identity(worker)
                     or saved_shell != _shell_identity(shell)
                     or result.state['controller_identity'] != (
@@ -662,7 +671,7 @@ class FocusedSession:
             if result.state['worker_identity'] != _identity(worker):
                 changed['worker'] = True
                 result.state['worker_identity'] = _identity(worker)
-            if {k: v for k, v in (result.state['shell_config'] or {}).items() if k != 'refused_patterns'} != _shell_identity(shell):
+            if _shell_binding(result.state['shell_config']) != _shell_identity(shell):
                 changed['shell'] = True
                 result.state['shell_config'] = _shell_identity(shell)
             expected = _identity(controller) if result.settings.reference is not None else None

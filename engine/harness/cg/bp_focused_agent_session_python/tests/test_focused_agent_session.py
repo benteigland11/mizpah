@@ -1746,3 +1746,19 @@ def test_a_final_tool_call_is_a_completion_claim(tmp_path):
     result = item.run()
     assert result['status'] == 'complete' and result['final_text'] == 'run r1, known k1'
     assert any(c.startswith('echo done:') and 'run r1' in c for c in shell.calls)   # the call ran like any command tool
+
+
+def test_reopen_accepts_another_scratch_root_and_other_refusal_wording(tmp_path):
+    # A session adopted into another task's root (continue_from) is opened with that root's scratch; the
+    # refusal patterns are host policy text. Neither is the sandbox binding.
+    from dataclasses import replace as dc_replace
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, enabled=False, rollover=False)
+    root = tmp_path/'session'
+    FocusedSession.create(root, settings, worker=worker, shell=shell)
+    moved = FixtureShell(tmp_path/'other-task'/'scratch')
+    moved.config = dc_replace(moved.config, refused_patterns=((r'\bpip\b', 'no installs'),))
+    assert FocusedSession.open(root, worker=worker, shell=moved).status()['status'] != 'blocked'
+    rebound = FixtureShell(tmp_path/'scratch')
+    rebound.config = dc_replace(rebound.config, read_only_binds=('/elsewhere',))
+    with pytest.raises(ValueError, match='Reopen requires'):
+        FocusedSession.open(root, worker=worker, shell=rebound)
