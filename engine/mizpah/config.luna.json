@@ -57,7 +57,7 @@
  "controller_output_tokens": 8192,
  "checkin_output_tokens": 2048,
  "scaffolding": {
-  "checkins": false,
+  "checkins": true,
   "small_edits": false
  },
  "ops": {

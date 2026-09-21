@@ -285,7 +285,7 @@ def test_a_step_may_not_link_its_own_procedure(tmp_path: Path, monkeypatch, caps
     assert "links to its own procedure" in capsys.readouterr().out
 
 
-def test_open_hands_back_an_unfinished_walk_and_skip_marks_the_rest(tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_open_hands_back_an_unfinished_walk_and_steps_skip_one_at_a_time(tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
     """A worker whose window rolled over opened the same procedure again and left a fresh unticked copy for
     the gate to hold the task on; and it looked twice for a verb to mark a walk not needed."""
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
@@ -309,21 +309,28 @@ def test_open_hands_back_an_unfinished_walk_and_skip_marks_the_rest(tmp_path: Pa
     assert main(["open", "tune-pedal", "--for", "the second piece", "--dir", str(tmp_path), "--again"]) == 0
     second = json.loads(capsys.readouterr().out)["path"]
     assert second != first and len(list((tmp_path/".playbook"/"open").glob("tune-pedal--*.md"))) == 2
-    # Two unfinished walks: skip by id is ambiguous, skip by file is not.
-    assert main(["skip", "tune-pedal", "--because", "not needed", "--dir", str(tmp_path)]) == 1
+    # Two unfinished walks: tick by id is ambiguous, tick by file is not. A step is skipped one at a time, with its
+    # reason written under it; there is no verb that closes a walk whole.
+    assert main(["tick", "tune-pedal", "--skip", "1", "--because", "not needed", "--dir", str(tmp_path)]) == 1
     assert "2 unfinished walks" in capsys.readouterr().out
-    assert main(["skip", second, "--because", "the piece has no pedal part", "--dir", str(tmp_path)]) == 0
-    assert json.loads(capsys.readouterr().out)["skipped"] == 2
+    assert main(["tick", second, "--skip", "1", "2", "--because", "no pedal part", "--dir", str(tmp_path)]) == 1
+    assert "one step per call" in capsys.readouterr().out
+    assert main(["tick", second, "--skip", "1", "--dir", str(tmp_path)]) == 1
+    assert "--because" in capsys.readouterr().out
+    assert main(["tick", second, "--skip", "1", "--because", "the piece has no pedal part", "--dir", str(tmp_path)]) == 0
+    assert json.loads(capsys.readouterr().out)["unticked"] == [2]
+    assert main(["tick", second, "--skip", "2", "--because", "nothing to place", "--dir", str(tmp_path)]) == 0
+    capsys.readouterr()
     text = Path(second).read_text()
-    assert "- [-] **1." in text and "- [-] **2." in text and "skipped: the piece has no pedal part" in text
-    # The first walk is now the only unfinished one: skip by id works and marks only what is left.
-    assert main(["skip", "tune-pedal", "--because", "measured another way", "--dir", str(tmp_path)]) == 0
-    assert json.loads(capsys.readouterr().out)["skipped"] == 1
+    assert "- [-] **1." in text and "not needed here: the piece has no pedal part" in text and "- [-] **2." in text
+    # The first walk is now the only unfinished one: by id works and marks only what is left.
+    assert main(["tick", "tune-pedal", "--skip", "2", "--because", "measured another way", "--dir", str(tmp_path)]) == 0
+    assert json.loads(capsys.readouterr().out)["unticked"] == []
     assert "- [x] **1." in path.read_text() and "- [-] **2." in path.read_text()
-    # Nothing unfinished: a plain open makes a fresh walk, and skip has nothing to skip.
+    # Nothing unfinished: a plain open makes a fresh walk.
     assert main(["open", "tune-pedal", "--for", "a third piece", "--dir", str(tmp_path)]) == 0
     assert "already_open" not in json.loads(capsys.readouterr().out)
-    assert main(["skip", "no-such", "--because", "x", "--dir", str(tmp_path)]) == 1
+    assert main(["tick", "no-such", "--done", "1", "--dir", str(tmp_path)]) == 1
 
 
 def test_search_lists_open_walks_here_first(tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -340,7 +347,7 @@ def test_search_lists_open_walks_here_first(tmp_path: Path, monkeypatch, capsys:
     reply = json.loads(capsys.readouterr().out)
     assert list(reply)[:2] == ["ok", "open_here"]
     assert reply["open_here"][0]["id"] == "tune-pedal" and reply["open_here"][0]["next"] == "1. Find harmonies"
-    assert main(["skip", "tune-pedal", "--because", "no pedal part", "--dir", str(tmp_path)]) == 0
+    assert main(["tick", "tune-pedal", "--skip", "1", "--because", "no pedal part", "--dir", str(tmp_path)]) == 0
     capsys.readouterr()
     assert main(["search", "pedal", "--dir", str(tmp_path)]) == 0
     assert "open_here" not in json.loads(capsys.readouterr().out)
@@ -354,7 +361,7 @@ def test_tick_marks_several_steps_in_one_call(tmp_path: Path, monkeypatch, capsy
     capsys.readouterr()
     assert main(["open", "tune-pedal", "--for", "the piece", "--dir", str(tmp_path)]) == 0
     path = json.loads(capsys.readouterr().out)["path"]
-    assert main(["tick", "tune-pedal", "--done", "1,3", "--skip", "2", "--dir", str(tmp_path)]) == 0
+    assert main(["tick", "tune-pedal", "--done", "1,3", "--skip", "2", "--because", "no second thing here", "--dir", str(tmp_path)]) == 0
     reply = json.loads(capsys.readouterr().out)
     assert reply["marked"] == [1, 2, 3] and reply["unticked"] == []
     text = Path(path).read_text()
@@ -387,7 +394,7 @@ def test_a_linked_step_ticks_only_after_its_procedure_is_walked(tmp_path: Path, 
     child = json.loads(capsys.readouterr().out)["path"]
     assert main(["tick", parent, "--done", "2", "--dir", str(tmp_path)]) == 1   # opened but not finished
     capsys.readouterr()
-    assert main(["skip", child, "--because", "the widget applies it", "--dir", str(tmp_path)]) == 0
+    assert main(["tick", child, "--skip", "1", "--because", "the widget applies it", "--dir", str(tmp_path)]) == 0
     capsys.readouterr()
     assert main(["tick", parent, "--done", "1", "2", "--dir", str(tmp_path)]) == 0
     assert json.loads(capsys.readouterr().out)["unticked"] == []

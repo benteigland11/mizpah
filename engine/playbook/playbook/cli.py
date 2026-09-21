@@ -103,18 +103,14 @@ def _build_parser() -> argparse.ArgumentParser:
     open_.add_argument("--again", action="store_true", help="a second walk for a second thing; without it an unfinished walk is handed back")
     open_.set_defaults(handler=_cmd_open)
 
-    tick = sub.add_parser("tick", help="mark steps of an open walk in one call: --done N,M get [x], --skip N get [-]")
+    tick = sub.add_parser("tick", help="mark steps of an open walk: --done N,M get [x]; --skip N --because ... gets [-] with the reason under it")
     tick.add_argument("target", help="the walk file under .playbook/open/, or the procedure id of its one unfinished walk")
     tick.add_argument("--done", nargs="*", default=[], help="step numbers done: --done 1,3 or --done 1 3")
-    tick.add_argument("--skip", nargs="*", default=[], help="step numbers not needed here: --skip 2 or --skip 2,4")
+    tick.add_argument("--skip", nargs="*", default=[], help="one step that does not apply here, with --because")
+    tick.add_argument("--because", default="", help="why the skipped step does not apply (written under it)")
     tick.add_argument("--dir", default=".", help="working tree the walk is under (default: .)")
     tick.set_defaults(handler=_cmd_tick)
 
-    skip = sub.add_parser("skip", help="mark every remaining step of an open walk [-] not needed, with the reason on the file")
-    skip.add_argument("target", help="the walk file under .playbook/open/, or the procedure id of its one unfinished walk")
-    skip.add_argument("--because", required=True, help="why this walk was not needed here")
-    skip.add_argument("--dir", default=".", help="working tree the walk is under (default: .)")
-    skip.set_defaults(handler=_cmd_skip)
 
     validate = sub.add_parser("validate", help="validate a procedure in the global store")
     validate.add_argument("id")
@@ -244,11 +240,7 @@ def _cmd_tick(args: argparse.Namespace) -> dict[str, Any]:
     def numbers(tokens: list[str]) -> list[int]:
         # `--done 1,3` and `--done 1 3` both: the first worker to tick wrote the numbers with spaces and was refused.
         return [int(x) for token in tokens for x in token.replace(" ", "").split(",") if x]
-    return ops.tick_walk(args.target, numbers(args.done), numbers(args.skip), args.dir)
-
-
-def _cmd_skip(args: argparse.Namespace) -> dict[str, Any]:
-    return ops.skip_walk(args.target, args.because, args.dir)
+    return ops.tick_walk(args.target, numbers(args.done), numbers(args.skip), args.dir, because=args.because)
 
 
 def _cmd_start(args: argparse.Namespace) -> dict[str, Any]:

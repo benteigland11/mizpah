@@ -98,6 +98,7 @@ def test_the_host_refreshes_a_stale_known_whose_reading_reproduces_and_reports_o
     config = worker.load_config(ROOT/'config.luna.json')
     config['mizpah']['sandbox'] = dict(config['mizpah']['sandbox'], workspace='bind', cache_dirs=[], services=None, network=None,
                                        share_network=False)
+    config['mizpah']['scaffolding'] = dict(config['mizpah']['scaffolding'], checkins=False)
     config['shell']['limits'] = dict(config['shell']['limits'], workspace_bytes=4*1024**2, max_files=2000)
     project = tmp_path/'proj'
     project.mkdir()
@@ -129,6 +130,7 @@ def test_a_bind_session_seeds_its_state_part_and_finds_it_again_after_open(tmp_p
     config = worker.load_config(ROOT/'config.luna.json')
     config['mizpah']['sandbox'] = dict(config['mizpah']['sandbox'], workspace='bind', cache_dirs=[], services=None, network=None,
                                        share_network=False)
+    config['mizpah']['scaffolding'] = dict(config['mizpah']['scaffolding'], checkins=False)
     config['shell']['limits'] = dict(config['shell']['limits'], workspace_bytes=4*1024**2, max_files=2000)
     project = tmp_path/'proj'
     (project/'.mizpah'/'map').mkdir(parents=True)
@@ -232,6 +234,7 @@ def test_a_continued_session_takes_the_project_state_again(tmp_path: Path) -> No
     config = worker.load_config(ROOT/'config.luna.json')
     config['mizpah']['sandbox'] = dict(config['mizpah']['sandbox'], workspace='bind', cache_dirs=[], services=None, network=None,
                                        share_network=False)
+    config['mizpah']['scaffolding'] = dict(config['mizpah']['scaffolding'], checkins=False)
     config['shell']['limits'] = dict(config['shell']['limits'], workspace_bytes=4*1024**2, max_files=2000)
     project = tmp_path/'proj'
     (project/'.mizpah'/'map').mkdir(parents=True)

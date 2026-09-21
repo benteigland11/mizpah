@@ -1080,8 +1080,8 @@ def open_checklists(snapshot: bytes) -> list[str]:
         if open_steps:
             problems.append('checklist '+name+' has '+str(len(open_steps))+' unticked step(s): '+
                             '; '.join(o[:60] for o in open_steps[:4])+(' …' if len(open_steps) > 4 else '')+
-                            ' — `playbook tick '+name+' --done N,M --skip K` marks them in one call; if the walk did not apply, '
-                            '`playbook skip '+name+' --because "..."` marks everything left `[-]`')
+                            ' — do each against the artifact and `playbook tick '+name+' --done N,M`; a step that does not '
+                            'apply here is `--skip K --because "..."`, one per call, and "already done" is not a reason')
     return problems
 
 
@@ -1846,6 +1846,8 @@ def focus_globs(unknowns: list[dict[str, Any]]) -> tuple[str, ...]:
         if creates:
             globs.append(creates)
             globs.append(creates.rstrip('/')+'/*')
+    # The walks it ticked: a skipped step's reason is a claim about the artifact, judged like a probe.
+    globs.append(PLAYBOOK_PREFIX+'/open/*.md')
     globs.append('cg/*/src/*.py')
     return tuple(dict.fromkeys(globs))
 
@@ -1922,7 +1924,7 @@ COMMAND_TOOLS: tuple[dict[str, Any], ...] = (
     dict(name='playbook_open', description='Write a whole procedure as a checklist to .playbook/open/<id>--<for>.md '
          'in the workspace; read that file once, follow it in order, tick steps off. One copy per walk: say what '
          'this walk is for; a procedure already open here is handed back with its next step. Use for the bootstrap '
-         'and for any domain procedure a search finds. A walk that did not apply: `playbook skip <file> --because ...` (bash).',
+         'and for any domain procedure a search finds. Every step is done or skipped one at a time with its reason (`playbook tick`, bash).',
          command='playbook open {id} --for {purpose}',
          parameters=dict(type='object', properties=dict(id=string('procedure id from search'),
                                                         purpose=string('what this walk is for: the unknown(s), artifact or source')),

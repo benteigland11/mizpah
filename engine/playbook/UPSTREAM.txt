@@ -7,3 +7,4 @@ diverged: `search` is local first — unfinished walks under the working tree (`
 diverged: `tick <file|id> --done N,M --skip K` marks several steps of an open walk in one call
 diverged: `edit-step` echoes the step as it now reads (`do`, linked `procedure`), not just its title
 diverged: `tick` refuses to close a step that links another procedure until a walk of that procedure is closed (every box [x]/[-]); the walk header says adapt the specifics, walk the linked ones
+diverged: the whole-walk `skip` verb is gone; `tick --skip N --because ...` skips one step per call with the reason written under it

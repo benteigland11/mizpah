@@ -74,7 +74,7 @@ def search_procedures(query: str, limit: int | None = None, include_retired: boo
     if here:
         result = {"ok": result["ok"], "open_here": here,
                   "note": "these walks are already open in this workspace and not finished: continue them "
-                          "(or `playbook skip <path> --because ...`) before opening anything from the hits",
+                          "before opening anything from the hits",
                   **{k: v for k, v in result.items() if k != "ok"}}
     return result
 
@@ -545,29 +545,6 @@ def open_walks(procedure_id: str | None, target_dir: str | Path = ".") -> list[d
     return result
 
 
-def skip_walk(target: str, because: str, target_dir: str | Path = ".") -> dict[str, Any]:
-    """Mark every remaining step of an open walk `[-]` not needed, with the reason on the file.
-
-    `target` is the walk file or the procedure id (its one unfinished walk). A worker that opened a
-    procedure the search ranked first and found it did not apply looked for this verb twice and
-    found nothing; the gate then held the task on the unticked boxes.
-    """
-    because = str(because or "").strip()
-    if not because:
-        raise ValueError("skip needs --because: why this walk was not needed here (one line; it goes on the file)")
-    path = _walk_file(target, target_dir)
-    lines = path.read_text(encoding="utf-8").splitlines()
-    skipped = 0
-    for i, line in enumerate(lines):
-        m = _STEP_LINE.match(line)
-        if m and m.group(1) == " ":
-            lines[i] = line.replace("- [ ]", "- [-]", 1)
-            skipped += 1
-    lines += ["", f"skipped: {because}"]
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return {"ok": True, "path": str(path), "skipped": skipped, "because": because}
-
-
 def _walk_file(target: str, target_dir: str | Path) -> Path:
     path = Path(target)
     if path.is_file():
@@ -610,12 +587,22 @@ def _walk_closed(procedure_id: str, target_dir: str | Path) -> bool:
 
 
 def tick_walk(target: str, done: list[int] | None = None, not_needed: list[int] | None = None,
-              target_dir: str | Path = ".") -> dict[str, Any]:
+              target_dir: str | Path = ".", because: str = "") -> dict[str, Any]:
     """Mark steps of an open walk in one call: `done` get `[x]`, `not_needed` get `[-]`. A worker ticking by
-    hand spent thirteen turns of grep, read and edit on seven boxes."""
+    hand spent thirteen turns of grep, read and edit on seven boxes.
+
+    A step is skipped one at a time, with its reason written under it: the procedure is the validation of the
+    work, and each step is its own decision. There is no verb that skips a walk whole — three procedures were
+    closed with one reason each ("already covered by the probe") on a piece whose every pedal hold crossed a
+    harmony, which the skipped procedure's fourth step checks."""
     done = list(done or []); not_needed = list(not_needed or [])
     if not done and not not_needed:
-        raise ValueError("tick needs --done and/or --skip with step numbers, e.g. --done 1,3 --skip 2")
+        raise ValueError("tick needs --done and/or --skip with step numbers, e.g. --done 1,3 --skip 2 --because ...")
+    if len(not_needed) > 1:
+        raise ValueError("skip one step per call, each with its own --because: a step is its own decision")
+    because = str(because or "").strip()
+    if not_needed and not because:
+        raise ValueError("--skip needs --because: why this step does not apply to what is in front of you (one line; it goes under the step)")
     if set(done) & set(not_needed):
         raise ValueError("a step is done or not needed, not both: " + ", ".join(str(n) for n in sorted(set(done) & set(not_needed))))
     path = _walk_file(target, target_dir)
@@ -627,7 +614,7 @@ def tick_walk(target: str, done: list[int] | None = None, not_needed: list[int] 
     unwalked = [n for n in sorted(set(done) | set(not_needed)) if n in linked and not _walk_closed(linked[n], target_dir)]
     if unwalked:
         raise ValueError("step(s) " + ", ".join(str(n) for n in unwalked) + " are other procedures; open and finish each first "
-                         "(every box [x] or [-], or `playbook skip <its walk> --because ...`), then tick this box: "
+                         "(every box [x], or [-] with its reason), then tick this box: "
                          + "; ".join(f"{n} -> `playbook open {linked[n]} --for ...`" for n in unwalked))
     seen: set[int] = set(); marked = []
     for i, line in enumerate(lines):
@@ -638,6 +625,8 @@ def tick_walk(target: str, done: list[int] | None = None, not_needed: list[int] 
         mark = "x" if n in done else "-" if n in not_needed else None
         if mark is not None:
             lines[i] = re.sub(r"^- \[( |x|-)\]", f"- [{mark}]", line, count=1)
+            if mark == "-":
+                lines[i] += f"\n\n  not needed here: {because}"
             marked.append(n)
     missing = sorted((set(done) | set(not_needed)) - seen)
     if missing:
@@ -666,7 +655,7 @@ def open_procedure(procedure_id: str, purpose: str, target_dir: str | Path = "."
             return {"ok": True, "id": procedure_id, "already_open": True, "path": walk["path"], "next": walk["next"],
                     "unticked": walk["unticked"],
                     "note": ("this procedure is already open here; continue from its next step, tick `[x]` done or `[-]` "
-                             "not needed, or `playbook skip <path> --because ...` if it does not apply. `--again` opens a "
+                             "not needed (one per call, with --because). `--again` opens a "
                              "second walk for a second thing.")}
     document = read_document(store.procedure_path(procedure_id))
     _require_valid(document, procedure_id)
@@ -677,14 +666,16 @@ def open_procedure(procedure_id: str, purpose: str, target_dir: str | Path = "."
         lines += [str(document["description"]).strip(), ""]
     if document.get("tags"):
         lines += ["tags: " + ", ".join(str(t) for t in document["tags"]), ""]
-    lines += ["Follow the steps in order, and tick as you go — in the same command as the step's work: "
-              "`playbook tick <this file> --done N` when a step is done, `--skip N` when it does not apply here "
-              "(several at once when several closed together); `playbook skip <this file> --because ...` marks "
-              "everything left `[-]` when the whole walk does not apply. A box ticked at the end records nothing. "
-              "The steps are knowledge earned on another task: adapt their specifics (names, keys, counts, the probe they "
-              "mention) to what is in front of you, and do them. A step that is another procedure is walked as well — "
-              "open it, finish it, then tick here; `tick` refuses a linked step whose walk is not closed. "
-              "Improve the procedure afterwards with `playbook edit-step` / `add-step` where a step fell short.", ""]
+    lines += ["This procedure is the validation of your work: each step is a check or a change someone found necessary, "
+              "written down so the next piece gets it too. Do the steps in order, against what is in front of you, and tick "
+              "as you go — in the same command as the step's work: `playbook tick <this file> --done N` when a step is done "
+              "(several when several closed together). A step that does not apply here is `--skip N --because \"...\"`, one "
+              "per call, the reason written under it — \"already done\" and \"covered by the probe\" are not reasons: do the "
+              "step and show what it found. There is no way to close a walk whole. The steps are knowledge earned on another "
+              "task: adapt their specifics (names, keys, counts, the probe they mention) to what is in front of you, and do "
+              "them. A step that is another procedure is walked as well — open it, finish it, then tick here; `tick` refuses "
+              "a linked step whose walk is not closed. Improve the procedure afterwards with `playbook edit-step` / `add-step` "
+              "where a step fell short.", ""]
     for i, step in enumerate(steps, 1):
         lines += [f"- [ ] **{i}. {step.get('title', '')}**", "", f"  {str(step.get('do', '')).strip()}", ""]
         if step.get("procedure"):
