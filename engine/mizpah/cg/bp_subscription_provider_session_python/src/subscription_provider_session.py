@@ -498,7 +498,11 @@ class ProviderTransport:
 
     def __call__(self, path: str, payload: dict[str, Any], *, timeout_seconds: float | None = None) -> WireResponse:
         started = time.monotonic()
-        timeout = self.profile.timeout_seconds if timeout_seconds is None else min(timeout_seconds, self.profile.timeout_seconds)
+        # The caller's bound, else the one set on this transport (a model client's endpoint timeout), else the
+        # profile's: a stalled proxy response held a worker turn for fifteen minutes on the profile's 900 s while
+        # the config said 300.
+        named = timeout_seconds if timeout_seconds is not None else getattr(self, "default_timeout_seconds", None)
+        timeout = self.profile.timeout_seconds if named is None else min(named, self.profile.timeout_seconds)
         try:
             bearer = self.session._bearer()
         except (NotSignedIn, QuarantinedCredential, RefreshFailed) as error:

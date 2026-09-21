@@ -201,7 +201,9 @@ class HostedModelClient(ModelClient):
         endpoint = dict(session.endpoint(), maximum_response_bytes=16_000_000, template_path='/apply-template',
                         tokenize_path='/tokenize', tokenizer_add_special=True, tokenizer_parse_special=True)
         endpoint.update({k: v for k, v in (spec.get('endpoint') or {}).items() if k in ('timeout_seconds', 'maximum_response_bytes')})
-        super().__init__(EndpointConfig(**endpoint), transport=session.transport(), observer=observer)
+        transport = session.transport()
+        transport.default_timeout_seconds = endpoint.get('timeout_seconds')   # the config's bound reaches the wire
+        super().__init__(EndpointConfig(**endpoint), transport=transport, observer=observer)
 
     def count(self, payload: dict[str, Any], purpose: str) -> dict[str, Any]:
         estimate = self.session.count(payload)
