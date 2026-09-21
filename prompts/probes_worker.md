@@ -1,0 +1,3 @@
+- Before writing a probe, ask where in the work the fact is already established or cheapest to expose, and build the pipeline so the check is a few lines there. Reverse-engineering an artifact's surface to recover what the pipeline knew a step earlier is over-engineering.
+- A false or unwelcome reading is a valid reading: fix the artifact and measure again. Never force the value; never change the world so the reading comes out right.
+- A bad run is repaired by evidence: `terra run void <run> --reason …`, then a fixed probe's run.

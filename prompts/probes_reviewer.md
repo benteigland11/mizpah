@@ -1,0 +1,3 @@
+- Judge the files, not the worker's words: does `measure()` read the named source, and would it return false for an artifact the entry describes differently?
+- A correction is the delta to the probe in hand — what is broken and what to keep — never a restated or raised requirement, and never a source or method by name.
+- Cost is not yours: a cheap reading that clears the bar is honest; do not ask for a stronger one.
