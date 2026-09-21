@@ -1041,7 +1041,7 @@ def test_completed_session_continues_on_host_text_and_survives_reopen(tmp_path):
     assert request[-2]['role'] == 'assistant' and request[-2]['content'] == 'Verified final report.'
     events = [json.loads(line) for line in (tmp_path/'session'/'events'/'session.jsonl').read_text().splitlines()]
     continued = [e['payload'] for e in events if e['event_type'] == 'continued']
-    assert continued == [dict(window=0, characters=72)]
+    assert continued == [dict(window=0, characters=72, label='')]
     turns = [e['payload'] for e in events if e['event_type'] == 'worker_turn']
     assert turns[3]['applied_input'][-1]['content'].startswith('Gate red')
 
@@ -1388,7 +1388,7 @@ def test_paused_session_takes_an_interjection_at_the_turn_boundary(tmp_path):
     with pytest.raises(ValueError, match='paused worker session'):
         reopened.interject('after completion')
     events = [json.loads(line) for line in (tmp_path/'session'/'events'/'session.jsonl').read_text().splitlines()]
-    assert [e['payload'] for e in events if e['event_type'] == 'interjected'] == [dict(window=0, characters=71)]
+    assert [e['payload'] for e in events if e['event_type'] == 'interjected'] == [dict(window=0, characters=71, label='')]
 
 
 def test_retune_changes_wire_view_policy_on_a_saved_session(tmp_path):

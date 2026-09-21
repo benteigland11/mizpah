@@ -1541,12 +1541,15 @@ class FocusedSession:
                     removed += 1
             return removed
 
-    def continue_with(self, message: str) -> dict[str, Any]:
+    def continue_with(self, message: str, label: str = '') -> dict[str, Any]:
         """Resume a completed session on new user text; the accepted final answer is withdrawn.
 
         The host judged the outcome outside the model (a gate, a check) and states what
         is still missing. Nothing is replayed: the text lands as the next user message
         after the worker's final answer, and the cursor makes it the new incoming input.
+        `label` names the phase the host is opening (a red round, the write-up after green,
+        a library merge) on the event, so a reader of the journal can see where one phase
+        ends and the next begins; the text itself is not journaled.
         """
         if not isinstance(message, str) or not message.strip():
             raise ValueError('Continuation requires nonempty text')
@@ -1557,11 +1560,11 @@ class FocusedSession:
                 raise ValueError('Only a completed session can be continued')
             self.session.append_guidance(message, standing=True)   # the current objective; survives a handoff
             self.state.update(phase='worker', proposed_final=None, final_text='')
-            self._event('continued', dict(window=self.session.window_index, characters=len(message)))
+            self._event('continued', dict(window=self.session.window_index, characters=len(message), label=label or ''))
             self._save()
             return self.status()
 
-    def interject(self, message: str) -> dict[str, Any]:
+    def interject(self, message: str, label: str = '') -> dict[str, Any]:
         """Hand the worker host text at a paused turn boundary, without withdrawing anything.
 
         A session paused by `run(maximum_worker_turns=...)` sits in the worker phase with no
@@ -1577,7 +1580,7 @@ class FocusedSession:
             if self.state['phase'] != 'worker' or self.state['pending_io'] is not None:
                 raise ValueError('Only a paused worker session can take an interjection')
             self.session.append_guidance(message)
-            self._event('interjected', dict(window=self.session.window_index, characters=len(message)))
+            self._event('interjected', dict(window=self.session.window_index, characters=len(message), label=label or ''))
             self._save()
             return self.status()
 

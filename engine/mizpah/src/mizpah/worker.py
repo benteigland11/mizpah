@@ -68,7 +68,7 @@ def state_of(workspace: Any) -> bytes:
     """The snapshot-managed part (all of it in snapshot mode; the state tar in bind mode): what write-back reads."""
     return workspace if isinstance(workspace, (bytes, bytearray)) else bytes(getattr(workspace, 'state', b''))
 # Library procedures that are the loop's own method, not a worker's to rewrite or get credit for.
-BOOTSTRAP_PROCEDURES = ('mizpah-resolve-unknown',)
+BOOTSTRAP_PROCEDURES = ('mizpah-resolve-unknown', 'mizpah-build-environment')
 # A bucket is the mode of work, not just its price (points 3 / 8 / 21 on the route).
 BUCKET_MODES = {'low': 'implement, the path is known', 'medium': 'validate, weigh a couple of options then conclude',
                 'high': 'explore, several options in parallel before choosing'}
@@ -2043,7 +2043,7 @@ def run_through_outages(session: FocusedSession, config: dict[str, Any], root: P
                 # instruction: the delta, once.
                 status = session.status()
                 if status['phase'] == 'worker' and status['pending_io'] is None:
-                    session.interject('Your last reply was larger than the transport allows and was discarded; nothing in it '
+                    session.interject(label='reply too big', message='Your last reply was larger than the transport allows and was discarded; nothing in it '
                                       'was applied. A reply is a plan and a tool call, never the artifact: when the thing you '
                                       'are making is big (an SVG of strokes, a long data file), a widget under cg/ writes it '
                                       'from a short plan you give it (regions, directions, spacing, widths, a seed), and you '
@@ -2114,9 +2114,9 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             # A session that had finished takes the note as a continuation; one paused mid-work (killed between
             # turns) takes it as an interjection; one mid-call or mid-review is left to finish its boundary.
             if status['phase'] == 'complete':
-                session.continue_with(note)
+                session.continue_with(note, label='resumed: walks left open')
             elif status['phase'] == 'worker' and status['pending_io'] is None:
-                session.interject(note)
+                session.interject(note, label='resumed: walks left open')
     else:
         task = pick_task(config, project, task_id)
         map_id = open_task_map(config, project, task)
@@ -2138,6 +2138,12 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
                            +'\n'.join('  - '+m for m in methods)+'\n')
         from . import bases
         assignment += bases.enabler_text(config)   # the gym's environment base, when it has one
+        if config['mizpah'].get('builds_base'):
+            assignment += ('\nThis gym builds an environment: on green, /work becomes the base "'+str(config['mizpah']['builds_base'])
+                           +'" that later gyms are set up in. Installing into /work is the work here (pip, downloads from the '
+                           'hosts the gym\'s config allows). Open `mizpah-build-environment` with `playbook open` and follow '
+                           'it: venv, tools, wrappers in bin/, relocatable shebangs, base.json; each need is one tool that '
+                           'must run.\n')
         worker_client, checkin, shell = bindings(config, root, map_id, project=project)
         holder['shell'] = shell
         reference = render_reference(project, task, unknowns)
@@ -2198,7 +2204,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
                                overruns=overruns))
             if status['completed_worker_turns'] >= cap:
                 break
-            session.interject(effort_message(task, estimate, status['completed_worker_turns'], overruns))
+            session.interject(effort_message(task, estimate, status['completed_worker_turns'], overruns), label='estimate spent')
             continue
         gate = task_gate(config, project, task, map_id, root)
         if gate['ok'] and config['mizpah'].get('remeasure', True):
@@ -2217,7 +2223,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
                            problems=gate['problems'], final_text=status['final_text']))
         if status['status'] != 'complete' or gate['ok']:
             break
-        session.continue_with(red_message(gate, project, map_id, task_unknown_ids(task)))
+        session.continue_with(red_message(gate, project, map_id, task_unknown_ids(task)), label='gate red: repair round')
     budget = cap
     if gate['ok'] and budget-status['completed_worker_turns'] > 0:
         # Only after green: the method goes into the library, and only through the harvest.
@@ -2225,7 +2231,9 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         session.continue_with(green_message(gate, task_unknown_ids(task), followed, tool_fight(root),
                                             checklist_skips(evidence(session)),
                                             uncovered_by_procedures(config, followed, unknowns),
-                                            made=[unknown_notes(u)['creates'] for u in unknowns if unknown_notes(u).get('creates')]))
+                                            made=[unknown_notes(u)['creates'] for u in unknowns if unknown_notes(u).get('creates')]),
+                              label='gate green: write up the method')
+
         status = run_through_outages(session, config, root, maximum_worker_turns=budget-status['completed_worker_turns'])
         session.prune_workspaces()
         widgets = harvest_widgets(evidence(session), root, config, project)
@@ -2247,7 +2255,8 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         while (refused or conflicts or merges) and status['status'] == 'complete' and budget-status['completed_worker_turns'] > 0:
             # A moved base is merged first (the merge message); plain refusals get the validator's words.
             session.continue_with(merge_message(conflicts) if conflicts else procedure_merge_message(merges) if merges
-                                  else refusal_message(refused))
+                                  else refusal_message(refused),
+                                  label='library merge' if (conflicts or merges) else 'library repair: validator refused')
             status = run_through_outages(session, config, root, maximum_worker_turns=budget-status['completed_worker_turns'])
             session.prune_workspaces()
             again_w = harvest_widgets(evidence(session), root, config, project)
