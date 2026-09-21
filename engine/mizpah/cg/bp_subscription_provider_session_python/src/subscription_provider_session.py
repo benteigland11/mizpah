@@ -114,9 +114,29 @@ def urllib_http(maximum_response_bytes: int = DEFAULT_MAXIMUM_RESPONSE_BYTES) ->
         except HTTPError as error:
             response = error
         with response:
-            raw = response.read(maximum_response_bytes + 1)
-            if len(raw) > maximum_response_bytes:
-                raise OSError("response exceeded the configured byte limit")
+            # Read in chunks and say so: a streamed reply arriving is a live model; silence on an open socket
+            # is a stalled one, and the two looked the same from outside for fifteen minutes.
+            progress = getattr(call, "progress", None)
+            chunks: list[bytes] = []
+            total = 0
+            last_event = ""
+            while True:
+                chunk = response.read(65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+                if total > maximum_response_bytes:
+                    raise OSError("response exceeded the configured byte limit")
+                if progress is not None:
+                    i = chunk.rfind(b"event: ")
+                    if i >= 0:
+                        last_event = chunk[i + 7:chunk.find(b"\n", i) if chunk.find(b"\n", i) > 0 else None].decode("utf-8", "replace").strip()
+                    try:
+                        progress(total, last_event)
+                    except Exception:  # noqa: BLE001 — progress is a courtesy, never the call
+                        pass
+            raw = b"".join(chunks)
             return HttpResponse(response.status, {k.lower(): v for k, v in response.headers.items()}, raw)
 
     return call
@@ -515,6 +535,12 @@ class ProviderTransport:
         def send(record: CredentialRecord) -> tuple[int, HttpResponse | str]:
             headers = self.session._headers(JSON_HEADERS)
             headers.update(self.profile.headers_for(record.secret["access_token"], dict(record.metadata, session=self.session_id)))
+            on_progress = getattr(self, "on_progress", None)
+            if on_progress is not None:
+                try:
+                    self.session.http.progress = lambda total, last_event: on_progress(dict(bytes=total, last_event=last_event, at=time.time()))
+                except AttributeError:
+                    pass
             try:
                 response = self.session.http("POST", self._url(path), headers, body_bytes, timeout)
             except (OSError, URLError, TimeoutError) as exc:

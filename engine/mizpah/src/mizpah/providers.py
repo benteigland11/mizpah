@@ -203,6 +203,9 @@ class HostedModelClient(ModelClient):
         endpoint.update({k: v for k, v in (spec.get('endpoint') or {}).items() if k in ('timeout_seconds', 'maximum_response_bytes')})
         transport = session.transport()
         transport.default_timeout_seconds = endpoint.get('timeout_seconds')   # the config's bound reaches the wire
+        # Stream progress reaches the observer as `model_stream` (the session keeps the latest beside the journal,
+        # not in it): the trace can say "streaming, 41 KB, last byte 1 s ago" against "silent for 38 s".
+        transport.on_progress = (lambda info: observer('model_stream', info)) if observer else None
         super().__init__(EndpointConfig(**endpoint), transport=transport, observer=observer)
 
     def count(self, payload: dict[str, Any], purpose: str) -> dict[str, Any]:

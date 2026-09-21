@@ -750,6 +750,15 @@ class FocusedSession:
         A subclass (a hosted provider with its own counting and capabilities) is kept: the copy is made
         through its class with the same attributes, not rebuilt as a plain ModelClient."""
         def observer(kind: str, payload: dict[str, Any]) -> None:
+            if kind == 'model_stream':
+                # Progress of the reply on the wire: the latest, beside the journal, never in it (a chunk every
+                # few hundred milliseconds would be thousands of events a turn). A trace reads it to tell a
+                # model that is answering from a proxy that has gone silent.
+                try:
+                    (self.root/'events'/'stream.json').write_text(json.dumps(dict(payload, phase=self.state.get('phase'))))
+                except OSError:
+                    pass
+                return
             self._event(kind, self._delta_request(payload) if kind == 'model_request' else payload)
             if original.observer:
                 original.observer(kind, payload)
