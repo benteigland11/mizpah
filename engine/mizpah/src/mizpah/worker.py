@@ -1621,8 +1621,9 @@ def effort_message(task: dict[str, Any], estimate: int, turns: int, overruns: in
     return ('Effort check: this task was bucketed '+task['bucket']+' ('+BUCKET_MODES.get(task['bucket'], '')+') and you have used '+str(turns)+' turns, '
             +('past' if overruns == 1 else str(overruns)+'× past')+' that estimate. Nothing has been decided for you. '
             'Judge your own effort honestly: if the readings are within reach with the approach you are on, continue; '
-            'if the approach is not working, change it; if the source cannot be read as the unknown asks, '
-            '`terra route block '+task['id']+' --reason "..."` and stop. Do not pad or fake. Reply by acting.\n')
+            'if the approach is not working, change it; if the source cannot be read as the unknown asks, or what you '
+            'need is a decision that is not yours, `terra route block '+task['id']+' --reason "..."` with the reason or '
+            'the question and stop — the controller answers by routing onto this workspace. Do not pad or fake. Reply by acting.\n')
 
 
 def library_parts(config: dict[str, Any], project: Path, unknowns: list[dict[str, Any]]) -> list[str]:
