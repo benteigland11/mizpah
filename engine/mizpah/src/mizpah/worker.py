@@ -109,8 +109,6 @@ def load_config(path: str | Path) -> dict[str, Any]:
     config['route_policy'] = (path.parent/config['route_policy_file']).read_text()
     config['eval_policy'] = (path.parent/config['eval_policy_file']).read_text()
     config['checkin_policy'] = (path.parent/config['checkin_policy_file']).read_text()  # tool-less; no v10 text
-    # The reviewer's second question, for the write-up after green: does the record say what the worker did?
-    config['writeup_policy'] = (path.parent/config.get('writeup_policy_file', 'src/mizpah/writeup_policy.md')).read_text()
     config['playbook_store'] = str(Path(config['playbook_store']).expanduser())
     config['widget_library'] = str(Path(config['widget_library']).expanduser())
     return dict(harness, mizpah=config, harness_config_path=str(harness_path), mizpah_config_path=str(Path(path).resolve()))
@@ -990,20 +988,6 @@ def open_checklists(snapshot: bytes) -> list[str]:
     return problems
 
 
-def checklist_skips(snapshot: bytes) -> dict[str, list[str]]:
-    """Steps a worker ticked `[-]` (not needed) per opened procedure: the signal the green phase hands back,
-    so the worker decides whether each was not needed on this walk or not needed in general."""
-    skips: dict[str, list[str]] = {}
-    for name, data in sorted(_members(snapshot).items()):
-        if not name.startswith(PLAYBOOK_PREFIX+'/open/') or not name.endswith('.md'):
-            continue
-        procedure = name.split('/')[-1].split('--')[0].removesuffix('.md')
-        for ln in data.decode('utf-8', errors='replace').splitlines():
-            if ln.strip().startswith('- [-]'):
-                skips.setdefault(procedure, []).append(ln.strip()[6:].strip('* '))
-    return skips
-
-
 def task_gate(config: dict[str, Any], project: Path, task: dict[str, Any], map_id: str,
               root: Path | None = None) -> dict[str, Any]:
     """Mechanical verdict: the route, the project map, Terra's gate, and every widget the task touched."""
@@ -1540,24 +1524,6 @@ def procedures_created(root: Path) -> list[str]:
     return created
 
 
-def tool_fight(root: Path) -> dict[str, Any]:
-    """What the worker paid in refused or failed calls, grouped by the procedure step it was on."""
-    step = '(no procedure step)'
-    cost: dict[str, dict[str, int]] = {}
-    for name, args, result in session_calls(root):
-        command = args.get('command') or '' if name == 'bash' else ''
-        if command.startswith('playbook start ') and result.get('exit_code') == 0:
-            title = command.split('--title', 1)[1].strip().strip('"\'') if '--title' in command else command.split()[2]
-            step = title[:60]
-            continue
-        failed = result.get('status') in ('rejected', 'error') or (name == 'bash' and result.get('exit_code') not in (0, None))
-        if failed:
-            bucket = cost.setdefault(step, {})
-            key = name if name != 'bash' else ('bash '+command.split()[0] if command.split() else 'bash')
-            bucket[key] = bucket.get(key, 0)+1
-    return cost
-
-
 def effort_message(task: dict[str, Any], estimate: int, turns: int, overruns: int) -> str:
     """The estimate is spent; the worker, not the host, judges whether to continue."""
     return ('Effort check: this task was bucketed '+task['bucket']+' ('+BUCKET_MODES.get(task['bucket'], '')+') and you have used '+str(turns)+' turns, '
@@ -1649,33 +1615,6 @@ STOP = {'with', 'from', 'that', 'this', 'into', 'every', 'each', 'must', 'their'
         'change', 'after', 'before', 'agreeing', 'prints', 'python3'}
 
 
-def uncovered_by_procedures(config: dict[str, Any], used: list[str], unknowns: list[dict[str, Any]]) -> dict[str, list[str]]:
-    """Per followed procedure, the task's unknowns none of its steps mention: the pressure a wider brief puts on a method.
-
-    An unknown counts as covered when two stems of its id or claim occur in the procedure's title, description
-    or steps. The eval mints unknowns a procedure never anticipated; each one it leaves uncovered is a step the
-    worker took without the procedure's help — and the step the next worker should find written down."""
-    import subprocess as sp
-    out: dict[str, list[str]] = {}
-    for procedure_id in used:
-        try:
-            text = sp.run([config['mizpah']['playbook'], 'load', procedure_id], capture_output=True, text=True, timeout=30).stdout
-            doc = json.loads(text[text.find('{'):])
-        except (ValueError, OSError, sp.SubprocessError):
-            continue
-        body = ' '.join([str(doc.get('title') or ''), str(doc.get('description') or '')]
-                        +[str(st.get('title') or '')+' '+str(st.get('do') or '') for st in doc.get('steps') or []]).lower().replace('-', ' ')
-        missing = []
-        for u in unknowns:
-            words = {w for w in re.findall(r'[a-z0-9]{4,}', (str(u.get('id') or '')+' '+str(u.get('claim') or '')).lower().replace('_', ' '))
-                     if w not in STOP}
-            if shared_stems(words, body) < 2:
-                missing.append(str(u.get('id')))
-        if missing:
-            out[procedure_id] = missing
-    return out
-
-
 def refusal_message(refused: list[tuple[str, str]]) -> str:
     """The library's reasons for refusing what the worker built, and the one chance to fix them."""
     lines = ['The gate is green and your work is done; one thing remains. The library refused what you built, for these '
@@ -1691,50 +1630,19 @@ def refusal_message(refused: list[tuple[str, str]]) -> str:
 def green_message(gate: dict[str, Any], unknown_id: str | list[str], used: list[str] = (), cost: dict[str, Any] | None = None,
                   skips: dict[str, list[str]] | None = None, uncovered: dict[str, list[str]] | None = None,
                   made: list[str] = ()) -> str:
-    """The write-up after green is a clean-up, not a second task. The worker minted while it worked (the policy
-    says so); what is left is to make what it minted true to what it did, in a handful of turns. The earlier text
-    asked for a search before every write, a procedure per skill exercised, a decision per skipped step and a
-    rewrite per failed call — and a green task spent twenty to thirty more turns, mostly searching and reading
-    (2026-09-21). Nothing here asks the worker to look for anything."""
+    """The one case a green task is asked back for the record: it made an artifact and touched no procedure and
+    no widget while working, so the library holds nothing of the method. One short round: record it, `done`.
+    (There is no write-up phase otherwise — the harvest of what was minted while working is the review.)"""
     if isinstance(unknown_id, list):
         unknown_id = ', '.join(unknown_id)
-    lines = ['Gate green: known '+unknown_id+' '+('are' if ',' in unknown_id else 'is')+' on the project map. Widgets under cg/ '
-             'that validate are checked in for you. This is the clean-up of what you minted while working — a few turns, '
-             'no searching, no reading files, no new work: fix what is wrong in the record and stop.']
-    todo = []
-    if used:
-        todo.append('You walked '+', '.join('`'+u+'`' for u in used)+'. Where a step said one thing and you did another, '
-                    '`playbook edit-step` that step to what you did; where you did something no step said, one `playbook '
-                    'add-step` in its place. A step that was right stays as it is.')
-    if uncovered:
-        rows = ['  - '+proc+': '+', '.join(ids) for proc, ids in uncovered.items()]
-        todo.append('Readings this task took that the procedure you walked has no step for — one `add-step` each, the '
-                    'reading and the command:\n'+'\n'.join(rows))
-    if skips:
-        rows = ['  - '+proc+': '+'; '.join(steps) for proc, steps in skips.items()]
-        todo.append('Steps you marked `[-]`:\n'+'\n'.join(rows)+'\n  Leave them unless the step is wrong in general; then one '
-                    '`edit-step` to narrow it, or `remove-step`.')
-    if cost:
-        rows = ['  - while on '+repr(step)+': '+', '.join(f'{n}× {k}' for k, n in sorted(counts.items(), key=lambda kv: -kv[1]))
-                for step, counts in cost.items()]
-        todo.append('Calls refused or failed by the step you were on:\n'+'\n'.join(rows)+'\n  Where the step led you there, '
-                    'one `edit-step` with the command that worked.')
-    if made:
-        todo.append('You made '+', '.join('`'+m+'`' for m in made)+'. If no procedure you touched records the skill you applied '
-                    'to it (the rules as a person states them, the widget function that applies each, the reading that '
-                    'verifies it), `playbook create` one now from the steps you already took — one `playbook search` first '
-                    'because create requires it, then create and add-step; the pipeline around it (render, probe, ladder) '
-                    'is linked with `--procedure`, never restated. If you minted it while working, there is nothing to do here.')
-    if not used and not made:
-        todo.append('You followed only the bootstrap. If your method was specific to this source or artifact, `playbook create` '
-                    'it from the steps you took (one search, then create); if it was nothing but the bootstrap, reply "none".')
-    lines += ['- '+t for t in todo]
-    lines.append('The store changes only through `playbook edit-step` / `add-step` / `remove-step` / `create`; the checklist '
-                 'under `.playbook/open/` is a rendered copy. Make all your edits, then `playbook validate <id>` once per procedure you touched, and '
-                 'call `done` with their ids. A correction from the reviewer is answered by making the edit once and calling '
-                 '`done` again — that call is what brings the reviewer back to look; an edit that returned ok landed, and a '
-                 'held correction is not a reason to make it again.')
-    return '\n'.join(lines)+'\n'
+    return ('Gate green: known '+unknown_id+' '+('are' if ',' in unknown_id else 'is')+' on the project map. You made '
+            +', '.join('`'+m+'`' for m in made)+' and the library holds nothing of how: no procedure was opened or created '
+            'and no widget was touched. One short round, no searching beyond the one `playbook search` a create requires: '
+            '`playbook create <id>` the skill you applied (the rules as a person states them, the code that applies each, '
+            'the check that verified it — one `add-step` per rule, from the steps you already took), `playbook validate '
+            '<id>` once, then call `done` with the id. If a procedure you know of already says it, `playbook open` it, '
+            '`playbook tick` its steps as done, and call `done`.\n')
+
 
 
 
@@ -1979,7 +1887,12 @@ def build_settings(config: dict[str, Any], assignment: str, reference: str,
     # fabrications the structure later caught. With Terra constraining the trajectory they are a toggle.
     checkins = config['mizpah']['scaffolding']['checkins']
     return SessionSettings(assignment, config['mizpah']['worker_policy'], reference if checkins else None,
-        config['worker']['generation'], SessionPolicy(**config['session_policy']), ReviewPolicy(**config['review_policy']),
+        config['worker']['generation'], SessionPolicy(**config['session_policy']),
+        # The reviewer looks when the worker claims done, not every N turns: the periodic look was the v10 drift
+        # guard for a small model; on Luna it produced "stub not implemented yet" corrections mid-work and
+        # pulled workers back into measurement inside bookkeeping rounds. `checkin_periodic: true` restores it.
+        ReviewPolicy(**(config['review_policy'] if config['mizpah'].get('checkin_periodic', False)
+                        else dict(config['review_policy'], update_interval=10**6))),
         checkin_settings(config) if checkins else None,
         config['review_on_completion'], config['guidance_prefix'],
         maximum_generation_retries=config.get('maximum_generation_retries', 0),
@@ -2268,29 +2181,14 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         session.continue_with(red_message(gate, project, map_id, task_unknown_ids(task)),
                               label='gate red: '+('tick the walks you opened' if evidence_ok else 'repair round'))
     budget = cap
-    # The write-up is asked for once: the marker survives a pause, and a resume inside the write-up (the session
-    # above ran to its end) goes straight to the harvest rather than asking a second time.
-    if gate['ok'] and budget-status['completed_worker_turns'] > 0 and not (root/WRITEUP_MARK).exists():
+    if gate['ok']:
+        # Green: the method goes into the library through the harvest — what the worker minted while it worked.
+        # There is no write-up phase: a second task asking the worker to "record the method" ran 20–50 turns a
+        # time and a second reviewer read it; the harvest's validators are the review. The worker is asked back
+        # only when the library refused something (the validator's words), a base moved under it (a merge), or
+        # it made an artifact and touched no procedure at all (one round to record what it did).
         (root/WRITEUP_MARK).write_text(str(status['completed_worker_turns']))
-        # Only after green: the method goes into the library, and only through the harvest.
-        followed = procedures_used(root)
-        # The reviewer's question changes with the phase: the probes are done; now it reads the procedures the
-        # worker touched against what the worker did. Its history rides along, the completion budget restarts.
-        touched = list(dict.fromkeys(followed+procedures_created(root)))
-        if session.controller_client is not None:
-            session.set_review_policy(config['mizpah']['writeup_policy'],
-                                      focus_globs=tuple(PLAYBOOK_PREFIX+'/playbook/procedures/'+pid+'.json' for pid in touched)
-                                      or (PLAYBOOK_PREFIX+'/playbook/procedures/*.json',),
-                                      label='gate green: review the write-up, not the probes')
-            session.resume_reviews()
-        session.continue_with(green_message(gate, task_unknown_ids(task), followed, tool_fight(root),
-                                            checklist_skips(evidence(session)),
-                                            uncovered_by_procedures(config, followed, unknowns),
-                                            made=[unknown_notes(u)['creates'] for u in unknowns if unknown_notes(u).get('creates')]),
-                              label='gate green: write up the method')
-
-        status = run_through_outages(session, config, root, maximum_worker_turns=budget-status['completed_worker_turns'])
-    if gate['ok'] and (root/WRITEUP_MARK).exists():
+        session.suspend_reviews('gate green: the harvest is the review')
         session.prune_workspaces()
         widgets = harvest_widgets(evidence(session), root, config, project)
         playbook = harvest_playbook(evidence(session), store, config,
@@ -2299,20 +2197,26 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         deps = declare_artifact_deps(config, project, unknowns)
         rounds.append(dict(turns=status['completed_worker_turns'], session=status['status'], gate='playbook',
                            final_text=status['final_text'], playbook=playbook, widgets=widgets, artifact_deps=deps))
-        # One repair round: the library refused something the worker built, for reasons it can act on (a
-        # missing test, a project name in src/, a hardcoded path). Without this the worker never saw the
-        # validator's words and real work did not compound.
-        # Repair rounds continue while each one fixes something (the refused count falls) and turns remain; a
-        # round that fixes nothing ends it — the same rule as red gate rounds. Fix one of two, and you get
-        # another go at the other.
+        made = [unknown_notes(u)['creates'] for u in unknowns if unknown_notes(u).get('creates')]
+        touched = procedures_used(root)+procedures_created(root)
+        unrecorded = bool(made) and not touched and not widgets['checked_in'] and not widgets['unchanged'] \
+            and status['status'] == 'complete' and budget-status['completed_worker_turns'] > 0
         refused = [('widget', r) for r in widgets['rejected']]+[('procedure', r) for r in playbook['rejected']]
         conflicts = list(widgets.get('conflicts') or [])
         merges = list(playbook.get('conflicts') or [])
-        while (refused or conflicts or merges) and status['status'] == 'complete' and budget-status['completed_worker_turns'] > 0:
-            # A moved base is merged first (the merge message); plain refusals get the validator's words.
-            session.continue_with(merge_message(conflicts) if conflicts else procedure_merge_message(merges) if merges
-                                  else refusal_message(refused),
-                                  label='library merge' if (conflicts or merges) else 'library repair: validator refused')
+        # Rounds continue while each one fixes something (the count of problems falls) and turns remain; a round
+        # that fixes nothing ends it — the same rule as red gate rounds.
+        while (refused or conflicts or merges or unrecorded) and status['status'] == 'complete' \
+                and budget-status['completed_worker_turns'] > 0:
+            if conflicts:
+                session.continue_with(merge_message(conflicts), label='library merge')
+            elif merges:
+                session.continue_with(procedure_merge_message(merges), label='library merge')
+            elif refused:
+                session.continue_with(refusal_message(refused), label='library repair: validator refused')
+            else:
+                session.continue_with(green_message(gate, task_unknown_ids(task), [], made=made),
+                                      label='gate green: record the method (nothing was minted)')
             status = run_through_outages(session, config, root, maximum_worker_turns=budget-status['completed_worker_turns'])
             session.prune_workspaces()
             again_w = harvest_widgets(evidence(session), root, config, project)
@@ -2331,9 +2235,12 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             still = [('widget', r) for r in widgets['rejected']]+[('procedure', r) for r in playbook['rejected']]
             still_conflicts = list(again_w.get('conflicts') or [])
             still_merges = list(again_p.get('conflicts') or [])
-            if len(still)+len(still_conflicts)+len(still_merges) >= len(refused)+len(conflicts)+len(merges):
+            still_unrecorded = unrecorded and not (procedures_used(root)+procedures_created(root)) \
+                and not again_w['checked_in'] and not again_w['unchanged']
+            if len(still)+len(still_conflicts)+len(still_merges)+int(still_unrecorded) \
+                    >= len(refused)+len(conflicts)+len(merges)+int(unrecorded):
                 break   # nothing fixed this round: the worker has had its say
-            refused, conflicts, merges = still, still_conflicts, still_merges
+            refused, conflicts, merges, unrecorded = still, still_conflicts, still_merges, still_unrecorded
     verdict = ('complete' if gate['ok'] else 'blocked_by_worker' if blocked_reason is not None
                else 'stopped' if status['status'] == 'stopped' else 'incomplete')
     result = dict(task=task['id'], unknown=task['map_id'], unknowns=task_unknown_ids(task), map=map_id, resumed=resuming,
