@@ -835,7 +835,7 @@ def _harvest_widgets(snapshot: bytes, root: Path, config: dict[str, Any], projec
         shipped = library/widget_id
         if shipped.is_dir():
             same = all((shipped/name[len(prefix):]).exists() and (shipped/name[len(prefix):]).read_bytes() == data
-                       for name, data in members.items() if not name.endswith('changelog.json'))
+                       for name, data in members.items() if not _widget_meta(name[len(prefix):]))
             if same:
                 result['unchanged'].append(widget_id)
                 continue
@@ -896,6 +896,16 @@ def _harvest_widgets(snapshot: bytes, root: Path, config: dict[str, Any], projec
     return result
 
 
+WIDGET_META = ('changelog.json', 'widget.json', 'library_notes', '.validation_stamp.json', UPSTREAM)
+
+
+def _widget_meta(name: str) -> bool:
+    """Files Cartograph writes about a widget, not the widget: the check-in bumps the version, `validate` stamps
+    the copy it ran on, a merge round stages the library's copy. None of them is a change of the widget and none
+    merges — a validation stamp both sides had written was a "conflict" that cost a nine-turn repair round."""
+    return name in WIDGET_META or name.split('/')[0] in WIDGET_META
+
+
 def _merge_widget(base_dir: Path, shipped: Path, members: dict[str, bytes], prefix: str) -> tuple[dict[str, bytes] | None, list[str]]:
     """Three-way merge of a widget's files: (merged members, files with an unresolved overlap). None when there
     is no base to merge from (the library keeps no history of that version). Files only one side touched take
@@ -905,13 +915,12 @@ def _merge_widget(base_dir: Path, shipped: Path, members: dict[str, bytes], pref
     import tempfile
     if not base_dir.is_dir():
         return None, []
-    skip = ('changelog.json', 'widget.json', 'library_notes')
     names = {n[len(prefix):] for n in members} | {str(p.relative_to(shipped)) for p in shipped.rglob('*')
                                                    if p.is_file() and 'history' not in p.parts and '__pycache__' not in p.parts and '.venv' not in p.parts}
     merged: dict[str, bytes] = {}
     clashes: list[str] = []
     for name in sorted(names):
-        if name.startswith(skip) or name.split('/')[0] in skip:
+        if _widget_meta(name):
             if (shipped/name).exists():
                 merged[prefix+name] = (shipped/name).read_bytes()
             continue

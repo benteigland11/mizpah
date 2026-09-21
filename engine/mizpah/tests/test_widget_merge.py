@@ -115,3 +115,29 @@ def test_a_moved_base_merges_three_way_when_the_library_keeps_the_base(tmp_path:
     text = (project/'cg'/DIR/'src'/'thing.py').read_text()
     assert '<<<<<<< yours' in text and '>>>>>>> library' in text and 'x+3   # mine' in text and 'x+2   # theirs' in text
     assert 'conflict markers' in worker.merge_message(result['conflicts'])
+
+
+def test_a_validation_stamp_and_a_staged_upstream_are_not_the_widget(tmp_path: Path) -> None:
+    """The stamp `cartograph validate` writes and the copy a merge round stages are Cartograph's files about
+    the widget, not the widget: a workspace whose only difference from the library is its stamp is unchanged,
+    and stamps both sides wrote are not a conflict (that "conflict" cost a nine-turn repair round)."""
+    library = tmp_path/'library'
+    shipped = library/WIDGET
+    body = 'def f(x):\n    return x+1\n'
+    for name, text in _widget_files('1.0.2', body).items():
+        (shipped/name).parent.mkdir(parents=True, exist_ok=True)
+        (shipped/name).write_text(text)
+    for name, text in _widget_files('1.0.1', body).items():
+        (shipped/'history'/'1.0.1'/name).parent.mkdir(parents=True, exist_ok=True)
+        (shipped/'history'/'1.0.1'/name).write_text(text)
+    (shipped/'.validation_stamp.json').write_text('{"at": "library"}')
+    config = dict(mizpah=dict(widget_library=str(library), cartograph='/bin/false'))
+    root = tmp_path/'sess'/'tasks'/'t1'
+    _journal(root)
+    project = tmp_path/'project'
+    (project/'cg'/DIR).mkdir(parents=True)
+    mine = _widget_files('1.0.1', body)
+    mine['.validation_stamp.json'] = '{"at": "workspace"}'
+    mine[worker.UPSTREAM+'/src/thing.py'] = body
+    result = worker.harvest_widgets(_snapshot(mine), root, config, project)
+    assert result['unchanged'] == [WIDGET] and result['conflicts'] == [] and result['merged'] == []
