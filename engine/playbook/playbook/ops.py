@@ -580,6 +580,35 @@ def _walk_file(target: str, target_dir: str | Path) -> Path:
     return Path(walks[0]["path"])
 
 
+_LINK_LINE = re.compile(r"^\s*→ this step is another procedure: `playbook open ([A-Za-z0-9._-]+) --for")
+
+
+def _linked_steps(lines: list[str]) -> dict[int, str]:
+    """step number -> the procedure id that step links, from a walk file's own text."""
+    out: dict[int, str] = {}
+    current = None
+    for line in lines:
+        m = _STEP_LINE.match(line)
+        if m:
+            current = int(m.group(2)); continue
+        k = _LINK_LINE.match(line)
+        if k and current is not None:
+            out[current] = k.group(1)
+    return out
+
+
+def _walk_closed(procedure_id: str, target_dir: str | Path) -> bool:
+    """A walk of the procedure exists under the working tree with no unticked box."""
+    out_dir = Path(target_dir) / OPEN_DIR
+    if not out_dir.is_dir():
+        return False
+    for path in out_dir.glob(f"{procedure_id}--*.md"):
+        steps = walk_steps(path)
+        if steps and all(mark != " " for mark, _, _ in steps):
+            return True
+    return False
+
+
 def tick_walk(target: str, done: list[int] | None = None, not_needed: list[int] | None = None,
               target_dir: str | Path = ".") -> dict[str, Any]:
     """Mark steps of an open walk in one call: `done` get `[x]`, `not_needed` get `[-]`. A worker ticking by
@@ -591,6 +620,15 @@ def tick_walk(target: str, done: list[int] | None = None, not_needed: list[int] 
         raise ValueError("a step is done or not needed, not both: " + ", ".join(str(n) for n in sorted(set(done) & set(not_needed))))
     path = _walk_file(target, target_dir)
     lines = path.read_text(encoding="utf-8").splitlines()
+    # A step that is another procedure closes only once that procedure's walk is closed: opened, and every
+    # box ticked or skipped with a reason. Ticking the parent box on the strength of "the widget did it" left
+    # three linked procedures unwalked and unrecorded in one task (attempt 4, 2026-09-21); the worker has to try.
+    linked = _linked_steps(lines)
+    unwalked = [n for n in sorted(set(done) | set(not_needed)) if n in linked and not _walk_closed(linked[n], target_dir)]
+    if unwalked:
+        raise ValueError("step(s) " + ", ".join(str(n) for n in unwalked) + " are other procedures; open and finish each first "
+                         "(every box [x] or [-], or `playbook skip <its walk> --because ...`), then tick this box: "
+                         + "; ".join(f"{n} -> `playbook open {linked[n]} --for ...`" for n in unwalked))
     seen: set[int] = set(); marked = []
     for i, line in enumerate(lines):
         m = _STEP_LINE.match(line)
@@ -643,6 +681,9 @@ def open_procedure(procedure_id: str, purpose: str, target_dir: str | Path = "."
               "`playbook tick <this file> --done N` when a step is done, `--skip N` when it does not apply here "
               "(several at once when several closed together); `playbook skip <this file> --because ...` marks "
               "everything left `[-]` when the whole walk does not apply. A box ticked at the end records nothing. "
+              "The steps are knowledge earned on another task: adapt their specifics (names, keys, counts, the probe they "
+              "mention) to what is in front of you, and do them. A step that is another procedure is walked as well — "
+              "open it, finish it, then tick here; `tick` refuses a linked step whose walk is not closed. "
               "Improve the procedure afterwards with `playbook edit-step` / `add-step` where a step fell short.", ""]
     for i, step in enumerate(steps, 1):
         lines += [f"- [ ] **{i}. {step.get('title', '')}**", "", f"  {str(step.get('do', '')).strip()}", ""]

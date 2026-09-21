@@ -362,3 +362,32 @@ def test_tick_marks_several_steps_in_one_call(tmp_path: Path, monkeypatch, capsy
     assert main(["tick", path, "--done", "9", "--dir", str(tmp_path)]) == 1
     assert "no such step" in capsys.readouterr().out
     assert main(["tick", path, "--done", "1", "--skip", "1", "--dir", str(tmp_path)]) == 1
+
+
+def test_a_linked_step_ticks_only_after_its_procedure_is_walked(tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """A step that is another procedure closes only once that walk is closed — opened, every box ticked or the
+    walk skipped with a reason. Ticking the parent on the strength of the widget call left three procedures
+    unwalked in one task."""
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    assert main(["create", "pedal-per-harmony", "--title", "Pedal", "--description", "d", "--tags", "midi"]) == 0
+    assert main(["add-step", "pedal-per-harmony", "--title", "Down after the onset", "--do", "cc64"]) == 0
+    assert main(["create", "compose", "--title", "Compose", "--description", "d", "--tags", "midi"]) == 0
+    assert main(["add-step", "compose", "--title", "Notes", "--do", "write them"]) == 0
+    assert main(["add-step", "compose", "--title", "Pedal", "--do", "apply", "--procedure", "pedal-per-harmony"]) == 0
+    capsys.readouterr()
+    assert main(["open", "compose", "--for", "the piece", "--dir", str(tmp_path)]) == 0
+    parent = json.loads(capsys.readouterr().out)["path"]
+    assert main(["tick", parent, "--done", "1", "2", "--dir", str(tmp_path)]) == 1
+    refusal = capsys.readouterr().out
+    assert "step(s) 2 are other procedures" in refusal and "playbook open pedal-per-harmony" in refusal
+    assert "- [ ] **2." in Path(parent).read_text()   # nothing ticked, not even step 1
+    assert main(["tick", parent, "--skip", "2", "--dir", str(tmp_path)]) == 1   # skipping it needs the walk too
+    capsys.readouterr()
+    assert main(["open", "pedal-per-harmony", "--for", "the piece: Pedal", "--dir", str(tmp_path)]) == 0
+    child = json.loads(capsys.readouterr().out)["path"]
+    assert main(["tick", parent, "--done", "2", "--dir", str(tmp_path)]) == 1   # opened but not finished
+    capsys.readouterr()
+    assert main(["skip", child, "--because", "the widget applies it", "--dir", str(tmp_path)]) == 0
+    capsys.readouterr()
+    assert main(["tick", parent, "--done", "1", "2", "--dir", str(tmp_path)]) == 0
+    assert json.loads(capsys.readouterr().out)["unticked"] == []
