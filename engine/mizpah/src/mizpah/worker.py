@@ -2064,12 +2064,26 @@ def run_through_outages(session: FocusedSession, config: dict[str, Any], root: P
     outages = 0
     stop_files = (root/'STOP', root.parent/'STOP', root.parent.parent/'STOP')
 
+    nudge = root/'nudge.md'
+    burst_start, burst = session.status()['completed_worker_turns'], maximum_worker_turns
+
     def stop_requested() -> bool:
-        return any(p.exists() for p in stop_files)
+        return any(p.exists() for p in stop_files) or nudge.exists()
 
     while True:
         try:
-            return session.run(maximum_worker_turns=maximum_worker_turns, stop_when=stop_requested)
+            status = session.run(maximum_worker_turns=maximum_worker_turns, stop_when=stop_requested)
+            if status['status'] == 'stopped' and nudge.exists() and not any(p.exists() for p in stop_files):
+                # The person's word, left as nudge.md while the worker ran: the session pauses at the boundary it is
+                # on, the note goes in as the next user message, and the burst resumes. No restart to say a sentence.
+                text = nudge.read_text().strip()
+                nudge.rename(root/'nudge.delivered.md')
+                if text and status['phase'] == 'worker' and status['pending_io'] is None:
+                    session.interject('From the person running this loop:\n'+text+'\n', label='the person')
+                if burst is not None:   # the rest of the burst, not a fresh one
+                    maximum_worker_turns = max(1, burst-(status['completed_worker_turns']-burst_start))
+                continue
+            return status
         except RejectedGeneration:
             raise
         except ModelTransportError as error:
