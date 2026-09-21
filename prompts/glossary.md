@@ -24,7 +24,7 @@ The words every seat in this loop uses, with one meaning each. A term below is u
 - **Adopt** — Method to pull knowns from a sub map to the global map.
 - **Gate** — The passing grade: a mechanical check over the whole map. Green when it carries no debt — no open unknown, every known backed, nothing stale, methods agreeing; red names each debt. The worker turns it green on its task map; the controller routes on its red. `terra gate`.
 - **Route** — The list of tasks the controller hands down to the worker with assigned buckets for effort expected. Each route is turned into a work order.
-- **Bucket** — The effort of a task, priced in points: **low** (3) implement, path known; **medium** (8) validate, weigh a couple of options then conclude; **high** (21) explore several.
+- **Bucket** — The effort of a task, priced in points: **low** (3) implement, path known; **medium** (8) validate, weigh a couple of options then conclude; **high** (21) explore several. A worker whose effort does not match its bucket says so; the controller re-buckets.
 - **Sitrep** — The controller's one-call orientation: Brief, route, budget, map, gate, prior art, workspaces. `terra sitrep`.
 - **Proposal** — The controller's request to change the Brief due to discoveries during the task.
 
@@ -57,7 +57,6 @@ The words every seat in this loop uses, with one meaning each. A term below is u
 - **Worker** — Performs the Work Orders in the environment it's given and is responsible for work being done.
 - **Reviewer** — Controllers arm to double check probes used to prove green are done truthfully and honestly without gaming.
 - **Correction** — An instruction handed down by the reviewer to communicate the faults of probes.
-- **Handoff** — the memory the worker writes for the next window when its context rolls over: what is established, what is unfinished, where to continue.
-- **Workspace** — the worker's tree under `/work`: the project, its `.mizpah` state, its playbook walks, its `cg/`.
-- **Sandbox** — where every command runs: the workspace bound in, the base read-only, no network beyond the allowed hosts, the toolchain and the engine invisible.
-- **Estimate** — the effort a work order is expected to take, set by its bucket; past it the worker is asked whether to continue, and decides.
+- **Handoff** — Compression of work done during a context window to carry important information for continuing the work order forward: what is established, what is unfinished, where to continue.
+- **Workspace** — The worker's tree under `/work`: the project, its `.mizpah` state, its playbook walks, its `cg/`.
+- **Sandbox** — Controlled environment all write able agents run in that restricts network access, file acces, and all other potentially destructive activites.
