@@ -10,5 +10,8 @@ glossary, the blocks that seat needs, then its policy — composed at load, neve
 moves up out of `wip/` when it is finished — written in the glossary's words, one meaning per term, nothing in
 it the engine does not do. `glossary.md`, `unknowns.md` and the probes pieces are there now.
 
+A file's name says who gets it: no tag (`probes.md`) — every seat; a seat tag (`probes_worker.md`,
+`probes_reviewer.md`, `unknowns_controller.md`) — that seat only, composed under the shared piece of the same name.
+
 Terms are used in the glossary's sense and no other, by every seat. A block explains; a policy instructs; the
 glossary names. Engine configs name the policy files by path (`*_policy_file`); the engine reads them from here.
