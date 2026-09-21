@@ -156,9 +156,10 @@ def library_methods(config: dict[str, Any], brief: dict[str, Any]) -> list[dict[
         try:
             out = sp.run([config['mizpah']['playbook'], 'reach', pid], capture_output=True, text=True, timeout=60).stdout
             r = json.loads(out[out.find('{'):])
-            rec.update(steps=int(r.get('steps') or 0), walks=int(r.get('walks') or 1), procedures=len(r.get('procedures') or {}))
+            rec.update(steps=int(r.get('steps') or 0), walks=int(r.get('walks') or 1), procedures=len(r.get('procedures') or {}),
+                       gravity=int(r.get('gravity') or 0))
         except (ValueError, OSError, sp.SubprocessError):
-            rec.update(steps=0, walks=1, procedures=1)
+            rec.update(steps=0, walks=1, procedures=1, gravity=0)
     return sorted(seen.values(), key=lambda r: r['id'])[:16]
 
 
@@ -409,10 +410,11 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
     lines += briefs.render(observation.get('related_briefs') or [])
     if observation.get('methods'):
         lines.append('Methods in the playbook near this brief (reach = steps through the procedures a method links; a walk is '
-                     'at most 50 steps, so reach says how many work orders the method is):')
+                     'at most 50 steps, so reach says how many work orders the method is. gravity = how many procedures run '
+                     'this one: a method the library leans on has gravity, a tune one gym wrote for itself has none):')
         for m in observation['methods']:
             lines.append('  `'+m['id']+'` — '+m['title']+' · reach '+str(m.get('steps'))+' steps through '+str(m.get('procedures'))
-                         +' procedure(s) = '+str(m.get('walks'))+' walk(s)')
+                         +' procedure(s) = '+str(m.get('walks'))+' walk(s) · gravity '+str(m.get('gravity', 0)))
         lines.append('A task names the walk its worker opens: "walk": "<procedure id>" (and "walk_from": N for the next '
                      'walk of a long method, the 0-based step the previous walk stopped at — the worker\'s result says '
                      'where). The worker opens what it is handed and searches only when nothing was named or the walk '
@@ -1240,6 +1242,15 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             if walk not in known_methods and not _procedure_exists(walk, observation.get('playbook_store') or ''):
                 cautions.append('task '+tid+': walk '+repr(walk)+' is not a procedure in the playbook; the worker searches instead')
                 walk, walk_from = '', 0
+        if walk:
+            by_method = {m['id']: m for m in observation.get('methods') or []}
+            picked = by_method.get(walk)
+            if picked is not None and int(picked.get('gravity') or 0) == 0:
+                heavier = [m for m in by_method.values() if int(m.get('gravity') or 0) >= 2 and m['id'] != walk]
+                if heavier:
+                    cautions.append('task '+tid+': walk '+repr(walk)+' has gravity 0 — a method one gym wrote for its own piece — while '
+                                    +', '.join('`'+m['id']+'` (gravity '+str(m.get('gravity'))+')' for m in heavier[:3])
+                                    +' is near this brief; a leaf is right when its specifics are the task, otherwise name the method the library leans on')
         if walk and walk_from:
             # The next walk of a long method follows a first one: on the route already, in this decision, or left
             # open on a workspace. Routed alone it starts a worker in the middle of a method (attempt 4 routed

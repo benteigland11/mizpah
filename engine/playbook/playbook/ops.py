@@ -816,6 +816,32 @@ def expand(procedure_id: str, _ancestors: tuple[str, ...] = (), _seen: set[str] 
     return out
 
 
+def gravity(procedure_id: str) -> int:
+    """How much of the library sinks into this procedure: the procedures that link to it, transitively. A
+    validation or pedal method that six others run has gravity six; a tune one gym wrote for itself has none.
+    The controller reads it beside reach: a gravity-0 leaf picked by title for a general task is one gym's own."""
+    links: dict[str, set[str]] = {}
+    for path in store.procedures_dir().glob("*.json"):
+        if path.name.startswith("."):
+            continue
+        try:
+            document = read_document(path)
+        except (OSError, ValueError):
+            continue
+        for step in document.get("steps") or []:
+            if isinstance(step, dict) and step.get("procedure"):
+                links.setdefault(str(step["procedure"]), set()).add(str(document.get("id") or path.stem))
+    seen: set[str] = set()
+    frontier = [procedure_id]
+    while frontier:
+        current = frontier.pop()
+        for parent in links.get(current, ()):
+            if parent not in seen and parent != procedure_id:
+                seen.add(parent)
+                frontier.append(parent)
+    return len(seen)
+
+
 def reach(procedure_id: str) -> dict[str, Any]:
     """How long the method really is: steps through links, the procedures it runs, and how many walks that is."""
     entries = expand(procedure_id)
@@ -828,7 +854,7 @@ def reach(procedure_id: str) -> dict[str, Any]:
         start = _cut(entries, start, FLAT_LIMIT)
         walks += 1
     return {"ok": True, "id": procedure_id, "steps": len(entries), "procedures": by_source,
-            "walks": max(1, walks), "limit": FLAT_LIMIT, "widgets": walk_widgets(procedure_id)}
+            "walks": max(1, walks), "limit": FLAT_LIMIT, "widgets": walk_widgets(procedure_id), "gravity": gravity(procedure_id)}
 
 
 def _cut(entries: list[dict[str, Any]], start: int, limit: int) -> int:
