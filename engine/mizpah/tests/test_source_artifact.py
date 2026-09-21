@@ -322,3 +322,26 @@ def test_a_reading_newer_than_its_artifact_is_not_reopened_for_a_duplicate(gym: 
     assert not refusals, refusals
     assert accepted['unknowns'] == [] and accepted['reopen'] == [] and accepted['tasks'] == []
     assert json.loads(path.read_text())['status'] == 'resolved'
+
+
+def test_a_cancel_frees_its_unknown_for_a_task_in_the_same_decision(gym: Path) -> None:
+    """The controller replaces a blocked validation with the repair it calls for: cancel and route in one reply.
+    Refusing the repair ("already has an open task") stalled syncopation's controller (2026-09-21)."""
+    observation = controller.observe(CONFIG, gym)
+    first = dict(unknowns=[dict(id='piece_mid_built', cites='deliverable:1', type='boolean', creates='piece.mid',
+                                claim='piece.mid exists as eight bars', evidence_needed='parse it')],
+                 tasks=[dict(id='validate_piece', unknowns=['piece_mid_built'], bucket='low', title='validate')])
+    accepted, refusals = controller.guard(first, observation, gym)
+    assert not refusals, refusals
+    controller.apply(CONFIG, gym, accepted)
+    terra(gym, 'route', 'block', 'validate_piece', '--reason', 'the piece is 8.5 bars; the artifact must change')
+    observation = controller.observe(CONFIG, gym)
+    again = dict(cancel=[dict(task='validate_piece', why='replaced by the repair')],
+                 tasks=[dict(id='rebuild_piece_eight_bars', unknowns=['piece_mid_built'], bucket='low', title='rebuild to eight bars')])
+    accepted, refusals = controller.guard(again, observation, gym)
+    assert not refusals, refusals
+    assert [t['id'] for t in accepted['tasks']] == ['rebuild_piece_eight_bars'] and accepted['cancel'] == [dict(task='validate_piece', why='replaced by the repair')]
+    applied = controller.apply(CONFIG, gym, accepted)
+    assert applied['cancel'] == ['validate_piece'] and 'rebuild_piece_eight_bars' in applied['tasks']
+    status = {t['id']: t['status'] for t in terra(gym, 'route', 'status')['tasks']}
+    assert status == {'validate_piece': 'cancelled', 'rebuild_piece_eight_bars': 'ready'}

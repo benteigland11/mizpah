@@ -765,7 +765,13 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
     cautions: list[str] = []
     existing_tasks = {t['id'] for t in observation['tasks']}
     open_unknowns = {u['id'] for u in observation['unknowns'] if u['status'] in OPEN_UNKNOWN}
-    routed = {u for t in observation['tasks'] if t['status'] in OPEN_TASK for u in (t.get('unknowns') or [t['unknown']])}
+    # A task this decision takes off the route (a ready or blocked one, with a reason) frees its unknowns for the
+    # tasks the same decision routes: the controller that replaced a blocked validation with the repair it called
+    # for was refused ("already has an open task") and the loop declared it stalled (syncopation, 2026-09-21).
+    leaving = {str(c.get('task')) for c in decision.get('cancel') or [] if isinstance(c, dict) and str(c.get('why') or '').strip()
+               and next((t for t in observation['tasks'] if t['id'] == str(c.get('task'))), {}).get('status') in ('ready', 'blocked')}
+    routed = {u for t in observation['tasks'] if t['status'] in OPEN_TASK and t['id'] not in leaving
+              for u in (t.get('unknowns') or [t['unknown']])}
     unknowns, tasks, proposals, rebucket, unblock, retype = [], [], [], [], [], []
     for item in decision.get('unknowns') or []:
         if not isinstance(item, dict):
@@ -1374,6 +1380,14 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
             args += ['--unit', u['unit']]
         terra(config, project, *args)
         done['unknowns'].append(u['id'])
+    for r in accepted.get('cancel') or []:
+        # Before the tasks, so a replacement routes onto the unknown the cancelled task held. Off the route: superseded, wrong, or its unknown is now carried by another task. Terra strands the
+        # task's dependents until re-pointed; the eval sees them on the next briefing.
+        try:
+            terra(config, project, 'route', 'cancel', r['task'], '--reason', r['why'])
+            done.setdefault('cancel', []).append(r['task'])
+        except RuntimeError as error:
+            done.setdefault('refused', []).append('cancel '+r['task']+': '+str(error)[:200])
     now = phases.current(terra(config, project, 'brief', 'show')) if accepted['tasks'] else None
     sectors = set()
     if now and (project/layout.dirname(project)/'route.json').exists():
@@ -1422,14 +1436,6 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
         terra(config, project, 'route', 'set-effort', r['task'], '--bucket', r['bucket'])
         terra(config, project, 'route', 'unblock', r['task'])
         done['rebucket'].append(r['task']+'→'+r['bucket'])
-    for r in accepted.get('cancel') or []:
-        # Off the route: superseded, wrong, or its unknown is now carried by another task. Terra strands the
-        # task's dependents until re-pointed; the eval sees them on the next briefing.
-        try:
-            terra(config, project, 'route', 'cancel', r['task'], '--reason', r['why'])
-            done.setdefault('cancel', []).append(r['task'])
-        except RuntimeError as error:
-            done.setdefault('refused', []).append('cancel '+r['task']+': '+str(error)[:200])
     for r in accepted.get('unblock') or []:
         terra(config, project, 'route', 'unblock', r['task'])
         record_release(project, r['task'], r['after'])
