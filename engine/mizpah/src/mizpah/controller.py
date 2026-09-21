@@ -294,9 +294,12 @@ def task_workspaces(root: Path) -> list[dict[str, Any]]:
         walks, widgets = [], []
         try:
             for line in (d/'events'/'session.jsonl').read_text().splitlines():
-                if '"playbook_open"' in line or 'playbook open ' in line:
-                    for m in re.findall(r'playbook open ([a-z0-9-]+)|\\"id\\": \\"([a-z0-9-]+)\\"', line):
-                        walks += [x for x in m if x]
+                if 'playbook open ' in line:
+                    # The procedure named on the open command, and nothing else on the line: an `"id"` regex
+                    # over the whole line took every id near it — call ids, the procedures a search listed —
+                    # and the sitrep said a worker had walked cad-gpu-headlight-ibl on a piano piece.
+                    walks += [m for m in re.findall(r'playbook open (?:--\S+ )*([a-z][a-z0-9-]+)', line)
+                              if m not in ('help',)]
                 for m in re.findall(r'cg/([a-z0-9_]+)/src/', line):
                     widgets.append(m)
         except OSError:
