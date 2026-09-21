@@ -2117,6 +2117,18 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
                 session.state['settings'] = asdict(session.settings)
                 session.state.setdefault('review_log', []).append(dict(turn=session.progress.turns, boundary='policy',
                                                                        operation='policy_changed', correction='resumed: current review policy', evidence=''))
+        # The tools too: a session saved without `done` (or a tool since added) keeps looping for want of it.
+        current_tools = COMMAND_TOOLS if config['mizpah']['scaffolding'].get('command_tools', True) else ()
+        if tuple(t['name'] for t in session.settings.command_tools) != tuple(t['name'] for t in current_tools) \
+                or tuple(session.settings.final_tools) != ('done',):
+            session.settings = replace(session.settings, command_tools=current_tools, final_tools=('done',))
+            session.state['settings'] = asdict(session.settings)
+            note = ('Your tools changed while you were paused: `done` exists now. When a stretch of work is finished — '
+                    'the task after `terra route complete` succeeded, the write-up after your edits validated, an answer '
+                    'to a correction — call `done` with the ids. An edit that returned ok landed; do not make it again.')
+            status_now = session.status()
+            if status_now['phase'] == 'worker' and status_now['pending_io'] is None:
+                session.interject(note, label='resumed: done tool added')
         if not (root/PLAYBOOK_BASE).is_dir():
             # A task started before three-way merges has no base; the store as it is now is the best one there is
             # (what moved before this point is already in it; what moves after is merged).
