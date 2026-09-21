@@ -149,7 +149,7 @@ def _bindings(config: dict[str, Any], root: Path) -> tuple[ModelClient, Sandboxe
     return client_for(deputy_spec(config), observe_model(root), config), shell_for(config, root)
 
 
-def _archive(root: Path, why: str) -> None:
+def _archive(root: Path, why: str) -> Path:
     """Put the session aside (its journal stays readable) and note the break in the turn log."""
     stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
     aside = root/('session.'+stamp)
@@ -158,6 +158,7 @@ def _archive(root: Path, why: str) -> None:
         if (root/name).exists():
             shutil.move(str(root/name), str(aside/name))
     _turn(root, 'system', 'The Deputy\'s memory was reset: '+why+'. The conversation above is on record; the seat starts fresh.')
+    return aside
 
 
 def _turn(root: Path, role: str, text: str, **extra: Any) -> dict[str, Any]:
@@ -344,10 +345,16 @@ def status(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def reset(config: dict[str, Any]) -> dict[str, Any]:
+    """Clear everything: the seat's memory and the conversation on the desk. Nothing is deleted — the session
+    and the turn log go aside under `session.<stamp>/`, readable on disk — but the office starts empty."""
     root = deputy_root()
-    if (root/'state.sqlite3').exists():
-        _archive(root, 'reset by the Administrator')
-    return dict(status='ok', root=str(root))
+    stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
+    aside = _archive(root, 'reset by the Administrator') if (root/'state.sqlite3').exists() else root/('session.'+stamp)
+    aside.mkdir(exist_ok=True)
+    for name in ('turns.jsonl', 'showing.json', 'activity.json', 'STOP'):
+        if (root/name).exists():
+            shutil.move(str(root/name), str(aside/name))
+    return dict(status='ok', root=str(root), aside=str(aside))
 
 
 def main(argv: list[str] | None = None) -> int:

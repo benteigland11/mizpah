@@ -587,20 +587,92 @@ class _store_lock:
         self.handle.close()
 
 
+PLAYBOOK_BASE = 'playbook_base'   # under the task root: the store as the task received it, for three-way merges
+
+
+def merge_procedure(base: dict[str, Any], theirs: dict[str, Any], yours: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Three-way merge of a procedure: the copy the task started from, the store now (another task's
+    improvement), and the workspace copy. Steps merge by id — a step only one side changed takes that side; a
+    step both changed the same way is fine; one both changed differently keeps theirs and is reported so the
+    worker can reconcile. Added steps keep their place after the step they followed; a step you removed goes
+    unless they changed it. Title, description and tags merge the same way. Two tasks improving the same
+    procedure used to be last-writer-wins: the first task's steps vanished without a word."""
+    conflicts: list[str] = []
+    merged = dict(theirs)
+    for field in ('title', 'description', 'tags'):
+        b, t, y = base.get(field), theirs.get(field), yours.get(field)
+        if y != b:
+            if t == b or t == y:
+                merged[field] = y
+            else:
+                conflicts.append(field+': theirs '+json.dumps(t, ensure_ascii=False)[:120]+' / yours '+json.dumps(y, ensure_ascii=False)[:120])
+    b_steps = {str(st.get('id')): st for st in base.get('steps') or [] if isinstance(st, dict)}
+    t_steps = {str(st.get('id')): st for st in theirs.get('steps') or [] if isinstance(st, dict)}
+    y_steps = {str(st.get('id')): st for st in yours.get('steps') or [] if isinstance(st, dict)}
+    order = [str(st.get('id')) for st in theirs.get('steps') or [] if isinstance(st, dict)]
+    result: dict[str, dict[str, Any]] = {sid: dict(t_steps[sid]) for sid in order}
+    yours_order = [str(st.get('id')) for st in yours.get('steps') or [] if isinstance(st, dict)]
+    for position, sid in enumerate(yours_order):
+        y = y_steps[sid]; b = b_steps.get(sid); t = t_steps.get(sid)
+        if b is None and t is None:
+            # Added by you: after the step you put it after, when that one survives; else at the end.
+            after = next((p for p in reversed(yours_order[:position]) if p in order), None)
+            order.insert(order.index(after)+1 if after is not None else len(order), sid)
+            result[sid] = dict(y)
+        elif b is not None and t is None:
+            continue   # they removed it; a removal they made stands (their improvement is the base you land on)
+        elif y != b:
+            if t == b or t == y:
+                result[sid] = dict(y)
+            else:
+                conflicts.append('step '+json.dumps(str(t.get('title') or sid), ensure_ascii=False)+': theirs '
+                                 +json.dumps(str(t.get('do') or ''), ensure_ascii=False)[:160]+' / yours '
+                                 +json.dumps(str(y.get('do') or ''), ensure_ascii=False)[:160])
+    for sid in list(order):
+        if sid in b_steps and sid not in y_steps and sid in t_steps and t_steps[sid] == b_steps[sid]:
+            order.remove(sid); result.pop(sid, None)   # you removed it and they left it as it was
+    merged['steps'] = [result[sid] for sid in order]
+    return merged, conflicts
+
+
+def procedure_merge_message(merges: list[dict[str, Any]]) -> str:
+    """The merge round for procedures: what moved, what merged on its own, the steps both sides changed."""
+    lines = ['The gate is green and your work is done; one thing remains. A procedure you improved was improved by another '
+             'task while you worked. Their changes and yours were merged step by step and the merged copy is now the one '
+             'in your store — except where you both changed the same thing differently, where theirs was kept:']
+    for m in merges:
+        lines.append('- `'+m['id']+'`: '+'; '.join(m['conflicts']))
+    lines.append('For each: `playbook load <id>` to read the merged procedure, then `playbook edit-step <id> --title "…" --do "…"` '
+                 'to carry what yours did onto their version of the step (keep what they added; say both things if both '
+                 'are true), `playbook validate <id>`, then reply that you are done; do not start other work.')
+    return '\n'.join(lines)
+
+
+def workspace_procedures(config: dict[str, Any], project: Path) -> Path | None:
+    """The worker's copy of the store, when it is a directory on the host (bind mode): where a merged procedure
+    is written back so the worker's `playbook load`/`edit-step` see it."""
+    path = project/PLAYBOOK_PREFIX/'playbook'/'procedures'
+    return path if bind_mode(config) and path.is_dir() else None
+
+
 def harvest_playbook(snapshot: bytes, store: Path, config: dict[str, Any],
-                     allowed: tuple[str, ...] | None = None) -> dict[str, list[str]]:
-    """Procedures new or changed in the workspace copy; installed only if they validate.
+                     allowed: tuple[str, ...] | None = None, base: Path | None = None,
+                     workspace_store: Path | None = None) -> dict[str, list[Any]]:
+    """Procedures new or changed in the workspace copy; installed only if they validate. With `base` (the store
+    as the task received it) a procedure the store moved under is three-way merged; a step both sides changed
+    differently comes back under `conflicts` with the merged copy written to `workspace_store` for a merge round.
 
     With `allowed`, only those ids are considered: the procedures this session followed or created.
     Anything else the worker touched stays in its workspace."""
     with _store_lock(store):
-        return _harvest_playbook(snapshot, store, config, allowed)
+        return _harvest_playbook(snapshot, store, config, allowed, base, workspace_store)
 
 
 def _harvest_playbook(snapshot: bytes, store: Path, config: dict[str, Any],
-                      allowed: tuple[str, ...] | None = None) -> dict[str, list[str]]:
+                      allowed: tuple[str, ...] | None = None, base: Path | None = None,
+                      workspace_store: Path | None = None) -> dict[str, list[Any]]:
     installed, rejected, ignored = [], [], []
-    created, improved = [], []
+    created, improved, merged_ids, conflicts = [], [], [], []
     prefix = PLAYBOOK_PREFIX+'/playbook/procedures/'
     with tarfile.open(fileobj=io.BytesIO(snapshot), mode='r:') as archive:
         for member in archive:
@@ -622,6 +694,25 @@ def _harvest_playbook(snapshot: bytes, store: Path, config: dict[str, Any],
                 continue
             if target.exists() and target.read_bytes() == data:
                 continue
+            started_from = base/target.name if base is not None else None
+            if started_from is not None and started_from.exists() and target.exists() \
+                    and target.read_bytes() != started_from.read_bytes():
+                # The store moved under this task: merge onto theirs rather than write over it.
+                if data == started_from.read_bytes():
+                    continue   # you did not change it; theirs stands
+                try:
+                    merged, clashes = merge_procedure(json.loads(started_from.read_bytes()), json.loads(target.read_bytes()),
+                                                      json.loads(data))
+                except ValueError as error:
+                    rejected.append(target.stem+': could not merge onto the library\'s newer copy: '+str(error)[:200]); continue
+                data = json.dumps(merged, indent=2, ensure_ascii=False).encode()
+                started_from.write_bytes(target.read_bytes())   # the next harvest of this task merges against theirs
+                if workspace_store is not None:
+                    (workspace_store/target.name).write_bytes(data)   # the worker's copy is the merged one now
+                if clashes:
+                    conflicts.append(dict(id=target.stem, conflicts=clashes))
+                    continue   # the worker reconciles in a merge round; the merge lands then
+                merged_ids.append(target.stem)
             staged = target.with_suffix('.json.staged')
             staged.write_bytes(data)
             backup = target.read_bytes() if target.exists() else None
@@ -639,7 +730,8 @@ def _harvest_playbook(snapshot: bytes, store: Path, config: dict[str, Any],
                     target.unlink()
                 else:
                     target.write_bytes(backup)
-    return dict(installed=installed, rejected=rejected, ignored=ignored, created=created, improved=improved)
+    return dict(installed=installed, rejected=rejected, ignored=ignored, created=created, improved=improved,
+                merged=merged_ids, conflicts=conflicts)
 
 
 def worker_blocked(project: Path, task: dict[str, Any]) -> str | None:
@@ -1687,8 +1779,16 @@ def bindings(config: dict[str, Any], root: Path, map_id: str, checkins: bool | N
                                                  read_only_binds=tuple(sandbox['read_only_binds']), environment=environment,
                                                  share_network=bool(sandbox.get('share_network', False)), services=services,
                                                  refused_paths=tuple(sandbox.get('refused_paths') or ()),
-                                                 refused_patterns=REFUSED_PATTERNS, network=network) | bound))
+                                                 refused_patterns=refused_patterns(config), network=network) | bound))
     return worker, checkin, SandboxedShell(shell)
+
+
+def refused_patterns(config: dict[str, Any]) -> tuple[tuple[str, str], ...]:
+    """The standing refusals, minus the install ban for an environment gym: building an environment is exactly
+    installing into /work, with the package hosts its config allows."""
+    if config['mizpah'].get('builds_base'):
+        return tuple(p for p in REFUSED_PATTERNS if 'install' not in p[0])
+    return REFUSED_PATTERNS
 
 
 def checkin_settings(config: dict[str, Any]) -> ControllerSettings:
@@ -2043,6 +2143,12 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         reference = render_reference(project, task, unknowns)
         # Bind mode: only the state directories are packed in; the tree is the project directory itself.
         initial = pack_workspace(project, store, only=state_dirs(project)) if bind_mode(config) else pack_workspace(project, store)
+        # The store as the task received it, for three-way merges at harvest (another task may improve the
+        # same procedure meanwhile; without a base the last harvest wrote over the first).
+        base_dir = root/PLAYBOOK_BASE
+        base_dir.mkdir(exist_ok=True)
+        for path in store.glob('*.json'):
+            (base_dir/path.name).write_bytes(path.read_bytes())
         session = FocusedSession.create(root, build_settings(config, assignment, reference, unknowns), worker=worker_client,
                                         shell=shell, controller=checkin, initial_workspace=initial,
                                         shared_workspaces=shared_workspaces(root))
@@ -2124,7 +2230,8 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         session.prune_workspaces()
         widgets = harvest_widgets(evidence(session), root, config, project)
         playbook = harvest_playbook(evidence(session), store, config,
-                                    allowed=tuple(procedures_used(root)+procedures_created(root)))
+                                    allowed=tuple(procedures_used(root)+procedures_created(root)),
+                                    base=root/PLAYBOOK_BASE, workspace_store=workspace_procedures(config, project))
         deps = declare_artifact_deps(config, project, unknowns)
         rounds.append(dict(turns=status['completed_worker_turns'], session=status['status'], gate='playbook',
                            final_text=status['final_text'], playbook=playbook, widgets=widgets, artifact_deps=deps))
@@ -2136,27 +2243,32 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         # another go at the other.
         refused = [('widget', r) for r in widgets['rejected']]+[('procedure', r) for r in playbook['rejected']]
         conflicts = list(widgets.get('conflicts') or [])
-        while (refused or conflicts) and status['status'] == 'complete' and budget-status['completed_worker_turns'] > 0:
+        merges = list(playbook.get('conflicts') or [])
+        while (refused or conflicts or merges) and status['status'] == 'complete' and budget-status['completed_worker_turns'] > 0:
             # A moved base is merged first (the merge message); plain refusals get the validator's words.
-            session.continue_with(merge_message(conflicts) if conflicts else refusal_message(refused))
+            session.continue_with(merge_message(conflicts) if conflicts else procedure_merge_message(merges) if merges
+                                  else refusal_message(refused))
             status = run_through_outages(session, config, root, maximum_worker_turns=budget-status['completed_worker_turns'])
             session.prune_workspaces()
             again_w = harvest_widgets(evidence(session), root, config, project)
             again_p = harvest_playbook(evidence(session), store, config,
-                                       allowed=tuple(procedures_used(root)+procedures_created(root)))
+                                       allowed=tuple(procedures_used(root)+procedures_created(root)),
+                                       base=root/PLAYBOOK_BASE, workspace_store=workspace_procedures(config, project))
             for key in ('checked_in', 'unchanged'):
                 widgets[key] = sorted(set(widgets[key]) | set(again_w[key]))
             widgets['rejected'] = list(again_w['rejected'])
-            for key in ('installed', 'created', 'improved', 'ignored'):
+            for key in ('installed', 'created', 'improved', 'ignored', 'merged'):
                 playbook[key] = sorted(set(playbook.get(key) or []) | set(again_p.get(key) or []))
             playbook['rejected'] = list(again_p['rejected'])
+            playbook['conflicts'] = list(again_p.get('conflicts') or [])
             rounds.append(dict(turns=status['completed_worker_turns'], session=status['status'], gate='library_repair',
                                final_text=status['final_text'], playbook=again_p, widgets=again_w))
             still = [('widget', r) for r in widgets['rejected']]+[('procedure', r) for r in playbook['rejected']]
             still_conflicts = list(again_w.get('conflicts') or [])
-            if len(still)+len(still_conflicts) >= len(refused)+len(conflicts):
+            still_merges = list(again_p.get('conflicts') or [])
+            if len(still)+len(still_conflicts)+len(still_merges) >= len(refused)+len(conflicts)+len(merges):
                 break   # nothing fixed this round: the worker has had its say
-            refused, conflicts = still, still_conflicts
+            refused, conflicts, merges = still, still_conflicts, still_merges
     verdict = ('complete' if gate['ok'] else 'blocked_by_worker' if blocked_reason is not None
                else 'stopped' if status['status'] == 'stopped' else 'incomplete')
     result = dict(task=task['id'], unknown=task['map_id'], unknowns=task_unknown_ids(task), map=map_id, resumed=resuming,

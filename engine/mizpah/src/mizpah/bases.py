@@ -22,6 +22,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -75,6 +76,47 @@ def load(name: str) -> dict[str, Any]:
     return dict(name=name, note=str(record.get('note') or ''), env=dict(env), path=str(folder))
 
 
+BUILD_EXCLUDE = ('.git', '.mizpah', '.terra', '.tool-output', '.session-history', '.playbook', '.svc', '__pycache__')
+
+
+def adopt(gym: Path, name: str | None = None, *, replace: bool = False) -> dict[str, Any]:
+    """An environment gym went green: its tree becomes the base. The worker wrote `base.json` at the gym's root
+    (name, note, env); everything but the gym's own records (`.git`, `.mizpah`, harness state) is copied under
+    `bases/<name>/`. Absolute `/work/...` paths in the tree would break at the base's path — the build procedure
+    makes the venv relocatable — so an adopt refuses when `bin/` or `venv/bin/` still carries one."""
+    gym = Path(gym).resolve()
+    try:
+        record = json.loads((gym/'base.json').read_text())
+    except OSError as error:
+        raise FileNotFoundError('the gym has no base.json at its root: '+str(gym)) from error
+    except ValueError as error:
+        raise ValueError('base.json is not JSON: '+str(error)) from error
+    name = _valid(name or str(record.get('name') or ''))
+    env = record.get('env') or {}
+    if not isinstance(env, dict) or any(not isinstance(v, str) for v in env.values()):
+        raise ValueError('base.json env must map names to strings')
+    stuck = []
+    for folder in ('bin', 'venv/bin'):
+        for script in (gym/folder).glob('*'):
+            try:
+                head = script.read_bytes()[:200]
+            except OSError:
+                continue
+            if head.startswith(b'#!') and b'/work/' in head.split(b'\n', 1)[0]:
+                stuck.append(folder+'/'+script.name)
+    if stuck:
+        raise ValueError('not relocatable: shebangs still name /work in '+', '.join(stuck[:6]))
+    target = path_of(name)
+    if (target/'base.json').exists():
+        if not replace:
+            raise FileExistsError('base exists: '+str(target)+' (adopt --replace to rebuild it)')
+        shutil.rmtree(target)
+    shutil.copytree(gym, target, symlinks=True, ignore=shutil.ignore_patterns(*BUILD_EXCLUDE))
+    (target/'base.json').write_text(json.dumps(dict(name=name, note=str(record.get('note') or ''), env=dict(env),
+                                                     built_from=str(gym)), indent=1)+'\n')
+    return dict(load(name), built_from=str(gym))
+
+
 def list_bases() -> list[dict[str, Any]]:
     out = []
     for folder in sorted(bases_root().iterdir()):
@@ -98,6 +140,9 @@ def apply(config: dict[str, Any], name: str) -> dict[str, Any]:
     sandbox['read_only_binds'] = binds
     env = dict(sandbox.get('environment') or {})
     venv = Path(root)/'venv'/'bin'
+    tools = Path(root)/'bin'   # wrappers the build wrote for downloaded programs
+    if tools.is_dir():
+        env['PATH'] = ':'.join(p for p in [str(tools), env.get('PATH', '')] if p)
     if venv.is_dir():
         env['PATH'] = ':'.join(p for p in [str(venv), env.get('PATH', '')] if p)
         env['VIRTUAL_ENV'] = str(Path(root)/'venv')
@@ -139,9 +184,15 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser('list', help='every base and what it provides')
     s = sub.add_parser('show', help='one base, resolved')
     s.add_argument('name')
+    a = sub.add_parser('adopt', help='a finished environment gym becomes a base (its base.json names it)')
+    a.add_argument('gym', type=Path)
+    a.add_argument('--name', help='override the name in base.json')
+    a.add_argument('--replace', action='store_true', help='rebuild a base of that name')
     args = parser.parse_args(argv)
     if args.command == 'create':
         print(json.dumps(create(args.name, note=args.note), indent=1))
+    elif args.command == 'adopt':
+        print(json.dumps(adopt(args.gym, args.name, replace=args.replace), indent=1))
     elif args.command == 'list':
         for base in list_bases():
             print(base['name']+'  '+base['path']+('  — '+base['note'] if base['note'] else ''))

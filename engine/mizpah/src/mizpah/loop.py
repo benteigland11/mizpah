@@ -554,7 +554,20 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
     if stop not in ('nothing_owed', 'max_cycles', 'max_tasks'):
         ops.notify(config, root, project.name+' stopped: '+stop,
                    str(tasks_run)+' tasks in '+str(round((time.time()-started)/3600, 2))+' h; report at '+str(root/'report.md'))
+    adopted = None
+    if stop == 'nothing_owed' and config['mizpah'].get('builds_base'):
+        # An environment gym went green: its tree is the base now, and any gym may be set up in it.
+        from . import bases
+        try:
+            adopted = bases.adopt(project, str(config['mizpah']['builds_base']), replace=True)
+            with log.open('a') as handle:
+                handle.write(json.dumps(dict(at=time.time(), where='bases.adopt', base=adopted['name'], path=adopted['path']))+'\n')
+        except (OSError, ValueError) as error:
+            with log.open('a') as handle:
+                handle.write(json.dumps(dict(at=time.time(), where='bases.adopt', error=str(error)[:300]))+'\n')
+            ops.notify(config, root, project.name+': environment not adopted', str(error)[:200])
     result = dict(stop=stop, cycles=cycles, tasks_run=tasks_run, hours=round((time.time()-started)/3600, 2), leaks=ops.leak_summary(root),
+                  **(dict(adopted_base=dict(name=adopted['name'], path=adopted['path'])) if adopted else {}),
                   usage=ops.usage_summary(root),
                   blocked=[dict(id=t['id'], reason=t.get('blocked_reason')) for t in blocked(config, project)],
                   open_proposals=terra(config, project, 'brief', 'show').get('open_proposals'))

@@ -247,3 +247,16 @@ def test_signing_records_the_environment_on_the_gym_itself(gyms: Path, homes: Pa
     draft.new('etude', 'Etude', 'm', 'piano')
     out = draft.authorize(gyms/'etude')
     assert init_module.project_config(Path(out['project']))['base'] == 'piano'
+
+
+def test_reset_clears_the_office_and_keeps_the_record_aside(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv('MIZPAH_DEPUTY_ROOT', str(tmp_path/'deputy'))
+    root = deputy.deputy_root()
+    deputy._turn(root, 'user', 'hello')
+    (root/'showing.json').write_text('{"draft": "a"}\n')
+    out = deputy.reset({})
+    assert out['status'] == 'ok'
+    assert not (root/'turns.jsonl').exists() and not (root/'showing.json').exists()
+    aside = Path(out['aside'])
+    assert (aside/'turns.jsonl').read_text().count('hello') == 1
+    assert deputy.turns(root) == []

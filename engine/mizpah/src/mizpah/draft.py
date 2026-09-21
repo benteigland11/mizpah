@@ -91,8 +91,14 @@ def environments() -> list[dict[str, str]]:
 
 BARE = 'none'
 
+# Where an environment gym may fetch from: package indexes and the release hosts the usual tools ship on. The
+# gym's config.json carries the list, so a person can add a host for one build without touching the engine.
+BUILD_DOMAINS = ('pypi.org', 'files.pythonhosted.org', 'github.com', 'objects.githubusercontent.com',
+                 'codeload.github.com', 'release-assets.githubusercontent.com', 'cdn.playwright.dev',
+                 'playwright.download.prss.microsoft.com', 'nodejs.org', 'lilypond.org', 'gitlab.com')
 
-def new(slug: str, title: str, mission: str, environment: str = '') -> dict[str, Any]:
+
+def new(slug: str, title: str, mission: str, environment: str = '', builds: str = '') -> dict[str, Any]:
     """A gym is a training ground, and the environment it is set up with is the point of making one: the choice is
     made here, out loud — a saved environment by name, or `none` for a bare gym (Python and a shell) — never left
     to default."""
@@ -107,6 +113,19 @@ def new(slug: str, title: str, mission: str, environment: str = '') -> dict[str,
     if environment and not environment_exists(environment):
         raise SystemExit(json.dumps(dict(status='error', error='no saved environment named '+repr(environment),
                                          environments=[e['name'] for e in environments()])))
+    if builds:
+        # An environment gym: bare, may install and reach the package hosts, and is adopted as base `builds` on green.
+        from . import bases
+        try:
+            bases._valid(builds)
+        except ValueError as error:
+            raise SystemExit(json.dumps(dict(status='error', error=str(error))))
+        if environment:
+            raise SystemExit(json.dumps(dict(status='error', error='an environment gym is set up bare (`none`): it builds '
+                                             +repr(builds)+', it does not run in another environment')))
+        if environment_exists(builds):
+            raise SystemExit(json.dumps(dict(status='error', error='a saved environment named '+repr(builds)
+                                             +' exists already; pick another name or adopt --replace by hand')))
     init_module.new_gym(title, name=slug)
     terra(project, 'init')
     # A mission on `brief init` issues the brief (status active); a draft is initialised bare and told its mission.
@@ -115,7 +134,12 @@ def new(slug: str, title: str, mission: str, environment: str = '') -> dict[str,
     if environment:
         terra(project, 'brief', 'set', '--environment', environment)
     terra(project, 'route', 'init')
-    return dict(status='ok', **summary(project),
+    if builds:
+        config = init_module.default_config()
+        config['builds_base'] = builds
+        config['sandbox']['network'] = dict(allowed_domains=list(BUILD_DOMAINS))
+        (project/layout.STATE_DIRNAME/'config.json').write_text(json.dumps(config, indent=1)+'\n')
+    return dict(status='ok', **summary(project), **(dict(builds=builds, allowed_domains=list(BUILD_DOMAINS)) if builds else {}),
                 next='add needs and deliverables one at a time with `terra brief set --need "..."` / `--deliverable "..."` '
                      'from inside '+str(project)+' (TERRA_DIRNAME=.mizpah), set --budget-points, name the environment '
                      'it runs in with --environment <name> (`mizpah.draft environments`), then show it')
@@ -200,6 +224,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument('--title', required=True)
     p.add_argument('--mission', required=True)
     p.add_argument('--environment', default='', help='the saved environment this gym is set up in (see `environments`), or `none` for a bare gym; required')
+    p.add_argument('--builds', default='', help='an environment gym: bare, may install and reach package hosts, adopted as this base on green')
     p = sub.add_parser('discard', help='Remove a draft and everything in it')
     p.add_argument('slug')
     p = sub.add_parser('show', help='Pull a draft up on the desk for the Administrator to look at')
@@ -212,7 +237,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser('environments', help='The saved gym environments a brief may name')
     args = parser.parse_args(argv)
     if args.verb == 'new':
-        out = new(args.slug, args.title, args.mission, args.environment)
+        out = new(args.slug, args.title, args.mission, args.environment, args.builds)
     elif args.verb == 'environments':
         out = environments()
     elif args.verb == 'discard':

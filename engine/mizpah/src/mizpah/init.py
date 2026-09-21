@@ -237,8 +237,13 @@ def apply_project_config(config: dict[str, Any], project: Path) -> dict[str, Any
     layer = pc.get('sandbox') or {}
     allowed = {'workspace', 'cache_dirs', 'network', 'share_network', 'read_only_binds', 'services'}
     picked = {k: v for k, v in layer.items() if k in allowed}
+    if isinstance(picked.get('network'), dict) and isinstance((config['mizpah'].get('sandbox') or {}).get('network'), dict):
+        # A project adds domains (an environment gym reaching package hosts); the proxy and its tools stay the host's.
+        picked['network'] = dict(config['mizpah']['sandbox']['network'], **picked['network'])
     if picked:
         config['mizpah']['sandbox'] = dict(config['mizpah'].get('sandbox') or {}, **picked)
+    if pc.get('builds_base'):
+        config['mizpah']['builds_base'] = str(pc['builds_base'])
     environment = project_environment(project) or pc.get('base')
     if environment:
         from . import bases
