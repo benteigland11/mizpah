@@ -6,5 +6,9 @@ here is fed to an agent; our own design notes live in `design/`. One file, one t
 (`worker_policy.md`, `route_policy.md`, `eval_policy.md`, `checkin_policy.md`). A seat's prompt is the
 glossary, the blocks that seat needs, then its policy — composed at load, never pasted.
 
+`wip/` holds what is not settled: the old policies as they run today, and blocks still being written. A file
+moves up out of `wip/` when it is finished — written in the glossary's words, one meaning per term, nothing in
+it the engine does not do. Only `glossary.md` is there now.
+
 Terms are used in the glossary's sense and no other, by every seat. A block explains; a policy instructs; the
 glossary names. Engine configs name the policy files by path (`*_policy_file`); the engine reads them from here.
