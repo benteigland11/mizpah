@@ -454,27 +454,35 @@ def test_a_flat_walk_inlines_links_cuts_at_a_boundary_and_edits_write_through(tm
     text = path.read_text()
     assert "- [ ] **3. pedal 1**" in text and "source: `pedal` · step 1" in text and "continues: 1 more step" in text
     assert "→ this step is another procedure" not in text
-    # Only the step you are on and the two after it show their text; the rest open as you tick.
-    assert "do pedal 1" in text and "do pedal 2" not in text and "(opens when the steps before it are ticked)" in text
-    assert main(["tick", str(path), "--done", "1", "2", "--dir", str(tmp_path)]) == 0   # no linked-step rule on a flat walk
+    # Only the step you are on shows its text; the rest open as you tick, and a tick out of order is refused.
+    assert "write them" in text and "do pedal 1" not in text and "(opens when the steps before it are ticked)" in text
+    assert main(["tick", str(path), "--done", "3", "--dir", str(tmp_path)]) == 1
+    assert "the walk is on step 1" in capsys.readouterr().out
+    assert main(["tick", str(path), "--done", "1", "2", "--dir", str(tmp_path)]) == 0   # in order from the current step
     reply = _json.loads(capsys.readouterr().out)
     assert reply["next"]["number"] == 3 and reply["next"]["do"] == "do pedal 1"
     text = path.read_text()
-    assert "do pedal 2" in text and "do pedal 3" in text and "- [x] **1. Notes**" in text
+    assert "do pedal 1" in text and "do pedal 2" not in text and "- [x] **1. Notes**" in text
+    assert main(["tick", str(path), "--done", "3", "--dir", str(tmp_path)]) == 0
+    capsys.readouterr()
+    text = path.read_text()
+    assert "do pedal 2" in text
     # edit where you stand: walk step 4 is pedal step 2
     assert main(["edit-step", "--walk", str(path), "--step", "4", "--do", "release before the next harmony"]) == 0
     capsys.readouterr()
     doc = _json.loads((tmp_path/"playbook"/"procedures"/"pedal.json").read_text())
     assert doc["steps"][1]["do"] == "release before the next harmony"
     assert "release before the next harmony" in path.read_text() and "- [ ] **4. pedal 2**" in path.read_text()
+    assert main(["tick", str(path), "--done", "4", "--dir", str(tmp_path)]) == 0
+    capsys.readouterr()
     # add after walk step 3 (pedal 1): goes into pedal after step 1; the walk renumbers and later sources shift
     assert main(["add-step", "--walk", str(path), "--after", "3", "--title", "pedal 1b", "--do", "half pedal"]) == 0
     capsys.readouterr()
     doc = _json.loads((tmp_path/"playbook"/"procedures"/"pedal.json").read_text())
     assert [s["title"] for s in doc["steps"]] == ["pedal 1", "pedal 1b", "pedal 2", "pedal 3"]
     text = path.read_text()
-    assert "- [ ] **4. pedal 1b**" in text and "- [ ] **5. pedal 2**" in text and "source: `pedal` · step 3" in text and "- [x] **1. Notes**" in text
-    assert "half pedal" in text   # within the open window (steps 3–5)
+    assert "- [ ] **4. pedal 1b**" in text and "- [x] **5. pedal 2**" in text and "source: `pedal` · step 3" in text and "- [x] **1. Notes**" in text
+    assert "half pedal" in text   # the step you are on now
     # remove walk step 6 (pedal 3)
     assert main(["remove-step", "--walk", str(path), "--step", "6"]) == 0
     capsys.readouterr()

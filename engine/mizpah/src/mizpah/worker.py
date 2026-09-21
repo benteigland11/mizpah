@@ -1993,6 +1993,9 @@ REFUSED_PATTERNS = (
      'a walk is not ticked in a loop: tick a step in the command that does it, with what it found'),
     (r'(\bplaybook\s+tick\b.*){4,}',
      'four or more ticks in one command is a list closed after the fact: tick a step in the command that does it'),
+    (r'^\s*playbook\s+tick\b[^;&|\n]*((;|&&)\s*playbook\s+tick\b[^;&|\n]*)*\s*;?\s*$',
+     'a tick rides on the command that does the step\'s work (the check, the edit\'s run, the reading), never alone: '
+     'a walk ticked in tick-only turns is boxes, not a method'),
 )
 
 

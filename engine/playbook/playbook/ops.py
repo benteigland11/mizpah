@@ -648,6 +648,16 @@ def tick_walk(target: str, done: list[int] | None = None, not_needed: list[int] 
     if len(done) > TICK_AT_ONCE:
         raise ValueError(f"tick at most {TICK_AT_ONCE} steps in one call: a tick is a claim like a reading, made in the command "
                          "that did the step's work — fifty boxes at once is a list closed after the fact, not a walk")
+    # A flat walk is ticked in order, the step you are on: a step whose text has not opened cannot have been
+    # done (a worker ticked the three visible steps a turn, twenty turns running, with no work between).
+    path0 = _walk_file(target, target_dir)
+    blocks0 = _walk_blocks(path0)
+    if blocks0 and all(b["source"] for b in blocks0):
+        current = next((b["number"] for b in blocks0 if b["mark"] == " "), None)
+        asked = sorted(set(done) | set(not_needed))
+        if current is not None and asked and asked != list(range(current, current + len(asked))):
+            raise ValueError(f"the walk is on step {current}: tick that one (and only the steps right after it that closed "
+                             f"with the same work), not {asked}")
     because = str(because or "").strip()
     if not_needed and not because:
         raise ValueError("--skip needs --because: why this step does not apply to what is in front of you (one line; it goes under the step)")
@@ -696,7 +706,7 @@ def tick_walk(target: str, done: list[int] | None = None, not_needed: list[int] 
 
 
 TICK_AT_ONCE = 6   # steps one tick call may close: several that closed together, never a walk at once
-REVEAL = 3         # steps whose text is open at once: the current one and the two after it; the rest open as you tick
+REVEAL = 1         # steps whose text is open at once: the one you are on; the next opens when it is ticked
 FLAT_LIMIT = 50   # steps in one walk: past this the method is several work orders, and the route carries the rest
 # The loop's own procedures: a step that links one runs the framework, and its steps are not part of a domain
 # method (a voicing walk with the generic resolve-an-unknown checklist inlined in the middle of it is not voicing).
@@ -764,8 +774,8 @@ _GUIDANCE = ("This procedure is the validation of your work: each step is a chec
              "per call, the reason written under it — \"already done\" and \"covered by the probe\" are not reasons: do the "
              "step and show what it found. There is no way to close a walk whole. The steps are knowledge earned on another "
              "task: adapt their specifics (names, keys, counts, the probe they mention) to what is in front of you, and do "
-             "them. Only the step you are on and the two after it show their text; the rest open as you tick — a walk is done "
-             "one step at a time, never taken in at once. Improve a step that fell short where you stand: `playbook edit-step "
+             "them. Only the step you are on shows its text; the next opens when it is ticked, and a tick is refused for any "
+             "step but the one you are on — a walk is done one step at a time, in the command that does the step, never taken in at once. Improve a step that fell short where you stand: `playbook edit-step "
              "--walk <this file> --step N --do ...` (`add-step --walk ... --after N`, `remove-step --walk ... --step N`) changes "
              "the procedure the step came from.")
 
