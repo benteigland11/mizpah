@@ -224,3 +224,45 @@ def test_reviewer_doubts_reach_the_controller(gym: Path, tmp_path: Path) -> None
     assert 'What the check-in reviewer still doubted' in text and 'never verifies the MIDI is 4/4' in text
     assert text.index('reviewer still doubted') < text.index('# Brief')
     assert controller.reviewer_doubts(tmp_path/'nowhere'/'controller.jsonl') == []
+
+
+def test_a_task_may_continue_a_workspace_the_loop_holds(gym: Path, tmp_path: Path) -> None:
+    """The controller sees the worker workspaces and may route a task onto one (continue_from); the guard drops a
+    name it does not hold with a caution; the worker adopts the session (state, journal, merge base) under the
+    new task's root, leaving the old report behind."""
+    root = tmp_path/'session'
+    old = root/'tasks'/'build_piece_mid'
+    (old/'events').mkdir(parents=True)
+    (old/'state.sqlite3').write_bytes(b'state')
+    (old/'events'/'session.jsonl').write_text(json.dumps(dict(event_type='worker_turn', payload=dict(response=dict(tool_calls=[
+        dict(id='c', function=dict(name='playbook_open', arguments=json.dumps(dict(id='midi-piano-voicing-melody', purpose='x'))))]))))+'\n'
+        + json.dumps(dict(event_type='worker_turn', payload=dict(response=dict(tool_calls=[dict(id='d', function=dict(name='edit',
+        arguments=json.dumps(dict(path='cg/data_music_x_python/src/x.py'))))]))))+'\n')
+    (old/'task.json').write_text(json.dumps(dict(task=dict(id='build_piece_mid'), unknowns=[dict(id='piece_mid_built')], map='t_build_piece_mid')))
+    (old/'result.json').write_text(json.dumps(dict(verdict='complete', turns=30)))
+    (old/'writeup.started').write_text('30')
+    (root/'controller.jsonl').write_text('')
+    spaces = controller.task_workspaces(root)
+    assert spaces == [dict(task='build_piece_mid', unknowns=['piece_mid_built'], verdict='complete', turns=30, probes=[],
+                           walks=['midi-piano-voicing-melody'], widgets=['data_music_x_python'])]
+    observation = controller.observe(CONFIG, gym) | dict(workspaces=spaces)
+    text = controller.render_observation(observation, 'route')
+    assert 'Worker workspaces this loop holds' in text and 'walked: midi-piano-voicing-melody' in text
+    decision = dict(unknowns=[dict(id='piece_mid_built', cites='deliverable:1', type='boolean', claim='`piece.mid` exists and parses',
+                                   evidence_needed='parse it'),
+                              dict(id='piece_mid_parses', cites='deliverable:1', type='boolean', claim='`piece.mid` parses with mido',
+                                   evidence_needed='parse it')],
+                    tasks=[dict(id='retake_piece', unknowns=['piece_mid_built'], bucket='low', title='take it again', continue_from='build_piece_mid'),
+                           dict(id='other', unknowns=['piece_mid_parses'], bucket='low', title='x', continue_from='no_such_task')])
+    accepted, refusals = controller.guard(decision, observation, gym)
+    by = {t['id']: t for t in accepted['tasks']}
+    assert by['retake_piece']['continue_from'] == 'build_piece_mid'
+    assert by.get('other', {}).get('continue_from', '') == '' and any('names no workspace' in c for c in accepted['cautions'])
+    # The worker adopts the session under the new root; the old report and marker stay behind.
+    from mizpah import worker
+    new = root/'tasks'/'retake_piece'
+    assert worker.adopt_workspace(old, new)
+    assert (new/'state.sqlite3').read_bytes() == b'state' and (new/'events'/'session.jsonl').exists()
+    assert not (new/'result.json').exists() and not (new/'writeup.started').exists()
+    assert not worker.adopt_workspace(old, new)   # already holds a session
+    assert worker.continue_from(dict(acceptance=['unknown:x', 'continue_from:build_piece_mid'])) == 'build_piece_mid'

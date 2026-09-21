@@ -117,6 +117,37 @@ def adopt(gym: Path, name: str | None = None, *, replace: bool = False) -> dict[
     return dict(load(name), built_from=str(gym))
 
 
+BARE = 'bare'
+BARE_NOTE = 'a bare gym: Python 3 and a shell, nothing else installed; the project directory is the whole workspace'
+
+
+def ensure_bare() -> dict[str, Any]:
+    """The environment every machine has: an empty base, so a gym with nothing special still runs in a named,
+    selectable environment rather than in the absence of one."""
+    try:
+        return load(BARE)
+    except FileNotFoundError:
+        return create(BARE, note=BARE_NOTE)
+
+
+def default_name() -> str:
+    """The environment a gym gets when none is named: `default.json` beside the bases, else `bare` (made if
+    missing). A default that no longer exists falls back the same way."""
+    path = bases_root()/'default.json'
+    try:
+        name = str(json.loads(path.read_text()).get('name') or '')
+        load(name)
+        return name
+    except (OSError, ValueError, FileNotFoundError):
+        return ensure_bare()['name']
+
+
+def set_default(name: str) -> dict[str, Any]:
+    base = load(name)   # must exist
+    (bases_root()/'default.json').write_text(json.dumps(dict(name=name))+'\n')
+    return base
+
+
 def list_bases() -> list[dict[str, Any]]:
     out = []
     for folder in sorted(bases_root().iterdir()):
@@ -184,6 +215,8 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser('list', help='every base and what it provides')
     s = sub.add_parser('show', help='one base, resolved')
     s.add_argument('name')
+    d = sub.add_parser('default', help='the environment a gym gets when none is named; with a name, set it')
+    d.add_argument('name', nargs='?')
     a = sub.add_parser('adopt', help='a finished environment gym becomes a base (its base.json names it)')
     a.add_argument('gym', type=Path)
     a.add_argument('--name', help='override the name in base.json')
@@ -191,6 +224,8 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     if args.command == 'create':
         print(json.dumps(create(args.name, note=args.note), indent=1))
+    elif args.command == 'default':
+        print(json.dumps(set_default(args.name) if args.name else load(default_name()), indent=1))
     elif args.command == 'adopt':
         print(json.dumps(adopt(args.gym, args.name, replace=args.replace), indent=1))
     elif args.command == 'list':

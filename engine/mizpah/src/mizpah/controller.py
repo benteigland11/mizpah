@@ -229,6 +229,46 @@ def reviewer_doubts(journal: Path) -> list[dict[str, Any]]:
     return out[:8]
 
 
+def task_workspaces(root: Path) -> list[dict[str, Any]]:
+    """The worker workspaces this loop holds, one per task that reached a turn: what each was for and what it
+    left behind (probes, walks, widgets), so the controller can route a task onto one instead of starting a
+    worker from nothing. Every repair task tonight rewrote a probe that was sitting in the last worker's
+    workspace (2026-09-21)."""
+    out = []
+    tasks = root/'tasks'
+    if not tasks.is_dir():
+        return out
+    for d in sorted(tasks.iterdir()):
+        if not (d/'state.sqlite3').exists():
+            continue
+        try:
+            saved = json.loads((d/'task.json').read_text())
+        except (OSError, ValueError):
+            continue
+        result = None
+        try:
+            result = json.loads((d/'result.json').read_text())
+        except (OSError, ValueError):
+            pass
+        unknowns = [u.get('id') for u in saved.get('unknowns') or [] if isinstance(u, dict)]
+        probes = sorted({p.name.removesuffix('_probe') for p in (root.parent.parent/'map'/'probes').glob('*_probe')
+                         if (p/'measure.py').exists() and p.name.removesuffix('_probe') in unknowns}) if (root.parent.parent/'map').is_dir() else []
+        walks, widgets = [], []
+        try:
+            for line in (d/'events'/'session.jsonl').read_text().splitlines():
+                if '"playbook_open"' in line or 'playbook open ' in line:
+                    for m in re.findall(r'playbook open ([a-z0-9-]+)|\\"id\\": \\"([a-z0-9-]+)\\"', line):
+                        walks += [x for x in m if x]
+                for m in re.findall(r'cg/([a-z0-9_]+)/src/', line):
+                    widgets.append(m)
+        except OSError:
+            pass
+        out.append(dict(task=d.name, unknowns=unknowns, verdict=(result or {}).get('verdict') or 'live',
+                        turns=(result or {}).get('turns'), probes=probes, walks=sorted(set(walks))[:6],
+                        widgets=sorted(set(widgets))[:6]))
+    return out
+
+
 def last_cautions(journal: Path) -> list[str]:
     """What the guard noted on the previous briefing: applied as decided, said once here."""
     try:
@@ -391,6 +431,13 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
                      ((' (blocked by the harness, not the worker: '+reason+' — it is retried on the next run; nothing about the '
                        'source or the brief follows from it)') if reason.startswith(DRIVER_BLOCK) else
                       (' (blocked: '+reason+')' if reason else '')))
+    if observation.get('workspaces'):
+        lines.append('Worker workspaces this loop holds (a task may continue one — "continue_from": "<task>" — so its worker '
+                     'resumes with its probes, its walk and its widgets in hand instead of starting from nothing):')
+        for w in observation['workspaces']:
+            lines.append('  '+w['task']+' ['+str(w['verdict'])+(', '+str(w['turns'])+' turns' if w.get('turns') else '')+'] → '
+                         +', '.join(w['unknowns'])+(' · probes: '+', '.join(w['probes']) if w['probes'] else '')
+                         +(' · walked: '+', '.join(w['walks']) if w['walks'] else '')+(' · widgets: '+', '.join(w['widgets']) if w['widgets'] else ''))
     waiting = [t for t in observation['tasks'] if t['status'] in ('ready', 'in_progress')]
     if waiting and mode == 'eval':
         lines.append('Already routed and waiting to run: '+', '.join(t['id'] for t in waiting)+' — they cover '
@@ -1053,8 +1100,18 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         carried = {u['enabler'] for u in unknowns if u['id'] in ids and u.get('enabler')}
         if len(carried) > 1:
             refusals.append('task '+tid+': one enabler per task ('+', '.join(sorted(carried))+')'); continue
+        # A task may continue a worker workspace this loop holds: its worker resumes with the probe, the walk
+        # and the widgets of that task rather than starting from nothing. A name that is not a workspace here is
+        # dropped with a caution (method, not integrity).
+        continue_from = str(item.get('continue_from') or '').strip()
+        if continue_from:
+            held = {w['task'] for w in observation.get('workspaces') or []}
+            if continue_from not in held:
+                cautions.append('task '+tid+': continue_from '+repr(continue_from)+' names no workspace this loop holds ('
+                                +(', '.join(sorted(held)) or 'none')+'); routed fresh')
+                continue_from = ''
         tasks.append(dict(id=tid, title=title, unknowns=ids, unknown=ids[0], bucket=item['bucket'], deps=deps,
-                          enabler=next(iter(carried), '')))
+                          enabler=next(iter(carried), ''), continue_from=continue_from))
     accepted_ids = existing_tasks | {t['id'] for t in tasks}
     for t in tasks:
         gone = [d for d in t['deps'] if d not in accepted_ids]
@@ -1164,6 +1221,19 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         if bucket not in BUCKETS or BUCKETS.index(bucket) <= BUCKETS.index(current['bucket'] or 'low'):
             refusals.append('rebucket '+tid+': bucket must be above '+str(current['bucket'])); continue
         rebucket.append(dict(task=tid, bucket=bucket, why=str(item.get('why') or '')))
+    cancel: list[dict[str, str]] = []
+    for item in decision.get('cancel') or []:
+        if not isinstance(item, dict):
+            refusals.append('cancel entry is not an object'); continue
+        tid, why = str(item.get('task') or ''), str(item.get('why') or '').strip()
+        current = by_id.get(tid)
+        if current is None:
+            refusals.append('cancel '+repr(tid)+': no such task'); continue
+        if current['status'] not in ('ready', 'blocked'):
+            refusals.append('cancel '+tid+': only a ready or blocked task comes off the route ('+str(current['status'])+')'); continue
+        if not why:
+            refusals.append('cancel '+tid+': say why'); continue
+        cancel.append(dict(task=tid, why=why))
     for item in decision.get('unblock') or []:
         if not isinstance(item, dict):
             refusals.append('unblock entry is not an object'); continue
@@ -1227,12 +1297,12 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             refusals.append('done refused: '+'; '.join(uncovered)+' — mint one unknown per named thing (with `creates`), '
                             'each claim naming it and the known it must agree with')
     return dict(unknowns=unknowns, tasks=tasks, proposals=proposals, rebucket=rebucket, unblock=unblock, retype=retype, noted=noted,
-                reopen=sorted(reopened), cautions=cautions, done=done, why=str(decision.get('why') or '')), refusals
+                cancel=cancel, reopen=sorted(reopened), cautions=cautions, done=done, why=str(decision.get('why') or '')), refusals
 
 
 def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> dict[str, list[str]]:
     """Write the accepted decision through Terra; proposals are queued, never accepted here."""
-    done = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[])
+    done = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[], cancel=[])
     for uid in accepted.get('reopen') or []:
         # A resolved reading to be taken again: open on the map, so its task is routable and its known is replaced.
         try:
@@ -1273,6 +1343,8 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
                 args += ['--sector', now['id']]   # the phase's provision: its points, not the next phase's
         for extra in ids[1:]:
             args += ['--accept', 'unknown:'+extra]  # the task resolves these too; Terra's map_id holds only one
+        if t.get('continue_from'):
+            args += ['--accept', 'continue_from:'+t['continue_from']]   # the worker workspace this task resumes
         for dep in t['deps']:
             args += ['--dep', dep]
         try:
@@ -1297,6 +1369,14 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
         terra(config, project, 'route', 'set-effort', r['task'], '--bucket', r['bucket'])
         terra(config, project, 'route', 'unblock', r['task'])
         done['rebucket'].append(r['task']+'→'+r['bucket'])
+    for r in accepted.get('cancel') or []:
+        # Off the route: superseded, wrong, or its unknown is now carried by another task. Terra strands the
+        # task's dependents until re-pointed; the eval sees them on the next briefing.
+        try:
+            terra(config, project, 'route', 'cancel', r['task'], '--reason', r['why'])
+            done.setdefault('cancel', []).append(r['task'])
+        except RuntimeError as error:
+            done.setdefault('refused', []).append('cancel '+r['task']+': '+str(error)[:200])
     for r in accepted.get('unblock') or []:
         terra(config, project, 'route', 'unblock', r['task'])
         record_release(project, r['task'], r['after'])
@@ -1434,6 +1514,7 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
         observation['operator_notes'] = notes
     observation['cautions'] = last_cautions(journal)
     observation['reviewer_doubts'] = reviewer_doubts(journal)
+    observation['workspaces'] = task_workspaces(Path(journal).parent)
     refusals: list[str] = []
     accepted = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[], done=None, why='')
     record: dict[str, Any] = dict(mode=mode, observation=observation, attempts=[], usage=usage)

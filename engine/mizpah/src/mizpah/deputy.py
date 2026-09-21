@@ -55,23 +55,24 @@ def deputy_root() -> Path:
 # The Deputy's verbs, typed because they are new and undiscoverable; everything else is bash and `terra --help`.
 DEPUTY_TOOLS: tuple[dict[str, Any], ...] = (
     dict(name='draft_new', description='Set up a gym: a training ground under /work in a named environment, with an '
-         'empty brief (title and mission set, status draft). The environment is the point of the gym and is chosen '
-         'here — a saved one by name (`python -m mizpah.draft environments` lists them and what each provides) or '
-         '`none` for a bare gym with Python and a shell only; settle it with the Administrator first. Then add needs, '
-         'deliverables, non-goals and the budget with `terra brief set` from inside /work/<slug> in bash, a few '
-         'entries per call.',
+         'empty brief (title and mission set, status draft). Every gym has an environment: the one named — `python -m '
+         'mizpah.draft environments` lists the saved ones, what each provides, and which is the default — or, when '
+         'none is named, the default (the `bare` one, Python and a shell only, unless the Administrator has set '
+         'another). Settle it with the Administrator first when the work needs more than the default. Then add '
+         'needs, deliverables, non-goals and the budget with `terra brief set` from inside /work/<slug> in bash, a '
+         'few entries per call.',
          command='python -m mizpah.draft new {slug} --title {title} --mission {mission} --environment {environment}',
          parameters=dict(type='object', properties=dict(slug=string('kebab-case name, e.g. ornith-landing'),
                                                         title=string('the brief title, a few words'),
                                                         mission=string('one or two sentences: what is built or found out, and how it is proved'),
-                                                        environment=string('a saved environment name, or "none" for a bare gym')),
-                         required=['slug', 'title', 'mission', 'environment'])),
+                                                        environment=string('a saved environment name; empty for the default', default='')),
+                         required=['slug', 'title', 'mission'])),
     dict(name='environment_new', description='Set up an environment gym: a bare gym whose brief\'s deliverable is a new '
          'saved environment, adopted under that name when its loop goes green. Use when no saved environment provides '
          'what the work needs. Then write its brief: one need per tool that must run (`Know whether <tool> runs …`), '
          'the deliverable `base.json` (name, the note the next worker reads, env with $BASE paths), the budget. Only '
          'after that environment exists can the real gym be set up in it.',
-         command='python -m mizpah.draft new {slug} --title {title} --mission {mission} --environment none --builds {name}',
+         command='python -m mizpah.draft new {slug} --title {title} --mission {mission} --environment bare --builds {name}',
          parameters=dict(type='object', properties=dict(name=string('the environment\'s name, e.g. browser (lowercase, digits, - and _)'),
                                                         slug=string('the gym\'s name, e.g. env-browser'),
                                                         title=string('the brief title'),
@@ -201,22 +202,9 @@ def open_or_create(config: dict[str, Any], root: Path, text: str) -> tuple[Focus
     generation = dict(deputy_spec(config)['generation'])
     if (root/'state.sqlite3').exists():
         before = _model_on_record(root)
-        try:
-            session = FocusedSession.rebind(root, worker=worker, shell=shell, generation=generation,
-                                            worker_system=policy_text(config))
-        except ValueError as refused:
-            if 'pending' not in str(refused):
-                raise
-            # A model call torn by an outage was never discarded: open under the old bindings, drop it (the
-            # rest of the turn is the person's to say again), then rebind.
-            torn = FocusedSession.open(root, worker=worker, shell=shell) if not _bindings_changed(root, worker, shell) else None
-            if torn is None:
-                raise
-            discarded = torn.discard_pending()
-            if discarded:
-                (root/'discarded.jsonl').open('a').write(json.dumps(discarded)+'\n')
-            session = FocusedSession.rebind(root, worker=worker, shell=shell, generation=generation,
-                                            worker_system=policy_text(config))
+        # A killed process (the app closed mid-turn) leaves a call unanswered; the rebind drops it and continues.
+        session = FocusedSession.rebind(root, worker=worker, shell=shell, generation=generation,
+                                        worker_system=policy_text(config), discard_pending=True)
         now = generation.get('model') or ''
         if before and now and before != now:
             _turn(root, 'system', 'Now on '+now+' (was '+before+'); the Deputy carries its memory over.')
@@ -224,15 +212,6 @@ def open_or_create(config: dict[str, Any], root: Path, text: str) -> tuple[Focus
         return session, False
     _note_model(root, generation.get('model') or '')
     return FocusedSession.create(root, settings_for(config, text), worker=worker, shell=shell), True
-
-
-def _bindings_changed(root: Path, worker: Any, shell: Any) -> bool:
-    """Whether a plain `open` would refuse: the saved model or sandbox bindings differ from these."""
-    try:
-        FocusedSession.open(root, worker=worker, shell=shell)
-        return False
-    except ValueError:
-        return True
 
 
 def _model_on_record(root: Path) -> str:

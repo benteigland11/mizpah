@@ -185,8 +185,10 @@ def cmd_use(args: argparse.Namespace) -> int:
     for role in roles:
         spec = harness.setdefault(role, {})
         endpoint = spec.setdefault('endpoint', {})
+        # A seat in conversation cannot wait a worker's fifteen minutes on a hung call: the Deputy's turn is a
+        # few short calls, and a stall should surface in minutes and be discarded.
         endpoint.update(base_url=profile.api_base_url, completion_path=profile.completion_path,
-                        timeout_seconds=profile.timeout_seconds,
+                        timeout_seconds=min(profile.timeout_seconds, 180) if role == 'deputy' else profile.timeout_seconds,
                         template_path=override.get('template_path', '/apply-template'),
                         tokenize_path=override.get('tokenize_path', '/tokenize'),
                         headers={'Content-Type': 'application/json', **profile.static_headers})

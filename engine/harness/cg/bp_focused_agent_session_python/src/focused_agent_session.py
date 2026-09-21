@@ -409,8 +409,10 @@ def _identity(client: ModelClient | None) -> dict[str, Any] | None:
 
 
 def _shell_identity(shell: SandboxedShell) -> dict[str, Any]:
-    # Compared against the saved JSON, so tuples must already be lists.
-    return json.loads(json.dumps(asdict(shell.config)))
+    # Compared against the saved JSON, so tuples must already be lists. The refusal patterns are host policy
+    # text, not the sandbox binding: a wording change between two runs left a saved session unopenable
+    # ("Reopen requires the saved model and shell bindings") and its task blocked.
+    return {k: v for k, v in json.loads(json.dumps(asdict(shell.config))).items() if k != 'refused_patterns'}
 
 
 def _settings(value: dict[str, Any]) -> SessionSettings:
@@ -481,8 +483,9 @@ class FocusedSession:
             if result.journal.drop_torn_tail('session'):
                 result.journal.append(session_id='session', event_type='torn_tail_dropped', payload={})
             result._restore()
+            saved_shell = {k: v for k, v in (result.state['shell_config'] or {}).items() if k != 'refused_patterns'}
             if (result.state['worker_identity'] != _identity(worker)
-                    or result.state['shell_config'] != _shell_identity(shell)
+                    or saved_shell != _shell_identity(shell)
                     or result.state['controller_identity'] != (
                         _identity(controller) if result.settings.reference is not None else None)):
                 raise ValueError('Reopen requires the saved model and shell bindings')
@@ -634,15 +637,21 @@ class FocusedSession:
 
     @classmethod
     def rebind(cls, root: str | Path, *, worker: ModelClient, shell: SandboxedShell,
-               controller: ModelClient | None = None, generation: dict[str, Any] | None = None) -> FocusedSession:
-        """Open a session under bindings that may have changed: another model, another endpoint, new mounts.
+               controller: ModelClient | None = None, generation: dict[str, Any] | None = None,
+               worker_system: str | None = None, discard_pending: bool = False) -> FocusedSession:
+        """Open a session under bindings that may have changed: another model, another endpoint, new mounts,
+        a revised system text.
 
         `open` refuses a changed binding because a window's native state (tool calls, counts) belongs to the
         model that made it. A seat that lives across model choices — a person's standing conversation — needs
         the other answer: accept the change, and when the window holds any work, make the next worker step a
         forced rollover, so the new model writes the memory it continues from and starts a fresh window on
-        it. Nothing is archived and nothing replays. Unchanged bindings open exactly as `open` does. Refused
-        while an operation is pending: a rebind happens at a resolved boundary or not at all.
+        it. Nothing is archived and nothing replays. A changed `worker_system` is swapped into the window's
+        system message in place — the model reads the new text from its next request on, no rollover — so a
+        standing seat follows its policy file as it is edited. Unchanged bindings open exactly as `open` does.
+        Refused while an operation is pending — a rebind happens at a resolved boundary or not at all — unless
+        `discard_pending`, which drops a torn operation first (a killed process left a call unanswered), exactly
+        as `discard_pending()` would, and then rebinds.
         """
         result = cls(root, worker, shell, controller)
         with result._locked():
@@ -653,7 +662,7 @@ class FocusedSession:
             if result.state['worker_identity'] != _identity(worker):
                 changed['worker'] = True
                 result.state['worker_identity'] = _identity(worker)
-            if result.state['shell_config'] != _shell_identity(shell):
+            if {k: v for k, v in (result.state['shell_config'] or {}).items() if k != 'refused_patterns'} != _shell_identity(shell):
                 changed['shell'] = True
                 result.state['shell_config'] = _shell_identity(shell)
             expected = _identity(controller) if result.settings.reference is not None else None
@@ -670,13 +679,24 @@ class FocusedSession:
                 changed['capabilities'] = True
                 result.state['capabilities'] = capabilities
                 result.session.tools = worker_tools(result.settings.worker_tools, result.settings, capabilities)
-            if changed:
+            policy_changed = False
+            if worker_system is not None and worker_system.strip() and worker_system != result.settings.worker_system:
+                policy_changed = True
+                result.settings = replace(result.settings, worker_system=worker_system)
+                result.state['settings'] = asdict(result.settings)
+                for messages in (result.session.base_messages, result.session.messages):
+                    if messages and messages[0].get('role') == 'system':
+                        messages[0]['content'] = worker_system
+            if changed or policy_changed:
+                if result.state['pending_io'] is not None and discard_pending:
+                    result._discard_pending_locked()
                 if result.state['pending_io'] is not None:
                     raise ValueError('Rebind only at a resolved boundary; recover the pending operation first')
-                rollover = len(result.session.messages) > len(result.session.base_messages)+1
+                rollover = bool(changed) and len(result.session.messages) > len(result.session.base_messages)+1
                 if rollover and not result.state.get('rollover_requested'):
                     result.state['rollover_requested'] = dict(reason='rebind', name='worker', count=0)
-                result._event('rebound', dict(changed, rollover=rollover, window=result.session.window_index))
+                result._event('rebound', dict(changed, system_text=policy_changed, rollover=rollover,
+                                              window=result.session.window_index))
                 result._save()
         return result
 
@@ -1544,24 +1564,28 @@ class FocusedSession:
         with self._locked():
             if self.store.read()['revision'] != self.revision:
                 raise RuntimeError('Session changed; reopen before discarding')
-            pending = self.state.get('pending_io')
-            if pending is None:
-                return None
-            self._event('pending_discarded', dict(pending))
-            self.state['pending_io'] = None
-            if pending.get('kind') == 'tool':
-                # The turn's response is kept; the call gets an explicit failed result.
-                turn = self.state.get('active_turn')
-                if turn is not None:
-                    call = turn['response']['tool_calls'][len(turn['tool_results'])]
-                    output = dict(status='error', error='This command was interrupted before its outcome was recorded; '
-                                                          'its effects were discarded. Run it again if still needed.')
-                    self.session.append_tool_result(call['id'], call['function']['name'], json.dumps(output, ensure_ascii=False))
-                    turn['tool_results'].append(dict(call_id=call['id'], name=call['function']['name'], result=output))
-                    if not self.session.pending_tools:
-                        self._finish_turn()
-            self._save()
-            return pending
+            return self._discard_pending_locked()
+
+    def _discard_pending_locked(self) -> dict[str, Any] | None:
+        """`discard_pending` under a lock the caller already holds."""
+        pending = self.state.get('pending_io')
+        if pending is None:
+            return None
+        self._event('pending_discarded', dict(pending))
+        self.state['pending_io'] = None
+        if pending.get('kind') == 'tool':
+            # The turn's response is kept; the call gets an explicit failed result.
+            turn = self.state.get('active_turn')
+            if turn is not None:
+                call = turn['response']['tool_calls'][len(turn['tool_results'])]
+                output = dict(status='error', error='This command was interrupted before its outcome was recorded; '
+                                                      'its effects were discarded. Run it again if still needed.')
+                self.session.append_tool_result(call['id'], call['function']['name'], json.dumps(output, ensure_ascii=False))
+                turn['tool_results'].append(dict(call_id=call['id'], name=call['function']['name'], result=output))
+                if not self.session.pending_tools:
+                    self._finish_turn()
+        self._save()
+        return pending
 
     def reset_generation_block(self) -> dict[str, Any] | None:
         """Lift a generation-retries block on reopen: the block is a verdict on one window's context, not on

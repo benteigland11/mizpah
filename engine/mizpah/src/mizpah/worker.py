@@ -319,7 +319,7 @@ def render_assignment(task: dict[str, Any], unknowns: list[dict[str, Any]], map_
         # Every work order carries the brief's non-goals: the lines the work must not cross, whatever the task.
         lines.append('Not asked for, by the brief (do not build, render or spend turns on these):')
         lines += ['  - '+n for n in non_goals]
-    acceptance = [a for a in task.get('acceptance') or [] if not str(a).startswith('unknown:')]
+    acceptance = [a for a in task.get('acceptance') or [] if not str(a).startswith(('unknown:', 'continue_from:'))]
     if acceptance:
         lines.append('Acceptance: '+'; '.join(acceptance))
     if task.get('enabler_id'):
@@ -403,6 +403,11 @@ def describe_unknown(unknown: dict[str, Any]) -> list[str]:
         lines.append('  read it from: '+notes['source'])
     if unknown.get('probe_id'):
         lines.append('  an instrument already exists: probe `'+unknown['probe_id']+'`')
+    elif unknown.get('_measure_exists'):
+        # The record may not name it (a reopened unknown), but the map holds its probe with a measure written:
+        # every repair task tonight rewrote one that was sitting there.
+        lines.append('  an instrument already exists: probe `'+unknown['id']+'_probe` has a measure.py on the map — read it '
+                     'and run it; write a new one only if it reads the wrong thing')
     return lines
 
 
@@ -2077,20 +2082,66 @@ def run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | N
             shell.close_network()
 
 
+def continue_from(task: dict[str, Any]) -> str:
+    """The task whose worker workspace this task continues (`continue_from:<id>` in its acceptance), or ''."""
+    for entry in task.get('acceptance') or []:
+        if isinstance(entry, str) and entry.startswith('continue_from:'):
+            return entry[len('continue_from:'):].strip()
+    return ''
+
+
+CARRIED = ('state.sqlite3', 'events', 'workspaces', 'scratch', PLAYBOOK_BASE, 'remeasure', 'remeasure.jsonl')
+
+
+def adopt_workspace(source: Path, root: Path) -> bool:
+    """Copy a finished task's session into a new task's root so the new task resumes that worker: its state,
+    journal, workspace snapshots, merge base. The old report and write-up marker stay behind; the new task
+    writes its own. False when there is nothing to adopt."""
+    import shutil
+    if not (source/'state.sqlite3').exists() or (root/'state.sqlite3').exists():
+        return False
+    root.mkdir(parents=True, exist_ok=True)
+    for name in CARRIED:
+        item = source/name
+        if item.is_dir():
+            shutil.copytree(item, root/name, dirs_exist_ok=True)
+        elif item.is_file():
+            shutil.copy2(item, root/name)
+    return True
+
+
 def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | None, holder: dict[str, Any]) -> dict[str, Any]:
     """Pick (or resume), open the task map, run until green or the backstop, harvest the playbook, report.
 
     A root that already holds a session is resumed: the task was re-bucketed after its worker
     ran out of budget, and the same session continues from where it paused on the new budget.
+    A task that continues another's workspace (`continue_from:<id>`) adopts that session first and resumes it
+    with the new task as its objective.
     """
     project, root = project.resolve(), root.resolve()
     settings = config['mizpah']
     store = Path(settings['playbook_store'])
+    continued = ''
+    if task_id and not (root/'state.sqlite3').exists():
+        fresh = next((t for t in terra(config, project, 'route', 'status')['tasks'] if t['id'] == task_id), None)
+        source_id = continue_from(fresh or {})
+        if source_id and adopt_workspace(root.parent/source_id, root):
+            continued = source_id
+            # The adopted task.json names the old task; the new one is written below from the route.
+            old = json.loads((root.parent/source_id/'task.json').read_text())
+            (root/'task.json').write_text(json.dumps(old | dict(continued_from=source_id), indent=1))
     resuming = (root/'state.sqlite3').exists()
     if resuming:
         saved = json.loads((root/'task.json').read_text())
-        task, unknowns, map_id = saved['task'], saved['unknowns'], saved['map']
-        probes_before = tuple(saved.get('probes_before') or ())
+        if continued:
+            # The adopted session, the new task: picked (started on the route), its own map, its own unknowns.
+            task = pick_task(config, project, task_id)
+            map_id = open_task_map(config, project, task)
+            unknowns = [read_unknown(project, uid, map_id) for uid in task_unknown_ids(task)]
+            probes_before = protected_probes(project, task)
+        else:
+            task, unknowns, map_id = saved['task'], saved['unknowns'], saved['map']
+            probes_before = tuple(saved.get('probes_before') or ())
         task = pick_task(config, project, task['id']) | dict(bucket=next(
             t['bucket'] for t in terra(config, project, 'route', 'status')['tasks'] if t['id'] == task['id']))
         worker_client, checkin, shell = bindings(config, root, map_id, project=project)
@@ -2135,6 +2186,29 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             status_now = session.status()
             if status_now['phase'] == 'worker' and status_now['pending_io'] is None:
                 session.interject(note, label='resumed: done tool added')
+        if continued:
+            # The worker's next objective, as an assignment would put it, on top of what it already holds.
+            try:
+                brief = json.loads((project/layout.dirname(project)/'brief.json').read_text())
+            except (OSError, ValueError):
+                brief = {}
+            for u in unknowns:
+                u['_measure_exists'] = (project/layout.dirname(project)/'map'/'probes'/(u['id']+'_probe')/'measure.py').exists()
+            objective = ('You continue from your workspace of task `'+continued+'`: your probes, the walk you ticked and the '
+                         'widgets you touched are all here. The route now asks this — the same rules, `done` when it is met:\n'
+                         +render_assignment(task, unknowns, map_id, probe_inputs(project, task), layout.dirname(project),
+                                            prior=prior_readings(project, unknowns), brief=brief))
+            (root/'task.json').write_text(json.dumps(dict(task=task, unknowns=unknowns, map=map_id, assignment=objective,
+                                                          reference=render_reference(project, task, unknowns),
+                                                          probes_before=probes_before, continued_from=continued), indent=1))
+            status_now = session.status()
+            if status_now['phase'] == 'complete':
+                session.continue_with(objective, label='continued: '+task['id'])
+            elif status_now['phase'] == 'worker' and status_now['pending_io'] is None:
+                session.interject(objective, label='continued: '+task['id'])
+            session.resume_reviews()
+            for stale in (WRITEUP_MARK,):
+                (root/stale).unlink(missing_ok=True)
         if not (root/PLAYBOOK_BASE).is_dir():
             # A task started before three-way merges has no base; the store as it is now is the best one there is
             # (what moved before this point is already in it; what moves after is merged).
@@ -2166,6 +2240,8 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             brief = json.loads((project/layout.dirname(project)/'brief.json').read_text())
         except (OSError, ValueError):
             brief = {}
+        for u in unknowns:
+            u['_measure_exists'] = (project/layout.dirname(project)/'map'/'probes'/(u['id']+'_probe')/'measure.py').exists()
         assignment = render_assignment(task, unknowns, map_id, probe_inputs(project, task), layout.dirname(project),
                                        prior=prior_readings(project, unknowns), brief=brief)
         parts = library_parts(config, project, unknowns)

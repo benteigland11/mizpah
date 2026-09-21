@@ -83,10 +83,12 @@ def environment_exists(name: str) -> bool:
     return True
 
 
-def environments() -> list[dict[str, str]]:
-    """The saved gym environments a brief may name: name and note."""
+def environments() -> list[dict[str, Any]]:
+    """The saved gym environments a brief may name: name and note, the default first and marked."""
     from . import bases
-    return [dict(name=b['name'], note=b['note']) for b in bases.list_bases()]
+    default = bases.default_name()   # makes `bare` when nothing else is there
+    out = [dict(name=b['name'], note=b['note'], default=b['name'] == default) for b in bases.list_bases()]
+    return sorted(out, key=lambda e: (not e['default'], e['name']))
 
 
 BARE = 'none'
@@ -105,12 +107,11 @@ def new(slug: str, title: str, mission: str, environment: str = '', builds: str 
     project = draft_dir(slug)
     if project.exists():
         raise SystemExit(json.dumps(dict(status='error', error='a gym named '+slug+' exists; discard it or pick another slug')))
-    if not environment.strip():
-        raise SystemExit(json.dumps(dict(status='error', error='a gym is set up in an environment: name a saved one, or '
-                                         +repr(BARE)+' for a bare gym (Python and a shell only)',
-                                         environments=environments())))
-    environment = '' if environment.strip() == BARE else environment.strip()
-    if environment and not environment_exists(environment):
+    from . import bases
+    # A gym is always set up in an environment: the one named, else the default (`bare` until another is chosen).
+    environment = environment.strip()
+    environment = bases.ensure_bare()['name'] if environment == BARE else environment or bases.default_name()
+    if not environment_exists(environment):
         raise SystemExit(json.dumps(dict(status='error', error='no saved environment named '+repr(environment),
                                          environments=[e['name'] for e in environments()])))
     if builds:
@@ -120,8 +121,8 @@ def new(slug: str, title: str, mission: str, environment: str = '', builds: str 
             bases._valid(builds)
         except ValueError as error:
             raise SystemExit(json.dumps(dict(status='error', error=str(error))))
-        if environment:
-            raise SystemExit(json.dumps(dict(status='error', error='an environment gym is set up bare (`none`): it builds '
+        if environment != bases.BARE:
+            raise SystemExit(json.dumps(dict(status='error', error='an environment gym is set up bare: it builds '
                                              +repr(builds)+', it does not run in another environment')))
         if environment_exists(builds):
             raise SystemExit(json.dumps(dict(status='error', error='a saved environment named '+repr(builds)
@@ -131,8 +132,7 @@ def new(slug: str, title: str, mission: str, environment: str = '', builds: str 
     # A mission on `brief init` issues the brief (status active); a draft is initialised bare and told its mission.
     terra(project, 'brief', 'init', '--title', title)
     terra(project, 'brief', 'set', '--mission', mission)
-    if environment:
-        terra(project, 'brief', 'set', '--environment', environment)
+    terra(project, 'brief', 'set', '--environment', environment)
     terra(project, 'route', 'init')
     if builds:
         config = init_module.default_config()
@@ -223,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument('slug')
     p.add_argument('--title', required=True)
     p.add_argument('--mission', required=True)
-    p.add_argument('--environment', default='', help='the saved environment this gym is set up in (see `environments`), or `none` for a bare gym; required')
+    p.add_argument('--environment', default='', help='the saved environment this gym is set up in (see `environments`); `none` is the bare one; omitted, the default')
     p.add_argument('--builds', default='', help='an environment gym: bare, may install and reach package hosts, adopted as this base on green')
     p = sub.add_parser('discard', help='Remove a draft and everything in it')
     p.add_argument('slug')

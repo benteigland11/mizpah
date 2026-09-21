@@ -10,7 +10,8 @@ A task lists the unknowns it resolves (several that are naturally done together 
 
 If the project-files section is not enough to route or bucket well, look first: reply {"look": ["path/or/glob", ...], "why": "one sentence"} (up to 6 paths, twice per step) and the heads of those files are added to what you see before you decide.\n\nReply with one JSON object and nothing else:
 {"unknowns": [{"id": "snake_case", "claim": "...", "evidence_needed": "...", "type": "number|boolean|label", "unit": "...", "cites": "need:1 | deliverable:1 (one, or several joined by |; the first is primary)"}],
- "tasks": [{"id": "snake_case", "title": "...", "unknowns": ["..."], "bucket": "low|medium|high", "deps": []}],
+ "tasks": [{"id": "snake_case", "title": "...", "unknowns": ["..."], "bucket": "low|medium|high", "deps": [], "continue_from": "<task id, optional>"}],
+ "cancel": [{"task": "<id>", "why": "..."}],
  "proposals": [{"summary": "...", "need": "new need text", "deliverable": "...", "non_goal": "...", "edit": {"need|deliverable|non_goal": N, "text": "..."}, "remove": {"need|deliverable|non_goal": N}, "budget_delta": +N, "evidence": "...", "blocking": false}],
  "why": "one sentence on what the map owes the brief"}
 Ids match ^[a-z][a-z0-9_]*$.
@@ -32,6 +33,25 @@ until then. Route the enabler first: one boolean unknown with "enabler": "<id>" 
 and validates) and a task for it, bucketed by how much is unknown about building it — the worker searches the widget
 library before building, so an instrument another project graduated is an install. When it is ready, mint the
 readings that name it.
+
+## Taking a task off the route
+
+A ready or blocked task that should not run — superseded by another, wrong, its unknown reopened and carried by a
+new task, or blocked on something the map no longer owes — comes off with `cancel` (task, why). Never mint a
+second task for the same unknown to get around one that is stuck: cancel the stuck one, then route. A task blocked
+by the harness ("driver error") is released on the next run by the loop itself; a task its worker blocked is
+`unblock` after the task that built what was missing.
+
+## Continuing a worker's workspace
+
+The observation lists the worker workspaces this loop holds: for each task that ran, what it resolved and what it
+left behind — its probes, the procedure it walked, the widgets it touched. A new task may continue one:
+`"continue_from": "<task id>"` resumes that worker where it stopped, with all of that in hand, and hands it the new
+task as its next objective. Use it whenever the new task is about the same thing: a reading that came back false
+and must be taken again after a fix (the worker has the probe), a reading of a file the builder just built (the
+builder has the file and the widget), a repair of what a validator found. A fresh worker rewrites the probe from
+nothing — every repair task did, at thirty to sixty turns each. Route fresh only when no workspace touched the
+thing.
 
 ## A need about the library
 

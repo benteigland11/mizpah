@@ -225,18 +225,21 @@ def test_a_gym_is_set_up_in_an_environment_chosen_out_loud(gyms: Path, tmp_path:
     monkeypatch.setattr(bases, 'bases_root', lambda: tmp_path/'bases')
     (tmp_path/'bases').mkdir()
     bases.create('piano', note='a piano studio')
-    with pytest.raises(SystemExit) as unsaid:
-        draft.new('quiet', 'Quiet', 'm')
-    refusal = json.loads(str(unsaid.value))
-    assert 'name a saved one' in refusal['error'] and [e['name'] for e in refusal['environments']] == ['piano']
-    assert not (gyms/'quiet').exists()
+    # Nothing named: the default, which is `bare` (made on first use) until another is set.
+    assert draft.new('quiet', 'Quiet', 'm')['environment'] == 'bare'
+    assert [e['name'] for e in draft.environments() if e['default']] == ['bare']
+    bases.set_default('piano')
+    assert draft.new('quiet2', 'Quiet', 'm')['environment'] == 'piano'
+    assert [e['name'] for e in draft.environments()][0] == 'piano'
+    (tmp_path/'bases'/'default.json').write_text('{"name": "gone"}')
+    assert bases.default_name() == 'bare'   # a default that no longer exists falls back
     with pytest.raises(SystemExit) as unknown:
-        draft.new('quiet', 'Quiet', 'm', 'organ')
+        draft.new('loud', 'Loud', 'm', 'organ')
     assert 'no saved environment' in str(unknown.value)
     out = draft.new('etude', 'Etude', 'm', 'piano')
     assert out['environment'] == 'piano'
-    bare = draft.new('quiet', 'Quiet', 'm', 'none')
-    assert bare['environment'] == ''
+    bare = draft.new('loud', 'Loud', 'm', 'none')
+    assert bare['environment'] == 'bare'
 
 
 def test_signing_records_the_environment_on_the_gym_itself(gyms: Path, homes: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -327,4 +330,4 @@ def test_the_seat_hears_the_desk_with_every_line(gyms: Path, tmp_path: Path) -> 
     draft.new('etude', 'Etude', 'm', 'none')
     (root/'showing.json').write_text('{"draft": "etude"}\n')
     line = deputy.situation(root)
-    assert line.startswith('[Desk, from the host: drafts: etude (Etude, 0 needs, 0 deliverables)') and line.endswith('; on the desk: etude]')
+    assert line.startswith('[Desk, from the host: drafts: etude (Etude, 0 needs, 0 deliverables, env ') and line.endswith('; on the desk: etude]')

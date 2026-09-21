@@ -134,7 +134,7 @@ def test_the_brief_names_the_environment_and_the_host_resolves_it(data_home: Pat
     init_module.apply_project_config(config, project)
     assert config['mizpah']['base']['name'] == 'piano'
     assert draft.environment_exists('piano') and not draft.environment_exists('orchestra')
-    assert [e['name'] for e in draft.environments()] == ['other', 'piano']
+    assert [e['name'] for e in draft.environments()] == ['bare', 'other', 'piano']   # bare: the default, made on first listing
     (project/'.mizpah'/'brief.json').write_text(json.dumps(dict(title='t', status='draft', environment='orchestra')))
     with pytest.raises(SystemExit) as stop:
         draft.authorize(project)

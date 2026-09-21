@@ -33,5 +33,8 @@
   "turn_cap": 400,
   "controller_output_tokens": 8192,
   "checkin_output_tokens": 2048,
-  "credentials_file": "~/.local/share/mizpah/credentials.json"
+  "credentials_file": "~/.local/share/mizpah/credentials.json",
+  "scaffolding": {
+    "small_edits": false
+  }
 }
