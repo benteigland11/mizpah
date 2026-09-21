@@ -10,9 +10,15 @@ glossary, the blocks that seat needs, then its policy — composed at load, neve
 moves up out of `wip/` when it is finished — written in the glossary's words, one meaning per term, nothing in
 it the engine does not do. 
 
-A file's name says who gets it: `name[_seat].md`. No seat tag (`probes.md`) — every seat; a seat tag
-(`probes_worker.md`, `probes_reviewer.md`) — that seat only, composed right after the shared piece of the same
-name. The order of the pieces in a prompt is `order.txt`, one name per line; it is written when the pieces are.
+A file's name says who gets it: `name[_seat].md`. No seat tag (`probes.md`) — the worker and the controller,
+the two seats that run the loop and share its vocabulary; a seat tag (`probes_worker.md`, `probes_controller.md`)
+— that seat only, composed right after the shared piece of the same name. Their order is `order.txt`, one
+name per line.
+
+The reviewer is a different kind of seat: it reads files and answers one question. Nothing reaches it by
+default. Its prompt is `order_reviewer.txt`, an explicit list of exactly what it gets (the glossary, unknowns,
+probes, `probes_reviewer.md`, its policy) — a `_reviewer` tag marks a piece written for it, and only that list
+includes it. Both order files are written when the pieces are.
 
 Terms are used in the glossary's sense and no other, by every seat. A block explains; a policy instructs; the
 glossary names. Engine configs name the policy files by path (`*_policy_file`); the engine reads them from here.
