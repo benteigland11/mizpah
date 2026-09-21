@@ -1736,19 +1736,29 @@ def refusal_message(refused: list[tuple[str, str]]) -> str:
 
 def green_message(gate: dict[str, Any], unknown_id: str | list[str], used: list[str] = (), cost: dict[str, Any] | None = None,
                   skips: dict[str, list[str]] | None = None, uncovered: dict[str, list[str]] | None = None,
-                  made: list[str] = ()) -> str:
-    """The one case a green task is asked back for the record: it made an artifact and touched no procedure and
-    no widget while working, so the library holds nothing of the method. One short round: record it, `done`.
+                  made: list[str] = (), procedures: list[str] = (), widgets: list[str] = ()) -> str:
+    """The library's one question after green, asked when it got nothing on one side or the other: the procedures
+    this task created or improved, or the widgets it checked in. The worker answers by doing or by declining.
     (There is no write-up phase otherwise — the harvest of what was minted while working is the review.)"""
     if isinstance(unknown_id, list):
         unknown_id = ', '.join(unknown_id)
-    return ('Gate green: known '+unknown_id+' '+('are' if ',' in unknown_id else 'is')+' on the project map. You made '
-            +', '.join('`'+m+'`' for m in made)+' and the library holds nothing of how: no procedure was opened or created '
-            'and no widget was touched. One short round, no searching beyond the one `playbook search` a create requires: '
-            '`playbook create <id>` the skill you applied (the rules as a person states them, the code that applies each, '
-            'the check that verified it — one `add-step` per rule, from the steps you already took), `playbook validate '
-            '<id>` once, then call `done` with the id. If a procedure you know of already says it, `playbook open` it, '
-            '`playbook tick` its steps as done, and call `done`.\n')
+    held = ('widgets checked in: '+(', '.join('`'+w+'`' for w in widgets) or 'none')
+            +'; procedures created or improved: '+(', '.join('`'+p+'`' for p in procedures) or 'none')
+            +('; walked: '+', '.join('`'+u+'`' for u in used) if used else ''))
+    asks = []
+    if not procedures:
+        asks.append('the method — is there a way of working you followed here that the next worker on a task like this '
+                    'should start from? If so, `playbook create <id>` it (one `add-step` per rule, from the steps you took; '
+                    '`playbook edit <id> --widgets a,b` names the widgets it calls), or `add-step`/`edit-step` the one you '
+                    'walked if it is that procedure with a step missing; `playbook validate <id>` once')
+    if not widgets:
+        asks.append('the instrument — did a probe here compute a reading that another project would want from a call? '
+                    'If so, make it a widget under `cg/` (validated; it is checked in after this round)')
+    return ('Gate green: known '+unknown_id+' '+('are' if ',' in unknown_id else 'is')+' on the project map'
+            +(' and you made '+', '.join('`'+m+'`' for m in made) if made else '')+'. The library holds, from this task: '
+            +held+'. One question before the task closes, and one short round to answer it: '+'; and '.join(asks)
+            +'. If there is nothing general here, say so in one line and call `done`; that is a fine answer. '
+            'No searching beyond the one `playbook search` a create requires.\n')
 
 
 
@@ -2489,8 +2499,12 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         rounds.append(dict(turns=turns(status), session=status['status'], gate='playbook',
                            final_text=status['final_text'], playbook=playbook, widgets=widgets, artifact_deps=deps))
         made = [unknown_notes(u)['creates'] for u in unknowns if unknown_notes(u).get('creates')]
-        touched = procedures_used(root)+procedures_created(root)
-        unrecorded = bool(made) and not touched and not widgets['checked_in'] and not widgets['unchanged'] \
+        # One round to ask, when either side of the library got nothing from this task: the procedures it
+        # created or improved, or the widgets it checked in. The worker decides — record the method, improve
+        # the one it walked, mint the instrument, or say there is nothing general here and finish. Asked only
+        # when both sides were empty, attempt 1 checked in five instruments over two tasks and no method: the
+        # walk of the bootstrap procedure was the only procedure ever touched.
+        unrecorded = (not (playbook['created'] or playbook['improved']) or not (widgets['checked_in'] or widgets['unchanged'])) \
             and status['status'] == 'complete' and budget-turns(status) > 0
         refused = [('widget', r) for r in widgets['rejected']]+[('procedure', r) for r in playbook['rejected']]
         conflicts = list(widgets.get('conflicts') or [])
@@ -2506,8 +2520,10 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             elif refused:
                 session.continue_with(refusal_message(refused), label='library repair: validator refused')
             else:
-                session.continue_with(green_message(gate, task_unknown_ids(task), [], made=made),
-                                      label='gate green: record the method (nothing was minted)')
+                session.continue_with(green_message(gate, task_unknown_ids(task), procedures_used(root), made=made,
+                                                    procedures=sorted(set(playbook['created']+playbook['improved'])),
+                                                    widgets=sorted(set(widgets['checked_in']+widgets['unchanged']))),
+                                      label='gate green: the library asks')
             status = run_through_outages(session, config, root, maximum_worker_turns=budget-turns(status))
             session.prune_workspaces()
             again_w = harvest_widgets(evidence(session), root, config, project)
@@ -2526,8 +2542,8 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             still = [('widget', r) for r in widgets['rejected']]+[('procedure', r) for r in playbook['rejected']]
             still_conflicts = list(again_w.get('conflicts') or [])
             still_merges = list(again_p.get('conflicts') or [])
-            still_unrecorded = unrecorded and not (procedures_used(root)+procedures_created(root)) \
-                and not again_w['checked_in'] and not again_w['unchanged']
+            still_unrecorded = unrecorded and (not (playbook['created'] or playbook['improved'])
+                                               or not (widgets['checked_in'] or widgets['unchanged']))
             if len(still)+len(still_conflicts)+len(still_merges)+int(still_unrecorded) \
                     >= len(refused)+len(conflicts)+len(merges)+int(unrecorded):
                 break   # nothing fixed this round: the worker has had its say
