@@ -2219,7 +2219,8 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
                                             prior=prior_readings(project, unknowns), brief=brief))
             (root/'task.json').write_text(json.dumps(dict(task=task, unknowns=unknowns, map=map_id, assignment=objective,
                                                           reference=render_reference(project, task, unknowns),
-                                                          probes_before=probes_before, continued_from=continued), indent=1))
+                                                          probes_before=probes_before, continued_from=continued,
+                                                          turn_origin=session.status()['completed_worker_turns']), indent=1))
             status_now = session.status()
             if status_now['phase'] == 'complete':
                 session.continue_with(objective, label='continued: '+task['id'])
@@ -2302,6 +2303,13 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
     # met its 60-turn boundary twice and closed incomplete at 39 (measure_headline_candidates, inspect_mark_files).
     estimate = settings['turn_budget'][task['bucket']]+settings.get('turns_per_extra_reading', 8)*max(0, len(unknowns)-1)
     cap = settings.get('turn_cap', 400)                  # safety only; not a bucket, not a judgment
+    # A continued session carries its earlier task's turns; this task's estimate and cap count from where it
+    # took over (a revalidate adopted onto a 260-turn session met its estimate at once and was asked about its
+    # effort four turns running).
+    origin = int((json.loads((root/'task.json').read_text()).get('turn_origin') or 0) if (root/'task.json').exists() else 0)
+
+    def turns(status: dict[str, Any]) -> int:
+        return status['completed_worker_turns']-origin
     rounds: list[dict[str, Any]] = []
     gate: dict[str, Any] = dict(ok=False, problems=['not run'], knowns=[], runs=[])
     playbook: dict[str, list[str]] = dict(installed=[], rejected=[], ignored=[])
@@ -2311,36 +2319,36 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
     overruns = 0
     stalled = 0
     while stalled < settings['gate_rounds']:
-        remaining = cap-status['completed_worker_turns']
+        remaining = cap-turns(status)
         if remaining <= 0:
             break
         # Run to the next estimate boundary; the worker judges its own effort there.
-        boundary = min(remaining, max(1, estimate*(overruns+1)-status['completed_worker_turns']))
+        boundary = min(remaining, max(1, estimate*(overruns+1)-turns(status)))
         status = run_through_outages(session, config, root, maximum_worker_turns=boundary)
         written = writeback(state_of(session.workspace()), project, task, map_id, probes_before)
         refused = [w for w in written if w.startswith('refused:')]
         if refused:
-            (root/'writeback.jsonl').open('a').write(json.dumps(dict(turns=status['completed_worker_turns'], refused=refused))+'\n')
+            (root/'writeback.jsonl').open('a').write(json.dumps(dict(turns=turns(status), refused=refused))+'\n')
         session.prune_workspaces()
         blocked_reason = worker_blocked(project, task)
         if blocked_reason is not None:
             # The honest exit: the worker says the source cannot be read as asked. That is state
             # for the controller (a proposal, usually), not a red round for the worker.
-            rounds.append(dict(turns=status['completed_worker_turns'], session=status['status'], gate='blocked',
+            rounds.append(dict(turns=turns(status), session=status['status'], gate='blocked',
                                blocked_reason=blocked_reason, final_text=status['final_text']))
             break
         if status['status'] == 'stopped':
             # The operator's STOP file: the session paused at a turn boundary and reopens where it is; the task
             # stays in_progress on the route so the next run resumes it.
-            rounds.append(dict(turns=status['completed_worker_turns'], session='stopped', gate='stopped'))
+            rounds.append(dict(turns=turns(status), session='stopped', gate='stopped'))
             break
         if status['status'] == 'paused':
             overruns += 1
-            rounds.append(dict(turns=status['completed_worker_turns'], session=status['status'], gate='effort',
+            rounds.append(dict(turns=turns(status), session=status['status'], gate='effort',
                                overruns=overruns))
-            if status['completed_worker_turns'] >= cap:
+            if turns(status) >= cap:
                 break
-            session.interject(effort_message(task, estimate, status['completed_worker_turns'], overruns), label='estimate spent')
+            session.interject(effort_message(task, estimate, turns(status), overruns), label='estimate spent')
             continue
         gate = task_gate(config, project, task, map_id, root)
         if gate['ok'] and config['mizpah'].get('remeasure', True):
@@ -2356,7 +2364,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         # A red round that changed nothing counts against gate_rounds; a red round with fewer
         # problems is progress and costs nothing. The worker keeps deciding.
         stalled = stalled+1 if previous is not None and len(gate['problems']) >= len(previous) else 0
-        rounds.append(dict(turns=status['completed_worker_turns'], session=status['status'], gate=gate['ok'],
+        rounds.append(dict(turns=turns(status), session=status['status'], gate=gate['ok'],
                            problems=gate['problems'], final_text=status['final_text']))
         if status['status'] != 'complete' or gate['ok']:
             break
@@ -2375,7 +2383,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         # time and a second reviewer read it; the harvest's validators are the review. The worker is asked back
         # only when the library refused something (the validator's words), a base moved under it (a merge), or
         # it made an artifact and touched no procedure at all (one round to record what it did).
-        (root/WRITEUP_MARK).write_text(str(status['completed_worker_turns']))
+        (root/WRITEUP_MARK).write_text(str(turns(status)))
         session.suspend_reviews('gate green: the harvest is the review')
         session.prune_workspaces()
         widgets = harvest_widgets(evidence(session), root, config, project)
@@ -2383,19 +2391,19 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
                                     allowed=tuple(procedures_used(root)+procedures_created(root)),
                                     base=root/PLAYBOOK_BASE, workspace_store=workspace_procedures(config, project))
         deps = declare_artifact_deps(config, project, unknowns)
-        rounds.append(dict(turns=status['completed_worker_turns'], session=status['status'], gate='playbook',
+        rounds.append(dict(turns=turns(status), session=status['status'], gate='playbook',
                            final_text=status['final_text'], playbook=playbook, widgets=widgets, artifact_deps=deps))
         made = [unknown_notes(u)['creates'] for u in unknowns if unknown_notes(u).get('creates')]
         touched = procedures_used(root)+procedures_created(root)
         unrecorded = bool(made) and not touched and not widgets['checked_in'] and not widgets['unchanged'] \
-            and status['status'] == 'complete' and budget-status['completed_worker_turns'] > 0
+            and status['status'] == 'complete' and budget-turns(status) > 0
         refused = [('widget', r) for r in widgets['rejected']]+[('procedure', r) for r in playbook['rejected']]
         conflicts = list(widgets.get('conflicts') or [])
         merges = list(playbook.get('conflicts') or [])
         # Rounds continue while each one fixes something (the count of problems falls) and turns remain; a round
         # that fixes nothing ends it — the same rule as red gate rounds.
         while (refused or conflicts or merges or unrecorded) and status['status'] == 'complete' \
-                and budget-status['completed_worker_turns'] > 0:
+                and budget-turns(status) > 0:
             if conflicts:
                 session.continue_with(merge_message(conflicts), label='library merge')
             elif merges:
@@ -2405,7 +2413,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             else:
                 session.continue_with(green_message(gate, task_unknown_ids(task), [], made=made),
                                       label='gate green: record the method (nothing was minted)')
-            status = run_through_outages(session, config, root, maximum_worker_turns=budget-status['completed_worker_turns'])
+            status = run_through_outages(session, config, root, maximum_worker_turns=budget-turns(status))
             session.prune_workspaces()
             again_w = harvest_widgets(evidence(session), root, config, project)
             again_p = harvest_playbook(evidence(session), store, config,
@@ -2418,7 +2426,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
                 playbook[key] = sorted(set(playbook.get(key) or []) | set(again_p.get(key) or []))
             playbook['rejected'] = list(again_p['rejected'])
             playbook['conflicts'] = list(again_p.get('conflicts') or [])
-            rounds.append(dict(turns=status['completed_worker_turns'], session=status['status'], gate='library_repair',
+            rounds.append(dict(turns=turns(status), session=status['status'], gate='library_repair',
                                final_text=status['final_text'], playbook=again_p, widgets=again_w))
             still = [('widget', r) for r in widgets['rejected']]+[('procedure', r) for r in playbook['rejected']]
             still_conflicts = list(again_w.get('conflicts') or [])
@@ -2435,7 +2443,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
                   verdict=verdict,
                   blocked_reason=blocked_reason, problems=gate['problems'], knowns=gate['knowns'],
                   runs=gate['runs'], foreign_violations=gate.get('foreign_violations', []),
-                  turns=status['completed_worker_turns'], turn_budget=budget, turn_estimate=estimate, overruns=overruns,
+                  turns=turns(status), turn_budget=budget, turn_estimate=estimate, overruns=overruns,
                   session=status['status'],
                   handoffs=status['handoffs'], checkins=status['controller_reviews'], held_guidance=status['held_guidance'],
                   # What the reviewer still doubted when its completion budget ran out: the reading stands, and the
