@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+from dataclasses import asdict, replace
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -2089,6 +2090,23 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         current = {k: getattr(session.settings.session_policy, k) for k in wanted}
         if wanted != current:
             session.retune(**{k: v for k, v in wanted.items() if current[k] != v})
+        # The reviewer's current policy text, memory and completion budget apply to a resumed session too: a
+        # session saved before they existed would otherwise run its old text with no budget to the end.
+        if session.controller_client is not None and session.settings.controller is not None:
+            fresh = checkin_settings(config)
+            held = session.settings.controller
+            if held.system_prompt != fresh.system_prompt or held.maximum_completion_corrections != fresh.maximum_completion_corrections:
+                session.settings = replace(session.settings, controller=replace(held, system_prompt=fresh.system_prompt,
+                                                                                 maximum_completion_corrections=fresh.maximum_completion_corrections))
+                session.state['settings'] = asdict(session.settings)
+                session.state.setdefault('review_log', []).append(dict(turn=session.progress.turns, boundary='policy',
+                                                                       operation='policy_changed', correction='resumed: current review policy', evidence=''))
+        if not (root/PLAYBOOK_BASE).is_dir():
+            # A task started before three-way merges has no base; the store as it is now is the best one there is
+            # (what moved before this point is already in it; what moves after is merged).
+            (root/PLAYBOOK_BASE).mkdir()
+            for path in store.glob('*.json'):
+                (root/PLAYBOOK_BASE/path.name).write_bytes(path.read_bytes())
         if discarded:
             (root/'discarded.jsonl').open('a').write(json.dumps(discarded)+'\n')
         # A resumed worker is told where it stood, not left to its compacted memory of it: every procedure it
