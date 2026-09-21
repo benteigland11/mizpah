@@ -13,6 +13,7 @@ import time
 import os
 from pathlib import Path
 import re
+from datetime import datetime, timezone
 import subprocess
 from typing import Any
 
@@ -653,6 +654,29 @@ SPEC_CLAIM = re.compile(r'\b(meets|satisf(?:y|ies)|fulfil+s?|conforms? to|matche
                         re.I)
 
 
+def _measured_since_change(project: Path, known: dict[str, Any], refs: list[str], brief: dict[str, Any]) -> str:
+    """When the known's readings postdate every file the cited brief entries name, the reading is current:
+    returns when it was taken (ISO) — empty when a named file is newer, none is named, or the known has no runs."""
+    run_ids = [r.get('run_id') or '' for r in ((known.get('stats') or {}).get('by_run') or [])] or list(known.get('run_ids') or [])
+    stamps = sorted(m.group(0) for r in run_ids for m in [re.match(r'\d{8}T\d{6}Z', str(r))] if m)
+    if not stamps:
+        return ''
+    taken = datetime.strptime(stamps[-1], '%Y%m%dT%H%M%SZ').replace(tzinfo=timezone.utc)
+    named: list[Path] = []
+    for ref in refs:
+        kind, _, index = ref.partition(':')
+        entries = brief.get('deliverables' if kind == 'deliverable' else 'needs') or []
+        text = entries[int(index)-1] if index.isdigit() and 0 < int(index) <= len(entries) else ''
+        for n in re.findall(r'`([^`]+)`|([\w./-]+\.[A-Za-z0-9]{1,5})', str(text)):
+            for name in n:
+                if name and (project/name).is_file():
+                    named.append(project/name)
+    if not named:
+        return ''
+    changed = max(datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc) for p in named)
+    return taken.strftime('%Y-%m-%dT%H:%M:%SZ') if taken > changed else ''
+
+
 def _same_reading(a: str, b: str) -> bool:
     """Two claims are one reading when their content words (stemmed) overlap almost entirely."""
     wa, wb = briefs._stems(briefs._words(a)), briefs._stems(briefs._words(b))
@@ -714,6 +738,8 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
     brief = observation['brief']
     counts = dict(need=len(brief.get('needs') or []), deliverable=len(brief.get('deliverables') or []))
     existing_unknowns = {u['id']: u for u in observation['unknowns']}
+    knowns_by_id = {k['id']: k for k in observation.get('knowns') or []}
+    dropped_duplicates: dict[str, str] = {}   # minted id -> the resolved, still-fresh reading it duplicated
     reopened: dict[str, str] = {}   # original id -> the id the decision used for its re-measure
     # Method guards became cautions (2026-09-20): the decision is applied as made and the caution rides with it
     # into the journal and the next briefing. A refusal costs a resubmission round; today's tally put 70 of 93
@@ -755,8 +781,16 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         if same_claim and same_claim[0].get('status') == 'resolved' and same_claim[0]['id'] not in reopened:
             # A resolved reading minted again (pedal_timing_valid_after_fix, _current) is a re-measure of the original:
             # the artifact was repaired and the reading must be taken afresh. Reopen its own id and route on it rather
-            # than refuse — refusing twice stalled the pedal gym's controller (2026-09-20).
+            # than refuse — refusing twice stalled the pedal gym's controller (2026-09-20). Unless the reading is
+            # already newer than the artifact: a re-measure of a re-measure (changing-meter reopened a known adopted
+            # nine minutes after meters.md last changed, right after the task that re-took it landed).
             original = same_claim[0]['id']
+            fresh = _measured_since_change(project, knowns_by_id.get(original) or {}, refs, brief)
+            if fresh:
+                noted.append('unknown '+uid+': the map holds this reading as '+original+' [resolved], taken '+fresh+
+                             '; nothing has changed since — not reopened, tasks naming '+uid+' drop it')
+                dropped_duplicates[uid] = original
+                continue
             reopened[original] = uid
             noted.append('unknown '+uid+': the map holds this reading as '+original+' [resolved]; reopened '+original+
                          ' to be measured again — tasks naming '+uid+' route on '+original)
@@ -931,11 +965,14 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         if not listed and item.get('unknown'):
             listed = [item.get('unknown')]
         alias = {new: orig for orig, new in reopened.items()}
-        ids = [alias.get(str(u), str(u)) for u in (listed or [])]
+        ids = [alias.get(str(u), str(u)) for u in (listed or []) if str(u) not in dropped_duplicates]
         if not ID_PATTERN.match(tid):
             refusals.append('task '+repr(tid)+': id must match ^[a-z][a-z0-9_]*$'); continue
         if tid in existing_tasks or any(t['id'] == tid for t in tasks):
             noted.append('task '+tid+': already on the route'); continue
+        if listed and not ids:
+            noted.append('task '+tid+': every reading it names is already on the map and current ('
+                         +', '.join(dropped_duplicates[str(u)] for u in listed if str(u) in dropped_duplicates)+'); not routed'); continue
         if not ids or len(set(ids)) != len(ids):
             refusals.append('task '+tid+': list the unknowns it resolves (one or more, no repeats)'); continue
         stale_ids = {k['id'] for k in observation['knowns'] if k.get('stale')}

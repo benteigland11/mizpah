@@ -295,3 +295,30 @@ def test_a_continued_task_opens_its_unknown_on_the_adopted_map(gym: Path) -> Non
     assert again == first
     sessions = gym/layout.dirname(gym)/'map'/'sessions'
     assert (sessions/first/'unknowns'/'piece_mid_retaken.json').exists() and not (sessions/'t_retake_piece').exists()
+
+
+def test_a_reading_newer_than_its_artifact_is_not_reopened_for_a_duplicate(gym: Path) -> None:
+    """The reopen-on-duplicate rule is for a repaired artifact. When the known's last run postdates every file
+    the cited entry names, the reading is current: the duplicate is dropped and a task naming only it is not
+    routed (changing-meter reopened a known re-taken minutes earlier, right after the re-take landed)."""
+    (gym/'piece.mid').write_bytes(b'MThd')
+    observation = controller.observe(CONFIG, gym)
+    first = dict(unknowns=[dict(id='piece_mid_valid', cites='deliverable:1', type='boolean', source='piece.mid',
+                                claim='piece.mid is a standard MIDI file with program 0', evidence_needed='parse')],
+                 tasks=[dict(id='validate_piece', unknowns=['piece_mid_valid'], bucket='low', title='validate')])
+    accepted, refusals = controller.guard(first, observation, gym)
+    assert not refusals, refusals
+    controller.apply(CONFIG, gym, accepted)
+    terra(gym, 'route', 'cancel', 'validate_piece', '--reason', 'done by hand in the test')
+    path = gym/'.terra'/'map'/'unknowns'/'piece_mid_valid.json'
+    doc = json.loads(path.read_text()); doc['status'] = 'resolved'; path.write_text(json.dumps(doc))
+    observation = controller.observe(CONFIG, gym)
+    observation['knowns'].append(dict(id='piece_mid_valid', type='boolean', rate=1.0,
+                                      stats=dict(by_run=[dict(run_id='20990101T000000Z_piece_mid_valid_probe_abc123')])))
+    again = dict(unknowns=[dict(id='piece_mid_valid_again', cites='deliverable:1', type='boolean', source='piece.mid',
+                                claim='piece.mid is a standard MIDI file with program 0', evidence_needed='parse again')],
+                 tasks=[dict(id='revalidate_piece', unknowns=['piece_mid_valid_again'], bucket='low', title='again')])
+    accepted, refusals = controller.guard(again, observation, gym)
+    assert not refusals, refusals
+    assert accepted['unknowns'] == [] and accepted['reopen'] == [] and accepted['tasks'] == []
+    assert json.loads(path.read_text())['status'] == 'resolved'
