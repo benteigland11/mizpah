@@ -106,3 +106,19 @@ def _write_measure_probe(tmp_path: Path, probe_id: str, *, quantity: str, value:
         "    }\n",
         encoding="utf-8",
     )
+
+
+def test_a_determined_quantity_stops_climbing_by_runs():
+    # Two identical runs: determined. Med from one instrument, never high without a second method;
+    # and the ladder's reason says so instead of asking for more of the same.
+    from terra.number_type import can_claim_confidence, is_determined
+
+    stats = {"kind": "boolean", "n": 2, "rate": 1.0, "distinct_sample_signatures": 1, "duplicate_sample_runs": 1,
+             "corroboration": {"methods": 1, "agree": None}}
+    assert is_determined(stats)
+    ok, why = can_claim_confidence(stats, "med", map_type="boolean")
+    assert ok
+    ok, why = can_claim_confidence(stats, "high", map_type="boolean")
+    assert not ok and "determined quantity" in why and "second probe" in why
+    varied = dict(stats, distinct_sample_signatures=2, duplicate_sample_runs=0)
+    assert not is_determined(varied)

@@ -1378,12 +1378,18 @@ def ladder_unknown(
     resolved = rec.get("resolved_by") or ""
     if resolved.startswith("known:"):
         known = load_known(project_root, resolved.split(":", 1)[1])
+    from .number_type import is_determined
+
     runs = 0
     while True:
         stats = (known or rec).get("stats") or {}
         ok, why = can_claim_confidence(stats, confidence, map_type=(known or rec).get("type"))
         if ok and known is not None:
             break
+        if known is not None and is_determined(stats):
+            # The runs have shown their kind: identical readings, so the quantity is determined and another
+            # run is the same reading again. The ladder stops here; the next rung is a second method.
+            raise ValueError(f"determined after {runs} run(s) and the ladder says: {why}")
         if runs >= max_runs:
             raise ValueError(f"{max_runs} runs taken and the ladder still says: {why}")
         stamp = run_probe(project_root, probe_id, to=to if to is not None else {"kind": "default"})

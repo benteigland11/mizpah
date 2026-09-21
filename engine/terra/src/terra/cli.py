@@ -2626,7 +2626,7 @@ def cmd_known_ladder(args: argparse.Namespace) -> int:
         root = require_project_root()
         to = json.loads(args.to) if args.to else None
         result = ladder_unknown(root, args.unknown_id, probe_id=args.probe, to=to,
-                                confidence=args.confidence, adopt=not args.no_adopt)
+                                confidence=args.confidence, adopt=not args.no_adopt, max_runs=args.max_runs)
     except (ValueError, FileExistsError, FileNotFoundError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
@@ -4830,6 +4830,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_kld.add_argument("--to", default=None, help="Run target JSON (default {\"kind\": \"default\"})")
     p_kld.add_argument("--confidence", default="med", choices=sorted(CONFIDENCE_SET))
     p_kld.add_argument("--no-adopt", action="store_true", help="Stop after promote; do not adopt upward")
+    p_kld.add_argument("--max-runs", type=int, default=6,
+                       help="Give up after this many runs if the evidence has not met the bar (the value will not "
+                            "settle). A determined quantity — identical readings — stops the ladder on its own.")
     p_kld.set_defaults(func=cmd_known_ladder)
 
     p_kst = kn_sub.add_parser("status", help="Set known status")

@@ -234,8 +234,28 @@ def derive_confidence_label(stats: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def is_determined(stats: dict[str, Any]) -> bool:
+    """Every run so far read the same value, byte for byte, and there are at least two of them: the
+    quantity is determined by its source, and another run of the same probe is the same reading again.
+    (``distinct_sample_signatures`` is computed on every recompute; upstream reported it and left ``n``
+    alone. The fork acts on it: see ``derive_confidence``.)"""
+    n = int(stats.get("n") or 0)
+    distinct = stats.get("distinct_sample_signatures")
+    return n >= 2 and distinct == 1
+
+
 def derive_confidence(stats: dict[str, Any], map_type: str | None = None) -> str:
     kind = map_type or stats.get("kind") or "number"
+    if kind in ("number", "boolean", "label") and is_determined(stats):
+        # A determined quantity earns nothing from repetition: identical runs are one reading written
+        # again, so two of them are as good as twenty and the ladder need not climb by n. One method's
+        # reading is med, the ceiling one instrument can reach; high is corroboration — a second probe
+        # by a different method reading the same fact — as it is for every kind.
+        from .corroboration import corroboration_gate_high, methods_disagree
+
+        if methods_disagree(stats):
+            return "low"
+        return "high" if corroboration_gate_high(stats)[0] else "med"
     if kind == "boolean":
         return derive_confidence_boolean(stats)
     if kind == "label":
@@ -275,6 +295,15 @@ def can_claim_confidence(
 
     from .corroboration import corroboration_gate_high, methods_disagree
 
+    if kind in ("number", "boolean", "label") and is_determined(stats):
+        ok_corr, why = corroboration_gate_high(stats)
+        return (
+            False,
+            f"cannot claim confidence={want!r}: a determined quantity (every run of the probe read the same "
+            f"value, n={stats.get('n')}) — repetition adds nothing above med; corroborate it with a second "
+            f"probe by a different method reading the same fact and link that run "
+            f"(`terra known link-run <id> <run>`)" + ("" if ok_corr else f"; {why}"),
+        )
     if methods_disagree(stats):
         corr = stats.get("corroboration") or {}
         return (
