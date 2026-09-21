@@ -9,3 +9,4 @@ diverged: the same ask is one change request — `same_ask` compares patches (bu
 diverged: `terra brief set --crew JSON` — the models the brief is issued to run on are recorded on it (`issued_crew`, {role: {provider, model, effort}}) with the signature, and never rewritten, 2026-09-20
 diverged: brief `environment` — the gym environment the project runs in, by name (`brief set --environment piano`, empty clears); the host resolves the name to a saved environment and binds it into every task
 diverged: budget proposals are deltas — `brief propose --budget-delta ±N` (patch `budget_delta`, `was_budget_points` as asked, `budget_before` as applied); accept adds the delta to the budget as it stands, never writes a number over it; pre-delta `budget_points` patches still apply as written
+diverged: `route complete` refuses while a Playbook walk under .playbook/open/ has an unticked step (route_walks_open; TERRA_WALKS_DIR overrides the folder)

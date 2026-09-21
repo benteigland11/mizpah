@@ -1034,6 +1034,23 @@ def cmd_route_heartbeat(args: argparse.Namespace) -> int:
     return emit(success(t, meta={"surface": "terra.route.heartbeat"}))
 
 
+def _unfinished_walks(root: Path) -> list[tuple[str, int]]:
+    """Playbook walks under the project with unticked steps: (file name, count). Empty when there is no
+    .playbook/open/ (a project without Playbook) — Terra knows the checklist shape, nothing more."""
+    folder = Path(os.environ.get("TERRA_WALKS_DIR") or (root / ".playbook" / "open"))
+    if not folder.is_dir():
+        return []
+    out: list[tuple[str, int]] = []
+    for path in sorted(folder.glob("*.md")):
+        try:
+            n = sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.startswith("- [ ] "))
+        except OSError:
+            continue
+        if n:
+            out.append((path.name, n))
+    return out
+
+
 def cmd_route_complete(args: argparse.Namespace) -> int:
     from .agent_io import emit, error, success
     from .route import _get_task, complete_task, load_route
@@ -1041,6 +1058,22 @@ def cmd_route_complete(args: argparse.Namespace) -> int:
     try:
         root = require_project_root()
         task = _get_task(load_route(root), args.id)
+        open_walks = _unfinished_walks(root)
+        if open_walks:
+            # A procedure walk is the method's own checklist (Playbook keeps them under .playbook/open/ in the
+            # working tree). A task completed with one still open is a claim whose method was never followed:
+            # the boxes are the evidence that each step was done against this artifact, and a worker that had
+            # already completed the route answered the host's "tick the walks" with `done` three times over.
+            return emit(
+                error(
+                    "route task completes only when the procedure walks it opened are closed: "
+                    + "; ".join(f"{name} ({n} unticked)" for name, n in open_walks)
+                    + " — do each step against the artifact and `playbook tick <walk> --done N`, or "
+                    "`--skip N --because \"...\"` one step at a time, then complete",
+                    code="route_walks_open",
+                    meta={"walks": [dict(walk=name, unticked=n) for name, n in open_walks]},
+                )
+            )
         gate_meta: dict[str, Any] = {}
         if "deliverable" in (task.get("skill"), task.get("role")):
             from .gate import check_gate

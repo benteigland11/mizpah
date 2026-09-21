@@ -1054,24 +1054,13 @@ def open_walks(snapshot: bytes) -> list[str]:
     return walks
 
 
-NESTING_LIMIT = 3   # walks open at once: the third says the unknown is several unknowns
-
-
 def open_checklists(snapshot: bytes) -> list[str]:
-    """Every procedure the worker opened is a commitment: each step ticked `[x]` (done) or `[-]` (not needed)
-    before the gate can be green. Checklists live under .playbook/open/ in the workspace, one per walk.
-
-    Depth is bounded at the map, not the window: with NESTING_LIMIT walks open at once, the task is told that
-    the unknown it holds is several unknowns and to block naming the readings the inner walks would produce;
-    the eval mints them, each one procedure deep, and this task resumes with them as inputs."""
+    """Every procedure the worker opened is a commitment: each step ticked `[x]` (done) or `[-]` (not needed,
+    with its reason) before the gate can be green. Checklists live under .playbook/open/ in the workspace, one
+    per walk. Several open at once is the normal shape of a procedure whose steps link other procedures (the
+    voicing procedure opens pedal, phrase shaping, ritardando and validation); the old "three open means the
+    unknown is several unknowns" line told a worker with four linked walks to block the task."""
     problems: list[str] = []
-    walks = open_walks(snapshot)
-    if len(walks) >= NESTING_LIMIT:
-        problems.append(str(len(walks))+' procedure walks are open at once ('+'; '.join(w.split(':')[0].rsplit('/', 1)[-1] for w in walks)
-                        +'): a walk nested this deep means the unknown is several unknowns. Finish the innermost if it is '
-                        'one or two steps from done; otherwise `terra route block` this task naming the readings the inner '
-                        'walks would produce as unknowns of their own — the route mints them, they are measured one '
-                        'procedure deep, and this task resumes with them on the map')
     for name, data in sorted(_members(snapshot).items()):
         if not name.startswith(PLAYBOOK_PREFIX+'/open/') or not name.endswith('.md'):
             continue
@@ -1903,7 +1892,8 @@ COMMAND_TOOLS: tuple[dict[str, Any], ...] = (
                                                         confidence=string('bar to reach', default='med', flag='--confidence')),
                          required=['unknown_id'])),
     dict(name='terra_route_complete', description='Close the task once every unknown it carries is adopted: cite one '
-         'run id and every known id. Refused while a known is missing.',
+         'run id and every known id. Refused while a known is missing, and refused while a procedure walk you opened '
+         'still has an unticked step — the walks are the method, closed before the claim.',
          command='terra route complete {task} --run {run} {knowns}',
          parameters=dict(type='object', properties=dict(task=string('task id'), run=string('a run id of this task'),
                                                         knowns=dict(type='array', items=dict(type='string'), flag='--known',

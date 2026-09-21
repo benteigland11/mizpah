@@ -791,3 +791,21 @@ def test_link_run_on_a_resolved_unknown_forwards_to_the_known(project: Path, mon
     assert payload["data"]["stats"]["n"] == 2
     assert second in load_known(project, "s_wing")["run_ids"]
     assert second not in (load_unknown(project, "s_wing").get("run_ids") or [])
+
+
+def test_route_complete_refuses_while_a_procedure_walk_is_open(project: Path) -> None:
+    """A Playbook walk under .playbook/open/ with unticked boxes is a method not yet followed: the task does
+    not complete on top of it. A worker that had completed the route answered "tick the walks" with `done`
+    three times; the refusal belongs where the claim is made. No .playbook/ → no opinion."""
+    _run(project, "route", "add", "t", "--title", "T", "--bucket", "low")
+    walks = project / ".playbook" / "open"
+    walks.mkdir(parents=True)
+    (walks / "midi-pedal--the-piece.md").write_text("# Pedal\n\n- [x] **1. Find**\n\n- [ ] **2. Place**\n\n- [ ] **3. Check**\n")
+    r = _run(project, "route", "complete", "t", "--evidence", "x")
+    assert r.returncode == 1
+    payload = json.loads(r.stdout)
+    assert payload["error"]["code"] == "route_walks_open" and "midi-pedal--the-piece.md (2 unticked)" in payload["error"]["message"]
+    (walks / "midi-pedal--the-piece.md").write_text("# Pedal\n\n- [x] **1. Find**\n\n- [-] **2. Place**\n\n  not needed here: no pedal part\n\n- [x] **3. Check**\n")
+    r = _run(project, "route", "complete", "t", "--evidence", "x")
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout)["data"]["status"] == "done"
