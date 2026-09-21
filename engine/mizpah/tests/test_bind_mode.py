@@ -223,3 +223,33 @@ def test_the_assignment_carries_the_brief_entries_an_unknown_cites():
     dangling = dict(unknown, notes='cites need:9')
     assert cited_entries(brief, dangling) == []
     assert 'what the brief asks for' not in render_assignment(dict(id='b', bucket='low', title='t'), [unknown], 't')
+
+
+def test_a_continued_session_takes_the_project_state_again(tmp_path: Path) -> None:
+    """A session adopted onto a new task carries the route as of its first task; the host routed the new task
+    since. Its .mizpah is replaced from the live project; the worker's own state dirs stay."""
+    from cg.bp_focused_agent_session_python.src.focused_agent_session import FocusedSession, workspace_files
+    config = worker.load_config(ROOT/'config.luna.json')
+    config['mizpah']['sandbox'] = dict(config['mizpah']['sandbox'], workspace='bind', cache_dirs=[], services=None, network=None,
+                                       share_network=False)
+    config['shell']['limits'] = dict(config['shell']['limits'], workspace_bytes=4*1024**2, max_files=2000)
+    project = tmp_path/'proj'
+    (project/'.mizpah'/'map').mkdir(parents=True)
+    (project/'.mizpah'/'route.json').write_text('{"tasks": [{"id": "first"}]}')
+    (project/'.tool-output').mkdir()
+    (project/'.tool-output'/'last.stdout').write_text('kept')
+    root = tmp_path/'sess'
+    root.mkdir()
+    model, _, shell = worker.bindings(config, root, 'm1', checkins=False, project=project)
+    settings = worker.build_settings(config, 'assignment', 'reference', [])
+    session = FocusedSession.create(root/'s', settings, worker=model, shell=shell, controller=None,
+                                    initial_workspace=worker.pack_workspace(project, only=worker.state_dirs(project)))
+    (project/'.mizpah'/'route.json').write_text('{"tasks": [{"id": "first"}, {"id": "second"}]}')
+    (project/'.mizpah'/'map'/'note.json').write_text('{}')
+    session.replace_state('.mizpah', worker._members(worker.pack_workspace(project, only=('.mizpah',))))
+    state = session.workspace().state
+    assert workspace_files(state, byte_limit=10**8, file_limit=10**5) == ('.mizpah/map/note.json', '.mizpah/route.json', '.tool-output/last.stdout')
+    assert b'second' in worker._members(state)['.mizpah/route.json'] and worker._members(state)['.tool-output/last.stdout'] == b'kept'
+    result = shell.run('cat /work/.mizpah/route.json', session.workspace())
+    assert result.status == 'ok' and 'second' in result.stdout, (result.status, result.stderr)
+    shell.close()

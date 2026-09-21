@@ -2199,6 +2199,13 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             if status_now['phase'] == 'worker' and status_now['pending_io'] is None:
                 session.interject(note, label='resumed: done tool added')
         if continued:
+            if bind_mode(config):
+                # The adopted session's project state is the route and map as of its first task; the host has
+                # routed this task since. Its `.mizpah` is taken again from the live project (the worker's own
+                # state, its playbook walks, stays) — a continued worker completing against the old route was
+                # told "task not found".
+                session.replace_state(layout.dirname(project),
+                                      _members(pack_workspace(project, store, only=(layout.dirname(project),))))
             # The worker's next objective, as an assignment would put it, on top of what it already holds.
             try:
                 brief = json.loads((project/layout.dirname(project)/'brief.json').read_text())

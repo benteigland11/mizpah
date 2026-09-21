@@ -8,10 +8,12 @@ from dataclasses import asdict, dataclass, replace
 import fcntl
 import fnmatch
 import hashlib
+import io
 import json
 import os
 from types import SimpleNamespace
 import shlex
+import tarfile
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -1611,6 +1613,44 @@ class FocusedSession:
             if len(self.session.messages) > len(self.session.base_messages)+1 and not self.state.get('rollover_requested'):
                 self.state['rollover_requested'] = dict(reason='generation_block_reset', name='worker', count=0)
             self._event('generation_block_reset', record)
+            self._save()
+            return record
+
+    def replace_state(self, prefix: str, members: dict[str, bytes]) -> dict[str, Any]:
+        """Replace one state directory in the saved workspace with `members` (names relative to the workspace
+        root, all under `prefix`), keeping the rest as it is. Bind mode only; refused mid-operation.
+
+        A session continued onto another task (adopted under a new root) carries the state tree it was
+        created with — the project's route and map as they were when its first task began. The host wrote
+        newer tasks to the live project since, and the worker's `terra route complete <new task>` inside the
+        sandbox answered "task not found": it was completing against a route that never had the task."""
+        with self._locked():
+            if self.store.read()['revision'] != self.revision:
+                raise RuntimeError('Session changed; reopen before replacing state')
+            if self.state['pending_io'] is not None:
+                raise ValueError('Replace state only at a resolved boundary')
+            if self._directory() is None:
+                raise ValueError('State directories exist in bind mode only')
+            prefix = prefix.strip('/')+'/'
+            current = self.workspace().state
+            kept: dict[str, bytes] = {}
+            if current:
+                with tarfile.open(fileobj=io.BytesIO(current), mode='r:') as archive:
+                    for member in archive:
+                        if member.isfile() and not member.name.startswith(prefix):
+                            kept[member.name] = archive.extractfile(member).read()
+            for name in members:
+                if not name.startswith(prefix):
+                    raise ValueError('member outside the replaced state directory: '+name)
+            buffer = io.BytesIO()
+            with tarfile.open(fileobj=buffer, mode='w:') as archive:
+                for name, data in sorted((kept | members).items()):
+                    info = tarfile.TarInfo(name)
+                    info.size = len(data)
+                    archive.addfile(info, io.BytesIO(data))
+            self.state['workspace'] = self._put_workspace(buffer.getvalue())
+            record = dict(prefix=prefix, replaced=len(members), kept=len(kept))
+            self._event('state_replaced', record)
             self._save()
             return record
 
