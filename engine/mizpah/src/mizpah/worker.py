@@ -809,7 +809,7 @@ def _harvest_widgets(snapshot: bytes, root: Path, config: dict[str, Any], projec
     import shutil
     import subprocess as sp
     import tempfile
-    result: dict[str, list[Any]] = dict(checked_in=[], rejected=[], unchanged=[], conflicts=[])
+    result: dict[str, list[Any]] = dict(checked_in=[], rejected=[], unchanged=[], conflicts=[], merged=[])
     files = _members(snapshot)
     library = Path(config['mizpah']['widget_library'])
     for directory in widgets_touched(root):
@@ -837,17 +837,35 @@ def _harvest_widgets(snapshot: bytes, root: Path, config: dict[str, Any], projec
                 shipped_version = None
             base_version = meta.get('version')
             if shipped_version and base_version and shipped_version != base_version:
-                # The base moved under this session: someone else's improvement is in the library. Stage it for a
-                # merge instead of overwriting it.
-                conflict = dict(id=widget_id, dir=directory, base=base_version, library=shipped_version,
-                                changes=_library_changes(shipped, base_version), diff=_widget_diff(shipped, members, prefix))
-                if project is not None:
-                    staged = project/'cg'/directory/UPSTREAM
-                    if staged.exists():
-                        shutil.rmtree(staged)
-                    shutil.copytree(shipped, staged, ignore=shutil.ignore_patterns('history', '__pycache__', '.venv'))
-                result['conflicts'].append(conflict)
-                continue
+                # The base moved under this session: someone else's improvement is in the library. Merge onto it
+                # three-way per file (base = the version this session started from, kept under history/; theirs =
+                # the library now; yours = the workspace). Hunks that do not overlap — a function added here, a
+                # test there, which is what parallel gyms mostly do — merge with no worker turn; a real overlap
+                # goes to the worker with the markers in the file. Seventeen improvements were dropped tonight
+                # because the merge was a prose diff for the worker to redo by hand.
+                base_dir = shipped/'history'/str(base_version)
+                merged, clashes = _merge_widget(base_dir, shipped, members, prefix)
+                if merged is not None and not clashes:
+                    members = merged
+                    result.setdefault('merged', []).append(widget_id)
+                else:
+                    conflict = dict(id=widget_id, dir=directory, base=base_version, library=shipped_version,
+                                    changes=_library_changes(shipped, base_version), diff=_widget_diff(shipped, members, prefix),
+                                    clashes=clashes)
+                    if project is not None:
+                        staged = project/'cg'/directory/UPSTREAM
+                        if staged.exists():
+                            shutil.rmtree(staged)
+                        shutil.copytree(shipped, staged, ignore=shutil.ignore_patterns('history', '__pycache__', '.venv'))
+                        if merged is not None:
+                            # The merged files with conflict markers where both sides changed the same lines: the
+                            # worker resolves the markers rather than re-applying its work from a diff.
+                            for name, data in merged.items():
+                                if name[len(prefix):] in clashes:
+                                    (project/name).parent.mkdir(parents=True, exist_ok=True)
+                                    (project/name).write_bytes(data)
+                    result['conflicts'].append(conflict)
+                    continue
         with tempfile.TemporaryDirectory(prefix='mizpah-widget-') as temp:
             target = Path(temp)/'cg'/directory
             for name, data in members.items():
@@ -868,6 +886,56 @@ def _harvest_widgets(snapshot: bytes, root: Path, config: dict[str, Any], projec
             else:
                 result['rejected'].append(widget_id+': checkin: '+(done.stdout or done.stderr).strip()[:300])
     return result
+
+
+def _merge_widget(base_dir: Path, shipped: Path, members: dict[str, bytes], prefix: str) -> tuple[dict[str, bytes] | None, list[str]]:
+    """Three-way merge of a widget's files: (merged members, files with an unresolved overlap). None when there
+    is no base to merge from (the library keeps no history of that version). Files only one side touched take
+    that side; `git merge-file` merges the rest and leaves markers where both changed the same lines. Metadata
+    (widget.json, changelog.json) is theirs: the check-in bumps the version."""
+    import subprocess
+    import tempfile
+    if not base_dir.is_dir():
+        return None, []
+    skip = ('changelog.json', 'widget.json', 'library_notes')
+    names = {n[len(prefix):] for n in members} | {str(p.relative_to(shipped)) for p in shipped.rglob('*')
+                                                   if p.is_file() and 'history' not in p.parts and '__pycache__' not in p.parts and '.venv' not in p.parts}
+    merged: dict[str, bytes] = {}
+    clashes: list[str] = []
+    for name in sorted(names):
+        if name.startswith(skip) or name.split('/')[0] in skip:
+            if (shipped/name).exists():
+                merged[prefix+name] = (shipped/name).read_bytes()
+            continue
+        base = (base_dir/name).read_bytes() if (base_dir/name).exists() else None
+        theirs = (shipped/name).read_bytes() if (shipped/name).exists() else None
+        mine = members.get(prefix+name)
+        if mine == theirs:
+            if mine is not None:
+                merged[prefix+name] = mine
+            continue
+        if theirs == base:                 # only you changed it (or added/removed it)
+            if mine is not None:
+                merged[prefix+name] = mine
+            continue
+        if mine == base:                   # only they changed it
+            if theirs is not None:
+                merged[prefix+name] = theirs
+            continue
+        if base is None or theirs is None or mine is None:
+            # Both sides added the same new file, or one removed what the other changed: no base to merge on.
+            clashes.append(name)
+            merged[prefix+name] = mine if mine is not None else theirs
+            continue
+        with tempfile.TemporaryDirectory(prefix='mizpah-merge-') as temp:
+            t = Path(temp)
+            (t/'mine').write_bytes(mine); (t/'base').write_bytes(base); (t/'theirs').write_bytes(theirs)
+            done = subprocess.run(['git', 'merge-file', '-p', '-L', 'yours', '-L', 'base', '-L', 'library',
+                                   str(t/'mine'), str(t/'base'), str(t/'theirs')], capture_output=True)
+            merged[prefix+name] = done.stdout
+            if done.returncode != 0:       # the number of conflicts, or negative on error
+                clashes.append(name)
+    return merged, clashes
 
 
 def _library_changes(shipped: Path, since: str) -> list[str]:
@@ -909,6 +977,10 @@ def merge_message(conflicts: list[dict[str, Any]]) -> str:
     for c in conflicts:
         lines.append('- `'+c['id']+'` (cg/'+c['dir']+'): you started from '+str(c['base'])+', the library is at '+str(c['library'])
                      +('; since then: '+'; '.join(c['changes']) if c['changes'] else '')+'.')
+        if c.get('clashes'):
+            lines.append('  Merged three-way already, except these files where you and they changed the same lines — they '
+                         'now hold conflict markers (`<<<<<<< yours` … `=======` … `>>>>>>> library`): '+', '.join(c['clashes'])
+                         +'. Resolve each marker keeping both intentions, delete the markers.')
         lines.append('  Their copy is at `cg/'+c['dir']+'/'+UPSTREAM+'/` (read it; it is the base you must land on). '
                      'The diff from their copy to yours:')
         lines.append('```\n'+(c['diff'] or '(no difference under src/ or tests/)')+'\n```')
@@ -2223,8 +2295,8 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             again_p = harvest_playbook(evidence(session), store, config,
                                        allowed=tuple(procedures_used(root)+procedures_created(root)),
                                        base=root/PLAYBOOK_BASE, workspace_store=workspace_procedures(config, project))
-            for key in ('checked_in', 'unchanged'):
-                widgets[key] = sorted(set(widgets[key]) | set(again_w[key]))
+            for key in ('checked_in', 'unchanged', 'merged'):
+                widgets[key] = sorted(set(widgets.get(key) or []) | set(again_w.get(key) or []))
             widgets['rejected'] = list(again_w['rejected'])
             for key in ('installed', 'created', 'improved', 'ignored', 'merged'):
                 playbook[key] = sorted(set(playbook.get(key) or []) | set(again_p.get(key) or []))

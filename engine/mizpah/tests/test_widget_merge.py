@@ -78,3 +78,40 @@ def test_a_moved_base_is_staged_for_merge_not_overwritten(tmp_path: Path, monkey
     merged['cg-junk'] = ''
     again = worker.harvest_widgets(_snapshot({k: v for k, v in merged.items() if k != 'cg-junk'}), root, config, project)
     assert again['conflicts'] == [] and again['rejected'] and 'validate' not in again['checked_in']
+
+
+def test_a_moved_base_merges_three_way_when_the_library_keeps_the_base(tmp_path: Path) -> None:
+    """With the version the session started from under history/, files merge three-way: hunks that do not
+    overlap (their new function, your documented one) land with no worker round; the same lines changed by
+    both go to the worker with markers in the file."""
+    library = tmp_path/'library'
+    shipped = library/WIDGET
+    base_body = 'def f(x):\n    return x+1\n'
+    for name, text in _widget_files('1.0.1', base_body+'\ndef g(x):\n    return x*2   # their improvement\n').items():
+        (shipped/name).parent.mkdir(parents=True, exist_ok=True)
+        (shipped/name).write_text(text)
+    for name, text in _widget_files('1.0.0', base_body).items():
+        (shipped/'history'/'1.0.0'/name).parent.mkdir(parents=True, exist_ok=True)
+        (shipped/'history'/'1.0.0'/name).write_text(text)
+    (shipped/'changelog.json').write_text(json.dumps([dict(version='1.0.1', reason='other task added g', timestamp='t2'),
+                                                       dict(version='1.0.0', reason='created', timestamp='t1')]))
+    config = dict(mizpah=dict(widget_library=str(library), cartograph='/bin/false'))
+    root = tmp_path/'sess'/'tasks'/'t1'
+    _journal(root)
+    project = tmp_path/'project'
+    (project/'cg'/DIR).mkdir(parents=True)
+    # Non-overlapping: you documented f at the top; they added g below. Merges clean → validate (refused here by /bin/false).
+    mine = _widget_files('1.0.0', '"""thing: documented"""\n'+base_body)
+    result = worker.harvest_widgets(_snapshot(mine), root, config, project)
+    assert result['conflicts'] == [] and result['merged'] == [WIDGET] and result['rejected']
+    # Overlapping: both rewrote f's return line differently → a conflict with markers in the workspace file.
+    theirs = _widget_files('1.0.1', 'def f(x):\n    return x+2   # theirs\n')
+    for name, text in theirs.items():
+        (shipped/name).write_text(text)
+    mine = _widget_files('1.0.0', 'def f(x):\n    return x+3   # mine\n')
+    result = worker.harvest_widgets(_snapshot(mine), root, config, project)
+    [conflict] = result['conflicts']
+    assert conflict['clashes'] == ['src/thing.py'] and result['merged'] == []
+    text = (project/'cg'/DIR/'src'/'thing.py').read_text()
+    assert '<<<<<<< yours' in text and '>>>>>>> library' in text and 'x+3   # mine' in text and 'x+2   # theirs' in text
+    assert 'conflict markers' in worker.merge_message(result['conflicts'])
