@@ -53,13 +53,11 @@ The words every seat in this loop uses, with one meaning each. A term below is u
 - **Instrument** — Items that get checked in to the library and can be reused and improved.
 - **Repo** — Existing folder on user's device that a task is performed in to make permanent changes.
 - **Gym** — A sandboxed, pre-configured environment a task is performed in to get better at something. Its deliverables are practice; only what reaches the library transfers.
-- **Controller** — owns brief, unknowns, route. Never uses the playbook; never sees the worker's transcript; never instructs the worker.
-- **Worker** — owns procedures, widgets, probes, knowns, map writes. Works one work order in a sandbox with `bash`, `read`, `write`, `edit` and the tools' commands.
-- **Reviewer** — the controller's look over the worker's shoulder at a completion claim: are the probes honest — does the reading come from the named source, and would a wrong artifact fail it. It never judges execution, order, or turns.
-- **Correction** — the reviewer's one instruction to the worker: the delta — what the files show is missing and what to keep — never a restated requirement, a tool, a method or a source by name. Held until the reviewer looks again; withdrawn when the files no longer show it.
-- **Claim** — the worker's `done` after `terra route complete` succeeded. The reviewer's look happens here.
-- **Turn** — one worker model call and the tool results it caused. Turns are cost, not score.
+- **Controller** — Mediator between requestor and workers. Role is to take in briefs and break them down to be successful based on previous tasks, library components, and setting up the map.
+- **Worker** — Performs the Work Orders in the environment it's given and is responsible for work being done.
+- **Reviewer** — Controllers arm to double check probes used to prove green are done truthfully and honestly without gaming.
+- **Correction** — An instruction handed down by the reviewer to communicate the faults of probes.
 - **Handoff** — the memory the worker writes for the next window when its context rolls over: what is established, what is unfinished, where to continue.
 - **Workspace** — the worker's tree under `/work`: the project, its `.mizpah` state, its playbook walks, its `cg/`.
 - **Sandbox** — where every command runs: the workspace bound in, the base read-only, no network beyond the allowed hosts, the toolchain and the engine invisible.
-- **Estimate** — the bucket's turns; past it the worker is asked whether to continue, and decides.
+- **Estimate** — the effort a work order is expected to take, set by its bucket; past it the worker is asked whether to continue, and decides.
