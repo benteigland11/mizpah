@@ -14,6 +14,7 @@ network; ``urllib_http`` is the stdlib default for real use.
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -104,6 +105,9 @@ HttpCall = Callable[[str, str, Mapping[str, str], bytes | None, float], HttpResp
 """``http(method, url, headers, body, timeout_seconds) -> HttpResponse``."""
 
 
+_LAST_TYPE = re.compile(rb'"type":\s*"(response\.[a-z_.]+)"')
+
+
 def urllib_http(maximum_response_bytes: int = DEFAULT_MAXIMUM_RESPONSE_BYTES) -> HttpCall:
     """The stdlib ``HttpCall``: single attempt, bounded read, non-2xx returned not raised."""
 
@@ -120,8 +124,12 @@ def urllib_http(maximum_response_bytes: int = DEFAULT_MAXIMUM_RESPONSE_BYTES) ->
             chunks: list[bytes] = []
             total = 0
             last_event = ""
+            # read1, not read: on a chunked stream read(n) blocks until n bytes have come, so a 64 KB
+            # read returned the whole reply at once and progress was one event at the end (the probe
+            # call, 2026-09-21: 15 KB in one read after 1.4 s). read1 returns what has arrived.
+            read = getattr(response, "read1", None) or response.read
             while True:
-                chunk = response.read(65536)
+                chunk = read(65536)
                 if not chunk:
                     break
                 chunks.append(chunk)
@@ -129,9 +137,15 @@ def urllib_http(maximum_response_bytes: int = DEFAULT_MAXIMUM_RESPONSE_BYTES) ->
                 if total > maximum_response_bytes:
                     raise OSError("response exceeded the configured byte limit")
                 if progress is not None:
+                    # The event's name: the `event:` line, or the `"type"` inside `data:` when the
+                    # stream carries data lines only. Enough to say thinking from writing.
                     i = chunk.rfind(b"event: ")
                     if i >= 0:
                         last_event = chunk[i + 7:chunk.find(b"\n", i) if chunk.find(b"\n", i) > 0 else None].decode("utf-8", "replace").strip()
+                    else:
+                        m = _LAST_TYPE.findall(chunk)
+                        if m:
+                            last_event = m[-1].decode("utf-8", "replace")
                     try:
                         progress(total, last_event)
                     except Exception:  # noqa: BLE001 — progress is a courtesy, never the call
