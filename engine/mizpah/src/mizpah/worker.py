@@ -2205,7 +2205,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
                 # state, its playbook walks, stays) — a continued worker completing against the old route was
                 # told "task not found".
                 session.replace_state(layout.dirname(project),
-                                      _members(pack_workspace(project, store, only=(layout.dirname(project),))))
+                                      _members(pack_workspace(project, only=(layout.dirname(project),))))
             # The worker's next objective, as an assignment would put it, on top of what it already holds.
             try:
                 brief = json.loads((project/layout.dirname(project)/'brief.json').read_text())
