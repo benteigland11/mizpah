@@ -47,6 +47,47 @@ def test_brief_init_and_propose_accept(tmp_path: Path, monkeypatch):
     assert "stall_kt formula holds" in rec2["needs"]
 
 
+def test_issuing_locks_the_crew_on_the_brief(tmp_path: Path, monkeypatch):
+    from terra.brief import set_brief_fields
+    monkeypatch.chdir(tmp_path)
+    init_brief(tmp_path, title="Piece", mission="m")
+    set_brief_fields(tmp_path, status="draft")
+    crew = {"worker": {"provider": "openai_chatgpt", "model": "gpt-5.6-luna", "effort": "high"},
+            "controller": {"provider": "xai_grok", "model": "grok-4.6", "effort": None}}
+    rec = set_brief_fields(tmp_path, status="active", signed_by="Ben, Administrator", crew=crew)
+    assert rec["issued_crew"] == crew and rec["issued_by"] == "Ben, Administrator"
+    # Not rewritten by a later set: it is what was signed.
+    rec = set_brief_fields(tmp_path, status="active", crew={"worker": {"model": "other"}})
+    assert rec["issued_crew"] == crew
+
+
+def test_the_same_ask_is_decided_once(tmp_path: Path, monkeypatch):
+    """Four budget asks at the same number are one change request: accepting one folds the rest; a reworded
+    need is the same ask; a different number or a different key is not."""
+    from terra.brief import reject_proposal, same_ask
+    monkeypatch.chdir(tmp_path)
+    init_brief(tmp_path, title="Piece", mission="m")
+    a = propose_change(tmp_path, summary="six more points: readings", budget_points=72)
+    b = propose_change(tmp_path, summary="six more points: the live checks", budget_points=72)
+    c = propose_change(tmp_path, summary="nine more", budget_points=75)
+    assert b["same_as"] == a["id"] and "same_as" not in a and "same_as" not in c
+    rec = accept_proposal(tmp_path, b["id"], reason="fine", signed_by="Ben, Administrator")
+    by_id = {p["id"]: p for p in rec["proposals"]}
+    assert by_id[a["id"]]["status"] == "accepted" and by_id[a["id"]]["decided_with"] == b["id"]
+    assert by_id[a["id"]]["decision_reason"] == "decided with " + b["id"] + ": fine"
+    assert by_id[a["id"]]["signed_by"] == "Ben, Administrator"
+    assert by_id[c["id"]]["status"] == "open"
+    assert rec["budget_points"] == 72 and rec["version"] == 2   # applied once
+    n1 = propose_change(tmp_path, summary="x", need="The two outstanding phrase-structure readings run against the current artifacts.")
+    n2 = propose_change(tmp_path, summary="y", need="The two outstanding phrase-structure readings must run against the current artifacts")
+    n3 = propose_change(tmp_path, summary="z", need="A tempo map with rubato.")
+    assert same_ask(n1, n2) and not same_ask(n1, n3)
+    rec = reject_proposal(tmp_path, n1["id"], reason="no")
+    by_id = {p["id"]: p for p in rec["proposals"]}
+    assert by_id[n2["id"]]["status"] == "rejected" and by_id[n3["id"]]["status"] == "open"
+    assert by_id[c["id"]]["status"] == "open"
+
+
 def test_route_deps_and_next(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     init_brief(tmp_path, title="Demo", mission="m")
@@ -355,3 +396,15 @@ def test_replacing_needs_with_fewer_renumbers_like_a_removal(tmp_path: Path, mon
     assert notes == "cites need:2"
     set_brief_fields(tmp_path, needs=["a", "c sharper"], replace_lists=True)
     assert load_brief(tmp_path)["phases"][0]["needs"] == [1, 2]
+
+
+def test_brief_names_its_environment(tmp_path: Path) -> None:
+    """A brief names the gym environment it runs in; the host resolves the name. Empty clears it."""
+    from terra.brief import init_brief, load_brief, set_brief_fields, brief_summary
+    init_brief(tmp_path, title="Counting a bar", mission="count")
+    assert load_brief(tmp_path)["environment"] == ""
+    set_brief_fields(tmp_path, environment="piano")
+    assert load_brief(tmp_path)["environment"] == "piano"
+    assert brief_summary(load_brief(tmp_path))["environment"] == "piano"
+    set_brief_fields(tmp_path, environment="")
+    assert load_brief(tmp_path)["environment"] == ""

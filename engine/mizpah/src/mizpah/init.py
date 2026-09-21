@@ -48,8 +48,42 @@ def default_config(cache_dirs: tuple[str, ...] = DEFAULT_CACHE_DIRS) -> dict[str
     )
 
 
+def crew_label(spec: dict[str, Any]) -> dict[str, Any]:
+    """A role spec as the person reads it: provider (the subscription's name, or the transport for a local
+    server), model, effort."""
+    generation = spec.get('generation') or {}
+    return dict(provider=spec.get('subscription') or spec.get('provider'), model=generation.get('model'),
+                effort=generation.get('reasoning_effort'))
+
+
+def pin_crew(project: Path, engine_config: Path, roles: tuple[str, ...] = ('worker', 'controller')) -> dict[str, dict[str, Any]]:
+    """Lock the crew in: every role the project has no choice of its own for gets the user's current harness
+    spec copied into `.mizpah/config.json` (`models.<role>`), so the run uses what the brief was signed on
+    whatever the defaults become later. A choice the task already made stays. Returns the crew as labels."""
+    import copy
+    engine = json.loads(Path(engine_config).read_text())
+    harness = json.loads((Path(engine_config).parent/engine['harness_config']).read_text())
+    project = Path(project).resolve()
+    pc = project_config(project) or default_config()
+    models = pc.setdefault('models', {})
+    changed = False
+    for role in roles:
+        if role not in models and isinstance(harness.get(role), dict):
+            models[role] = copy.deepcopy(harness[role])
+            changed = True
+    if changed:
+        path = layout.state(project)/'config.json'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(pc, indent=1)+'\n')
+    return {role: crew_label(models[role]) for role in roles if isinstance(models.get(role), dict)}
+
+
 def gyms_root() -> Path:
-    """Where projects that belong to no repository live: training gyms, drills, a brief tried on scratch."""
+    """Where projects that belong to no repository live: training gyms, drills, a brief tried on scratch, and
+    the drafts the Deputy writes. `MIZPAH_GYMS` when set (the Deputy's sandbox sets it to /work)."""
+    env = os.environ.get('MIZPAH_GYMS')
+    if env:
+        return Path(env)
     if resolve_app_paths is not None:
         base = resolve_app_paths('mizpah').data_dir/'gyms'
     else:
@@ -77,12 +111,13 @@ def register_project(project: Path, title: str, *, gym: bool) -> None:
         pass  # a registry that cannot be written never stops an init
 
 
-def new_gym(title: str) -> Path:
-    """A fresh git-initialised folder under the gyms root, named for the brief. The project is ordinary from
-    here: same `.mizpah/`, same loop, same record; it just has no code of the person's around it."""
+def new_gym(title: str, name: str | None = None) -> Path:
+    """A fresh git-initialised folder under the gyms root, named for the brief (with a stamp) or as given. The
+    project is ordinary from here: same `.mizpah/`, same loop, same record; it just has no code of the person's
+    around it."""
     slug = layout._slug(title)
     stamp = __import__('time').strftime('%Y%m%dT%H%M%SZ', __import__('time').gmtime())
-    folder = gyms_root()/(slug+'-'+stamp)
+    folder = gyms_root()/(name or slug+'-'+stamp)
     folder.mkdir(parents=True)
     subprocess.run(['git', 'init', '-q'], cwd=folder, check=True)
     (folder/'README.md').write_text('# '+title+'\n\nA Mizpah gym: a project with no repository of its own.\n')
@@ -182,6 +217,17 @@ if __name__ == '__main__':
     main()
 
 
+def project_environment(project: Path) -> str:
+    """The gym environment the brief names (`environment`), or '' — the brief is the authority; `base` in the
+    project config is the older place and only counts when the brief names nothing. Three practice gyms
+    started bare (no mido, no synth) because the app's signature path never set a base: the brief now says."""
+    try:
+        brief = json.loads((project/layout.STATE_DIRNAME/'brief.json').read_text())
+    except (OSError, ValueError):
+        return ''
+    return str(brief.get('environment') or '').strip()
+
+
 def apply_project_config(config: dict[str, Any], project: Path) -> dict[str, Any]:
     """Layer the project's `.mizpah/config.json` over the loaded user config: the sandbox keys a project may
     own (workspace mode, cache dirs, network, extra binds), and — when the task chose its own — the model
@@ -193,9 +239,10 @@ def apply_project_config(config: dict[str, Any], project: Path) -> dict[str, Any
     picked = {k: v for k, v in layer.items() if k in allowed}
     if picked:
         config['mizpah']['sandbox'] = dict(config['mizpah'].get('sandbox') or {}, **picked)
-    if pc.get('base'):
+    environment = project_environment(project) or pc.get('base')
+    if environment:
         from . import bases
-        bases.apply(config, str(pc['base']))   # the environment the gym runs on: bound read-only, env set
+        bases.apply(config, str(environment))   # the environment the gym runs in: bound read-only, env set
     for role in ('worker', 'controller'):
         spec = (pc.get('models') or {}).get(role)
         if isinstance(spec, dict) and spec:

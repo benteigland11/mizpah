@@ -107,3 +107,35 @@ def test_the_sandbox_sees_the_base_read_only_with_its_venv_first(data_home: Path
         assert (project/'here.txt').read_text() == 'mine\n' and not (folder/'x').exists()
     finally:
         shell.close()
+
+
+def test_the_brief_names_the_environment_and_the_host_resolves_it(data_home: Path, tmp_path: Path) -> None:
+    """The brief is the authority for the gym environment; `base` in the project config only counts when the
+    brief names nothing. A draft refuses a name that is not saved; so does authorize."""
+    from mizpah import draft
+    bases.create('piano', note='a piano studio')
+    project = tmp_path/'gym'
+    (project/'.mizpah').mkdir(parents=True)
+    (project/'.mizpah'/'brief.json').write_text(json.dumps(dict(title='t', status='draft', environment='piano')))
+    config = {'mizpah': {'sandbox': {'read_only_binds': [], 'environment': {}}}}
+    init_module.apply_project_config(config, project)
+    assert config['mizpah']['base']['name'] == 'piano'
+    assert init_module.project_environment(project) == 'piano'
+    # The brief wins over an older project-config base.
+    init_module.set_base(project, 'piano')
+    bases.create('other', note='other')
+    (project/'.mizpah'/'brief.json').write_text(json.dumps(dict(title='t', status='draft', environment='other')))
+    config = {'mizpah': {'sandbox': {'read_only_binds': [], 'environment': {}}}}
+    init_module.apply_project_config(config, project)
+    assert config['mizpah']['base']['name'] == 'other'
+    # A brief that names nothing falls back to the project config; one naming an unknown environment is refused.
+    (project/'.mizpah'/'brief.json').write_text(json.dumps(dict(title='t', status='draft', environment='')))
+    config = {'mizpah': {'sandbox': {'read_only_binds': [], 'environment': {}}}}
+    init_module.apply_project_config(config, project)
+    assert config['mizpah']['base']['name'] == 'piano'
+    assert draft.environment_exists('piano') and not draft.environment_exists('orchestra')
+    assert [e['name'] for e in draft.environments()] == ['other', 'piano']
+    (project/'.mizpah'/'brief.json').write_text(json.dumps(dict(title='t', status='draft', environment='orchestra')))
+    with pytest.raises(SystemExit) as stop:
+        draft.authorize(project)
+    assert 'orchestra' in str(stop.value) and 'no saved environment' in str(stop.value)

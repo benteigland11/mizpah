@@ -397,6 +397,7 @@ def cmd_brief_set(args: argparse.Namespace) -> int:
             budget_points=getattr(args, "budget_points", None),
             clear_budget_points=bool(getattr(args, "clear_budget_points", False)),
             budget_notes=getattr(args, "budget_notes", None),
+            environment=getattr(args, "environment", None),
             needs=args.needs,
             non_goals=args.non_goals,
             deliverables=args.deliverables,
@@ -404,6 +405,7 @@ def cmd_brief_set(args: argparse.Namespace) -> int:
             replace_lists=bool(args.replace_lists),
             signed_by=getattr(args, "signed_by", "") or "",
             signature=getattr(args, "signature", "") or "",
+            crew=json.loads(args.crew) if getattr(args, "crew", None) else None,
         )
     except (FileNotFoundError, ValueError, OSError) as e:
         return emit(error(str(e), code="brief_set"))
@@ -4875,6 +4877,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Clear budget_points (set to null)",
     )
     p_bset.add_argument(
+        "--environment",
+        default=None,
+        help="The gym environment this project runs in, by name (empty string clears it)",
+    )
+    p_bset.add_argument(
         "--budget-notes",
         default=None,
         dest="budget_notes",
@@ -4882,6 +4889,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_bset.add_argument("--signed-by", default="", dest="signed_by", help="Who signed the issue (status active); kept on the document")
     p_bset.add_argument("--signature", default="", help="Where the signer's mark was filed (a path under the state dir); kept beside --signed-by")
+    p_bset.add_argument("--crew", default="", help='JSON {role: {provider, model, effort}}: the models the brief is issued to run on; kept on the document (issued_crew)')
     p_bset.set_defaults(func=cmd_brief_set)
 
     p_bph = br_sub.add_parser("phase", help="Add a phase name to the brief")

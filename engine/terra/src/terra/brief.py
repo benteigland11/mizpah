@@ -52,6 +52,9 @@ def default_brief(
         # Total effort budget for the program (same unit as route task points: 3/8/21 buckets)
         "budget_points": None,
         "budget_notes": "",
+        # The gym environment the project runs in, by name (a saved environment the host binds into every
+        # task: its toolchain, its packages, its env). Empty: none. The brief names it; the host resolves it.
+        "environment": "",
         "needs": [],
         "non_goals": [],
         "deliverables": [],
@@ -93,6 +96,8 @@ def validate_brief(data: Any) -> list[str]:
     if "budget_notes" in data and data["budget_notes"] is not None:
         if not isinstance(data["budget_notes"], str):
             blocks.append("budget_notes must be a string")
+    if "environment" in data and data["environment"] is not None and not isinstance(data["environment"], str):
+        blocks.append("environment must be a string (the gym environment's name) or empty")
     for key in ("needs", "non_goals", "deliverables", "proposals", "enablers"):
         if key in data and data[key] is not None and not isinstance(data[key], list):
             blocks.append(f"{key} must be a list")
@@ -192,6 +197,8 @@ def load_brief(project_root: Path) -> dict[str, Any]:
         data["budget_points"] = None
     if "budget_notes" not in data:
         data["budget_notes"] = ""
+    if "environment" not in data:
+        data["environment"] = ""
     blocks = validate_brief(data)
     if blocks:
         raise ValueError("invalid brief:\n  - " + "\n  - ".join(blocks))
@@ -251,6 +258,7 @@ def set_brief_fields(
     budget_points: int | None = None,
     clear_budget_points: bool = False,
     budget_notes: str | None = None,
+    environment: str | None = None,
     needs: list[str] | None = None,
     non_goals: list[str] | None = None,
     deliverables: list[str] | None = None,
@@ -258,13 +266,16 @@ def set_brief_fields(
     replace_lists: bool = False,
     signed_by: str = "",
     signature: str = "",
+    crew: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Direct field updates (human / lead agent). Bumps version.
 
     ``signed_by`` is the person issuing the brief; it is recorded on the brief itself
     (``issued_by`` / ``issued_at``) the moment the status becomes active, so the
     document carries its own signature rather than whoever happens to be configured
-    when it is read later."""
+    when it is read later. ``crew`` — ``{role: {provider, model, effort}}`` — is
+    recorded the same way (``issued_crew``): the models the brief was signed to run on,
+    locked in with the signature."""
     rec = load_brief(project_root)
     if title is not None:
         rec["title"] = title.strip()
@@ -279,6 +290,8 @@ def set_brief_fields(
                 rec["issued_by"] = signed_by.strip()
             if signature.strip():
                 rec["issued_signature"] = signature.strip()
+            if crew:
+                rec["issued_crew"] = {str(k): dict(v) for k, v in crew.items() if isinstance(v, dict)}
         rec["status"] = status
     if clear_budget_points:
         rec["budget_points"] = None
@@ -290,6 +303,8 @@ def set_brief_fields(
         rec["budget_points"] = budget_points
     if budget_notes is not None:
         rec["budget_notes"] = budget_notes.strip()
+    if environment is not None:
+        rec["environment"] = environment.strip()   # empty clears it
     for key, vals in (
         ("needs", needs),
         ("non_goals", non_goals),
@@ -496,6 +511,73 @@ def _next_proposal_id(proposals: list[dict[str, Any]]) -> str:
     return f"CR-{n:03d}"
 
 
+def _words(text: Any) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", str(text or "").lower()))
+
+
+def _same_text(a: Any, b: Any, threshold: float = 0.75) -> bool:
+    """Two entries ask the same thing when they read the same once case, punctuation and spacing are ignored,
+    or when their word sets overlap enough (Jaccard) — a controller reworks a need's phrasing each time it asks
+    for it again ("the two remaining readings" / "the two outstanding readings")."""
+    wa, wb = _words(a), _words(b)
+    if not wa or not wb:
+        return wa == wb
+    if wa == wb:
+        return True
+    return len(wa & wb) / len(wa | wb) >= threshold
+
+
+def same_ask(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    """Whether two proposals ask for the same change to the brief, whatever their summaries say. Keys must
+    match (the ask is the patch as a whole); a budget is the same at the same number, an edit or removal at the
+    same index (and the same new text), an added entry or a mission when the text is the same as above. A
+    note-only proposal is the same as another when the notes read the same."""
+    pa, pb = a.get("patch") or {}, b.get("patch") or {}
+    keys = {k for k in pa if not k.startswith("was_") and not k.startswith("removed_")}
+    if keys != {k for k in pb if not k.startswith("was_") and not k.startswith("removed_")}:
+        return False
+    if not keys:
+        return False
+    for key in keys:
+        va, vb = pa[key], pb[key]
+        if key == "budget_points":
+            if int(va) != int(vb):
+                return False
+        elif key.startswith("remove_"):
+            if int(va) != int(vb):
+                return False
+        elif key.startswith("edit_"):
+            if int(va.get("index", -1)) != int(vb.get("index", -2)) or not _same_text(va.get("text"), vb.get("text")):
+                return False
+        elif key == "add_enabler":
+            if (va or {}).get("id") != (vb or {}).get("id"):
+                return False
+        elif not _same_text(va, vb):
+            return False
+    return True
+
+
+def same_open_asks(proposals: list[dict[str, Any]], proposal: dict[str, Any]) -> list[dict[str, Any]]:
+    """The other open proposals that ask what this one asks: decided together, as one change request."""
+    return [p for p in proposals if p is not proposal and p.get("status") == "open" and same_ask(p, proposal)]
+
+
+def _fold(others: list[dict[str, Any]], head: dict[str, Any], status: str, reason: str, signed_by: str, signature: str) -> None:
+    """The same ask, decided once: the others take the head's decision and say so. Their patches are not
+    applied again (an edit or removal by index would double), and the record keeps them as what they were —
+    the fourth time the controller asked for the same thing."""
+    for p in others:
+        p["status"] = status
+        p[status + "_at"] = head[status + "_at"]
+        p["decided_at"] = head["decided_at"]
+        p["decided_with"] = head["id"]
+        p["decision_reason"] = ("decided with " + head["id"] + (": " + reason.strip() if reason.strip() else ""))
+        if signed_by.strip():
+            p["signed_by"] = signed_by.strip()
+        if signature.strip():
+            p["signature"] = signature.strip()
+
+
 def propose_change(
     project_root: Path,
     *,
@@ -556,6 +638,11 @@ def propose_change(
         patch["was_budget_points"] = rec.get("budget_points")
     if not patch:
         patch["note"] = summary.strip()
+    # The same ask again (open or already decided): the record says so, and the app shows the open ones as one
+    # change request, decided together.
+    same = [p for p in proposals if same_ask(p, prop)]
+    if same:
+        prop["same_as"] = same[-1]["id"]
     proposals.append(prop)
     rec["proposals"] = proposals
     # propose does not bump brief version until accept
@@ -678,6 +765,7 @@ def accept_proposal(
         found["signed_by"] = signed_by.strip()
     if signature.strip():
         found["signature"] = signature.strip()
+    _fold(same_open_asks(proposals, found), found, "accepted", reason, signed_by, signature)
     rec["proposals"] = proposals
     rec["version"] = int(rec.get("version") or 1) + 1
     save_brief(project_root, rec)
@@ -702,6 +790,7 @@ def reject_proposal(
                 p["signed_by"] = signed_by.strip()
             if signature.strip():
                 p["signature"] = signature.strip()
+            _fold(same_open_asks(proposals, p), p, "rejected", reason, signed_by, signature)
             rec["proposals"] = proposals
             save_brief(project_root, rec)
             return load_brief(project_root)
@@ -721,6 +810,7 @@ def brief_summary(rec: dict[str, Any]) -> dict[str, Any]:
         "mission": rec.get("mission"),
         "budget_points": rec.get("budget_points"),
         "budget_notes": rec.get("budget_notes") or "",
+        "environment": rec.get("environment") or "",
         "needs": rec.get("needs") or [],
         "non_goals": rec.get("non_goals") or [],
         "deliverables": rec.get("deliverables") or [],
