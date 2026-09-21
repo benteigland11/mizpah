@@ -24,6 +24,7 @@ tempo variation, hand spans, the final chord. It is the curve's ruler, kept besi
 from __future__ import annotations
 
 import json
+from typing import Any
 import os
 from pathlib import Path
 import subprocess
@@ -62,7 +63,7 @@ def gym(title: str, mission: str, needs: list[str], deliverables: list[str], bud
         non_goals: list[str] = ()) -> Path:
     folder = init_module.new_gym(title)
     init_module.init(folder, title=title, mission=mission, terra=str(TERRA), base=BASE)
-    args = ['brief', 'set', '--status', 'active', '--budget-points', str(budget)]
+    args = ['brief', 'set', '--budget-points', str(budget)]   # a draft until `issue()` makes it active with its crew
     for need in needs:
         args += ['--need', need]
     for d in deliverables:
@@ -202,7 +203,9 @@ def benchmark_attempt(attempt: int) -> Path:
     init_module.init(folder, title=pinned['title'], mission=pinned['mission'], terra=str(TERRA), base=BASE)
     fresh = json.loads((folder/'.mizpah'/'brief.json').read_text())
     keep = {k: pinned[k] for k in pinned if k not in ('created_at', 'updated_at', 'history', 'proposals')}
-    (folder/'.mizpah'/'brief.json').write_text(json.dumps(dict(fresh, **keep, proposals=[]), indent=1)+'\n')
+    # Written as a draft: `issue()` makes it active, and Terra records the crew and the signature on that
+    # transition (a brief copied in already active was issued with no crew on it).
+    (folder/'.mizpah'/'brief.json').write_text(json.dumps({**fresh, **keep, 'proposals': [], 'status': 'draft'}, indent=1)+'\n')
     mark_benchmark(folder)
     return folder
 
@@ -275,16 +278,41 @@ def score(project: Path) -> dict:
                 rendered=dict(mp3=(project/'piece.mp3').exists(), wav=(project/'piece.wav').exists(), pdf=(project/'piece.pdf').exists()))
 
 
+def issue(folder: Path, engine_config: Path | None, signed_by: str = '') -> dict[str, Any]:
+    """What the app does when the person starts a brief: the crew is pinned in the project config from the
+    engine config's harness (`init.pin_crew`) and recorded on the brief with the signature (`issued_crew`),
+    so the paper says what it was signed to run on. A gym made here without it ran unsigned and crewless."""
+    crew: dict[str, Any] = {}
+    if engine_config is not None:
+        crew = init_module.pin_crew(folder, Path(engine_config).resolve())
+    args = ['brief', 'set', '--status', 'active']
+    if crew:
+        args += ['--crew', json.dumps(crew)]
+    if signed_by.strip():
+        args += ['--signed-by', signed_by.strip()]
+    terra(folder, *args)
+    return crew
+
+
 def main() -> None:
-    if len(sys.argv) >= 3 and sys.argv[1] == 'make' and sys.argv[2] == 'benchmark' and PINNED.exists():
-        attempt = int(sys.argv[3]) if len(sys.argv) > 3 else 2
+    args = list(sys.argv[1:])
+    config = None
+    signed_by = ''
+    if '--config' in args:
+        i = args.index('--config'); config = Path(args[i+1]); del args[i:i+2]
+    if '--signed-by' in args:
+        i = args.index('--signed-by'); signed_by = args[i+1]; del args[i:i+2]
+    if len(args) >= 2 and args[0] == 'make' and args[1] == 'benchmark' and PINNED.exists():
+        attempt = int(args[2]) if len(args) > 2 else 2
         folder = benchmark_attempt(attempt)
-        print(json.dumps(dict(project=str(folder), base=BASE, attempt=attempt, pinned=str(PINNED)), indent=1))
-    elif len(sys.argv) >= 3 and sys.argv[1] == 'make':
-        folder = MAKERS[sys.argv[2]]()
-        print(json.dumps(dict(project=str(folder), base=BASE), indent=1))
-    elif len(sys.argv) >= 3 and sys.argv[1] == 'score':
-        print(json.dumps(score(Path(sys.argv[2]).resolve()), indent=1))
+        crew = issue(folder, config, signed_by)
+        print(json.dumps(dict(project=str(folder), base=BASE, attempt=attempt, pinned=str(PINNED), crew=crew), indent=1))
+    elif len(args) >= 2 and args[0] == 'make':
+        folder = MAKERS[args[1]]()
+        crew = issue(folder, config, signed_by)
+        print(json.dumps(dict(project=str(folder), base=BASE, crew=crew), indent=1))
+    elif len(args) >= 2 and args[0] == 'score':
+        print(json.dumps(score(Path(args[1]).resolve()), indent=1))
     else:
         raise SystemExit(__doc__)
 
