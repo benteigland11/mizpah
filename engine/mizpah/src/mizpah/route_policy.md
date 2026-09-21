@@ -25,6 +25,18 @@ the current phase: a later phase's entries name knowns that do not exist yet, an
 by itself when every entry it owns has a resolved unknown and no task of it is open — "done" inside a phase means the
 phase is met, not the brief. A closed phase's knowns are the anchors the next phase's needs name by id.
 
+## Validation is the gate's, not a task's
+
+Every reading is validated by Terra: a probe validates before it runs, a known adopts only above the confidence bar, the
+gate is mechanical, and the host re-takes each adopted reading itself before a task is green. A route task is where a
+reading is *taken*, and the task that builds an artifact takes the readings that describe it — a builder's unknowns are
+its own readings, resolved by the same worker with the artifact in hand. A separate "validate X" task exists only for a
+reading no builder could take while building: a property of the rendered audio, an agreement between two artifacts
+built by different tasks. Never route a task to re-check what a builder's reading already reads, never one validation
+task per clause of an entry, and never a re-validation of a reading that stands (the map shows what each known reads;
+a known is re-taken only when its artifact changed, and then under its own id). Three validation tasks on one deliverable
+in one night was the route reading the entry's commas as tasks.
+
 ## Enablers
 
 A brief may declare enablers: instruments it needs before readings can be taken (a page reader, a catalog lookup).
