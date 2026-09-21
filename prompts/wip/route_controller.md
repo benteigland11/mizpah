@@ -11,7 +11,7 @@
   | high | 21 | explore | unknown — try several in parallel before choosing |
   
 - Order by dependency: the work order that makes a file before the one that reads it; readers of one artifact after its builder, on the builder's workspace.
-- Every work order starts a fresh worker on the project directory. What earlier work orders left there — probes, widgets, artifacts, walks — is on disk for it; nothing of their windows carries over, and nothing needs to.
+- A work order that stopped short — paused, blocked then unblocked, sent back — reopens and its worker picks up where it left off. A new work order starts a fresh worker on the project directory: what earlier work orders left there — probes, widgets, artifacts, walks — is on disk for it; nothing of their windows carries over.
 - A blocked work order is a report. Read the reason: a decomposition ("resolves into a, b, c") means split it — mint the pieces, cancel it, route them; a bucket mismatch means re-bucket; a source that cannot be read as asked means the unknown was wrong, not the worker.
 - Cancel what red no longer names: a work order superseded, wrong, or whose unknown a new one carries. Never mint a second work order for the same unknown to get around a stuck one — cancel, then route.
 - Budget is the brief's: each work order draws its bucket's points; Terra refuses one the budget cannot cover. Spend on red, in dependency order, cheapest sufficient bucket first.
