@@ -404,3 +404,27 @@ def test_a_linked_step_ticks_only_after_its_procedure_is_walked(tmp_path: Path, 
     capsys.readouterr()
     assert main(["tick", parent, "--done", "1", "2", "--dir", str(tmp_path)]) == 0
     assert json.loads(capsys.readouterr().out)["unticked"] == []
+
+
+def test_a_link_that_leads_back_is_refused_and_reported(tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """A step links a narrower procedure it runs, never one that runs this one — through any number of others.
+    The music library grew 266 such circles (validation linked voicing linked validation) and a worker holding
+    both walks open could tick neither."""
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    for pid in ("compose", "validate", "pedal"):
+        assert main(["create", pid, "--title", pid, "--description", "d", "--tags", "midi"]) == 0
+    assert main(["add-step", "compose", "--title", "Validate", "--do", "x", "--procedure", "validate"]) == 0
+    assert main(["add-step", "validate", "--title", "Pedal", "--do", "x", "--procedure", "pedal"]) == 0
+    capsys.readouterr()
+    assert main(["add-step", "pedal", "--title", "Back", "--do", "x", "--procedure", "compose"]) == 1
+    out = capsys.readouterr().out
+    assert "would make a circle" in out and "pedal -> compose -> validate -> pedal" in out
+    assert main(["edit-step", "validate", "--title", "Pedal", "--procedure", "compose"]) == 1
+    capsys.readouterr()
+    # A circle written by hand (a library from before the rule) is reported by validate.
+    import json as _json
+    path = tmp_path/"playbook"/"procedures"/"pedal.json"
+    doc = _json.loads(path.read_text()); doc["steps"].append(dict(id="s9", title="Back", do="x", procedure="compose")); path.write_text(_json.dumps(doc))
+    assert main(["validate", "pedal"]) == 2
+    reply = _json.loads(capsys.readouterr().out)
+    assert not reply["valid"] and any("links a circle" in e["message"] for e in reply["errors"])

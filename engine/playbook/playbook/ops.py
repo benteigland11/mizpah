@@ -257,15 +257,49 @@ def _append_steps(
     return updated
 
 
+def _link_path(start: str, target: str) -> list[str] | None:
+    """The chain of links from `start` that reaches `target` (start first, target last), or None. Links are the
+    `procedure` fields of steps, followed through the store."""
+    seen: set[str] = set()
+    stack: list[list[str]] = [[start]]
+    while stack:
+        path = stack.pop()
+        current = path[-1]
+        if current in seen:
+            continue
+        seen.add(current)
+        try:
+            document = read_document(store.procedure_path(current))
+        except (OSError, ValueError):
+            continue
+        for step in document.get("steps") or []:
+            linked = str(step.get("procedure") or "") if isinstance(step, dict) else ""
+            if not linked:
+                continue
+            if linked == target:
+                return path + [linked]
+            if linked not in seen:
+                stack.append(path + [linked])
+    return None
+
+
 def _require_procedure(procedure_id: str, owner: str = "") -> None:
-    """A linked step must point at a procedure that exists and is another one: a dangling link is a step nobody
-    can walk, and a self-link is a loop (a step that says "run this procedure" from inside it — drone-pack-sizing-probe
-    linked six of its own steps to itself, 2026-09-19). "See step N" is prose in `do`, not a link."""
+    """A linked step must point at a procedure that exists, is another one, and does not lead back here: a
+    dangling link is a step nobody can walk; a self-link is a loop (drone-pack-sizing-probe linked six of its own
+    steps to itself, 2026-09-19); a link whose procedure links back — through any number of others — is a walk
+    that can never close (the music library grew 266 such cycles: validation linked voicing linked validation, and
+    a worker holding both walks open could tick neither). "See step N" is prose in `do`, not a link."""
     if owner and procedure_id == owner:
         raise ValueError(f"a step may not link to its own procedure {procedure_id!r}; a link runs another procedure "
                          "as this step — refer to another step of this one in the step's text instead")
     if not store.procedure_path(procedure_id).is_file():
         raise ValueError(f"linked procedure {procedure_id!r} does not exist; search for its id or create it first")
+    if owner:
+        back = _link_path(procedure_id, owner)
+        if back:
+            raise ValueError(f"linking {procedure_id!r} would make a circle: " + " -> ".join([owner] + back)
+                             + " — a step links a narrower procedure it runs, never one that runs this one; "
+                             "say what to do in the step's text instead")
 
 
 def load_procedure(procedure_id: str, full: bool = True) -> dict[str, Any]:
@@ -353,6 +387,7 @@ def validate_procedure(procedure_id: str) -> dict[str, Any]:
     step_summaries = []
     dangling = []
     self_links = []
+    circles: list[tuple[str, str]] = []
     if isinstance(steps, list):
         for step in steps:
             if isinstance(step, dict):
@@ -362,11 +397,16 @@ def validate_procedure(procedure_id: str) -> dict[str, Any]:
                     self_links.append(str(step.get("title")))
                 elif step.get("procedure") and not store.procedure_path(str(step["procedure"])).is_file():
                     dangling.append(str(step["procedure"]))
+                elif step.get("procedure"):
+                    back = _link_path(str(step["procedure"]), str(document.get("id")))
+                    if back:
+                        circles.append((str(step.get("title")), " -> ".join([str(document.get("id"))] + back)))
     return {
-        "valid": result.valid and not dangling and not self_links,
+        "valid": result.valid and not dangling and not self_links and not circles,
         "errors": [{"path": err.path, "message": err.message} for err in result.errors]
         + [{"path": "$.steps", "message": f"linked procedure {d!r} does not exist"} for d in dangling]
-        + [{"path": "$.steps", "message": f"step {t!r} links to its own procedure; a link runs another procedure"} for t in self_links],
+        + [{"path": "$.steps", "message": f"step {t!r} links to its own procedure; a link runs another procedure"} for t in self_links]
+        + [{"path": "$.steps", "message": f"step {t!r} links a circle: {c}; a link runs a narrower procedure, never one that runs this one"} for t, c in circles],
         "id": document.get("id"),
         "description": document.get("description"),
         "tags": document.get("tags", []),
