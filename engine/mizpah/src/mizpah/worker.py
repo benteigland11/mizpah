@@ -2281,6 +2281,18 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
                 session.state['settings'] = asdict(session.settings)
                 session.state.setdefault('review_log', []).append(dict(turn=session.progress.turns, boundary='policy',
                                                                        operation='policy_changed', correction='resumed: current review policy', evidence=''))
+        # The worker's own policy text too: a rule added while a worker was mid-task (the probe cost rule, 2026-09-21)
+        # reached every new session and not the one it was written for. The system text changes, so the prefix
+        # cache misses once; the wire view of the turns is untouched.
+        if session.settings.worker_system != config['mizpah']['worker_policy']:
+            session.settings = replace(session.settings, worker_system=config['mizpah']['worker_policy'])
+            session.state['settings'] = asdict(session.settings)
+            # The text on the wire is the session's first message, saved with it, not read from the settings.
+            first = session.session.messages[0] if session.session.messages else None
+            if isinstance(first, dict) and first.get('role') == 'system':
+                first['content'] = config['mizpah']['worker_policy']
+            session.state.setdefault('review_log', []).append(dict(turn=session.progress.turns, boundary='policy',
+                                                                   operation='policy_changed', correction='resumed: current worker policy', evidence=''))
         # The payload bounds too: a session saved under the small-edit caps keeps rejecting whole files after the
         # config lifted them.
         bounds = {k: config.get(k) for k in ('maximum_tool_argument_characters', 'maximum_write_characters', 'maximum_edit_characters')}
