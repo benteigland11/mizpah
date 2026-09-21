@@ -662,6 +662,10 @@ def tick_walk(target: str, done: list[int] | None = None, not_needed: list[int] 
     note = str(note or "").strip()
     if not_needed and not because:
         raise ValueError("--skip needs --because: why this step does not apply to what is in front of you (one line; it goes under the step)")
+    if not_needed and _NOT_A_REASON.search(because):
+        raise ValueError("that is not a reason to skip, it is the step you did not do: a skip says what about this artifact makes "
+                         "the step not apply (\"solo piano, no SATB\"; \"no pedal part in this piece\"). A step that is already done is "
+                         "ticked --done with what it found; a step the probe covers is done by reading the probe's value into the note")
     if done and not note:
         raise ValueError("--done needs --note: what the step found or changed, one line with the value or the file (it goes under "
                          "the step, and the reviewer reads it against the artifact) — a box without what it found is a box")
@@ -711,6 +715,11 @@ def tick_walk(target: str, done: list[int] | None = None, not_needed: list[int] 
     return result
 
 
+# Skip reasons that say the step was done elsewhere: a worker skipped fifty steps of a walk with these, one per
+# turn, on a piece whose every pedal hold crossed a harmony — the "covered" step was the check it never made.
+_NOT_A_REASON = re.compile(r"\b(already|covered|superseded|redundant|measured (separately|by|earlier|during)|recorded (for|by|separately)|"
+                           r"performed (separately|earlier)|handled (by|elsewhere)|probe (already|covers|measured)|done (earlier|already|separately)|"
+                           r"inspected (earlier|during|separately)|validated (earlier|separately|during))\b", re.I)
 TICK_AT_ONCE = 6   # steps one tick call may close: several that closed together, never a walk at once
 REVEAL = 1         # steps whose text is open at once: the one you are on; the next opens when it is ticked
 FLAT_LIMIT = 50   # steps in one walk: past this the method is several work orders, and the route carries the rest
