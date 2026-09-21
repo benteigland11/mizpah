@@ -244,10 +244,17 @@ def test_a_task_may_continue_a_workspace_the_loop_holds(gym: Path, tmp_path: Pat
     (root/'controller.jsonl').write_text('')
     spaces = controller.task_workspaces(root)
     assert spaces == [dict(task='build_piece_mid', unknowns=['piece_mid_built'], verdict='complete', turns=30, probes=[],
-                           walks=['midi-piano-voicing-melody'], widgets=['data_music_x_python'])]
+                           walks=['midi-piano-voicing-melody'], widgets=['data_music_x_python'], walks_open=[])]
     observation = controller.observe(CONFIG, gym) | dict(workspaces=spaces)
     text = controller.render_observation(observation, 'route')
     assert 'Worker workspaces this loop holds' in text and 'walked: midi-piano-voicing-melody' in text
+    (old/'result.json').write_text(json.dumps(dict(verdict='blocked_by_worker', turns=30,
+        walks_open=[dict(procedure='midi-pedal-per-harmony', file='.playbook/open/midi-pedal-per-harmony--x.md', steps=4, unticked=4, next='Apply separated sustain')])))
+    spaces = controller.task_workspaces(root)
+    assert spaces[0]['walks_open'] == [dict(procedure='midi-pedal-per-harmony', unticked=4, next='Apply separated sustain')]
+    text = controller.render_observation(observation | dict(workspaces=spaces), 'route')
+    assert 'walks left open: midi-pedal-per-harmony (4 unticked' in text and 'one walk per work order' in text
+    (old/'result.json').write_text(json.dumps(dict(verdict='complete', turns=30)))
     decision = dict(unknowns=[dict(id='piece_mid_built', cites='deliverable:1', type='boolean', claim='`piece.mid` exists and parses',
                                    evidence_needed='parse it'),
                               dict(id='piece_mid_parses', cites='deliverable:1', type='boolean', claim='`piece.mid` parses with mido',

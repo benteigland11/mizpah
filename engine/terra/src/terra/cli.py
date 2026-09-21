@@ -1069,7 +1069,9 @@ def cmd_route_complete(args: argparse.Namespace) -> int:
                     "route task completes only when the procedure walks it opened are closed: "
                     + "; ".join(f"{name} ({n} unticked)" for name, n in open_walks)
                     + " — do each step against the artifact and `playbook tick <walk> --done N`, or "
-                    "`--skip N --because \"...\"` one step at a time, then complete",
+                    "`--skip N --because \"...\"` one step at a time, then complete; when the walks left are more "
+                    "than this task can carry, `terra route block " + args.id + " --reason \"walks left: <ids>\"` "
+                    "and the route carries each as a task of its own on this workspace",
                     code="route_walks_open",
                     meta={"walks": [dict(walk=name, unticked=n) for name, n in open_walks]},
                 )

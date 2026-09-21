@@ -266,7 +266,9 @@ def task_workspaces(root: Path) -> list[dict[str, Any]]:
             pass
         out.append(dict(task=d.name, unknowns=unknowns, verdict=(result or {}).get('verdict') or 'live',
                         turns=(result or {}).get('turns'), probes=probes, walks=sorted(set(walks))[:6],
-                        widgets=sorted(set(widgets))[:6]))
+                        widgets=sorted(set(widgets))[:6],
+                        walks_open=[dict(procedure=w.get('procedure'), unticked=w.get('unticked'), next=w.get('next'))
+                                    for w in ((result or {}).get('walks_open') or [])][:8]))
     return out
 
 
@@ -454,7 +456,15 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
         for w in observation['workspaces']:
             lines.append('  '+w['task']+' ['+str(w['verdict'])+(', '+str(w['turns'])+' turns' if w.get('turns') else '')+'] → '
                          +', '.join(w['unknowns'])+(' · probes: '+', '.join(w['probes']) if w['probes'] else '')
-                         +(' · walked: '+', '.join(w['walks']) if w['walks'] else '')+(' · widgets: '+', '.join(w['widgets']) if w['widgets'] else ''))
+                         +(' · walked: '+', '.join(w['walks']) if w['walks'] else '')+(' · widgets: '+', '.join(w['widgets']) if w['widgets'] else '')
+                         +(' · walks left open: '+'; '.join(str(x['procedure'])+' ('+str(x['unticked'])+' unticked, next: '+str(x['next'])[:50]+')'
+                                                            for x in w.get('walks_open') or []) if w.get('walks_open') else ''))
+        if any(w.get('walks_open') for w in observation['workspaces']):
+            lines.append('A walk left open is method the route still owes, not a failing of that worker: a procedure whose '
+                         'steps link four others is several tasks\' work. Route each open walk as a task of its own on '
+                         'that workspace ("continue_from"), low bucket, carrying the reading the walk serves (the need it '
+                         'is about — pedal per harmony serves the pedal need), so the method is paid over the brief, one '
+                         'walk per work order; a blocked task whose reason names its open walks is asking for exactly this.')
     waiting = [t for t in observation['tasks'] if t['status'] in ('ready', 'in_progress')]
     if waiting and mode == 'eval':
         lines.append('Already routed and waiting to run: '+', '.join(t['id'] for t in waiting)+' — they cover '

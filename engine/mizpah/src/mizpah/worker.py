@@ -1054,6 +1054,21 @@ def open_walks(snapshot: bytes) -> list[str]:
     return walks
 
 
+def walks_left(snapshot: bytes) -> list[dict[str, Any]]:
+    """The open walks as records: procedure id, file, steps, unticked, next step title."""
+    out: list[dict[str, Any]] = []
+    for name, data in sorted(_members(snapshot).items()):
+        if not name.startswith(PLAYBOOK_PREFIX+'/open/') or not name.endswith('.md'):
+            continue
+        lines = [ln.strip() for ln in data.decode('utf-8', errors='replace').splitlines()]
+        steps = [ln for ln in lines if ln.startswith('- [')]
+        pending = [ln[6:].strip('* ') for ln in steps if ln.startswith('- [ ]')]
+        if pending:
+            out.append(dict(procedure=name.rsplit('/', 1)[-1].split('--', 1)[0], file=name, steps=len(steps),
+                            unticked=len(pending), next=pending[0][:100]))
+    return out
+
+
 def open_checklists(snapshot: bytes) -> list[str]:
     """Every procedure the worker opened is a commitment: each step ticked `[x]` (done) or `[-]` (not needed,
     with its reason) before the gate can be green. Checklists live under .playbook/open/ in the workspace, one
@@ -2457,6 +2472,10 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
                   # What the reviewer still doubted when its completion budget ran out: the reading stands, and the
                   # doubt goes to the controller as a candidate reading of its own rather than back to this worker.
                   reviewer_doubts=list(session.state.get('dropped_corrections') or []),
+                  # The procedure walks this worker left open, for the controller: each is method still owed on
+                  # this workspace, and a task of its own (continued here) is how the route pays it over the brief
+                  # rather than in one worker's window.
+                  walks_open=walks_left(state_of(session.workspace())),
                   checkin_document=session.project_document(), rounds=rounds, playbook=playbook, widgets=widgets,
                   usage=ops.journal_usage(root/'events'/'session.jsonl'))
     (root/'result.json').write_text(json.dumps(result, indent=1))
