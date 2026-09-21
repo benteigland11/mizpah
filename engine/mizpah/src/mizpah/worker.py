@@ -2109,6 +2109,32 @@ def run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | N
             shell.close_network()
 
 
+def install_walk_widgets(config: dict[str, Any], project: Path, walk_id: str) -> list[str]:
+    """Install the widgets a method names (its `widgets` field, across the procedures its walk inlines) into the
+    project's cg/ before the worker's first turn. Returns the ids present afterwards; a failed install is left
+    for the worker (its step says so)."""
+    import subprocess as sp
+    try:
+        out = sp.run([config['mizpah']['playbook'], 'reach', walk_id], capture_output=True, text=True, timeout=60).stdout
+        wanted = [str(w) for w in (json.loads(out[out.find('{'):]).get('widgets') or [])]
+    except (ValueError, OSError, sp.SubprocessError):
+        return []
+    env = dict(os.environ, WIDGET_LIBRARY_PATH=config['mizpah']['widget_library'])
+    present: list[str] = []
+    for wid in wanted:
+        target = project/'cg'/wid.replace('-', '_')
+        if target.is_dir():
+            present.append(wid)
+            continue
+        try:
+            done = sp.run([config['mizpah']['cartograph'], 'install', wid], cwd=project, capture_output=True, text=True, timeout=120, env=env)
+            if done.returncode == 0 and target.is_dir():
+                present.append(wid)
+        except (OSError, sp.SubprocessError):
+            continue
+    return present
+
+
 def assigned_walk(task: dict[str, Any]) -> tuple[str, int]:
     """The procedure walk the route named for this task (`walk:<id>@<from>` in its acceptance), or ('', 0)."""
     for entry in task.get('acceptance') or []:
@@ -2318,11 +2344,17 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
                            'rather than creating a near-duplicate:\n'+'\n'.join('  - '+p for p in parts)+'\n')
         walk_id, walk_from = assigned_walk(task)
         if walk_id:
-            # The route named the method: the worker opens it, flat, and does not search first.
+            # The route named the method: the worker opens it, flat, and does not search first. The method's
+            # widgets are installed under cg/ before its first turn: a widget is a dependency of the method, not
+            # a step of it (a step that said "install X" cost a tick and was satisfied by installing without using).
+            installed = install_walk_widgets(config, project, walk_id)
             assignment += ('Your method is named: open it before anything else — `playbook open '+walk_id+' --for "'+task['id']+'"'
                            +(' --from '+str(walk_from) if walk_from else '')+'` — and walk it; it is one straight list of at '
                            'most 50 steps, each naming the procedure it came from. Search the playbook only if that walk '
                            'does not fit what is in front of you, and say so when you block or complete.\n')
+            if installed:
+                assignment += ('The method\'s widgets are installed under cg/ already: '+', '.join('`'+w+'`' for w in installed)
+                               +' — call them; a step that says to install one is done when `cartograph validate cg/<dir>` passes.\n')
         else:
             methods = procedure_parts(config, task, unknowns)
             if methods:
