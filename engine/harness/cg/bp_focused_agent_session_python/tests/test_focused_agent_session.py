@@ -1654,3 +1654,20 @@ def test_rebind_with_an_empty_window_needs_no_rollover(tmp_path):
     rebound = FocusedSession.rebind(root, worker=other, shell=shell)
     assert rebound.state.get('rollover_requested') is None
     assert rebound.run()['status'] == 'complete' and rebound.status()['handoffs'] == 0
+
+
+def test_reviews_can_be_suspended_and_resumed(tmp_path):
+    """The host may switch review boundaries off for a stretch whose work the reviewer does not review (a
+    checklist to tick, the write-up after green) and on again; both are journaled."""
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, total=3, enabled=True, rollover=False)
+    settings = replace(settings, review_on_completion=True)
+    item = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, controller=controller)
+    item.suspend_reviews('the write-up')
+    assert item.run()['status'] == 'complete'
+    events = [json.loads(line) for line in (tmp_path/'session'/'events'/'session.jsonl').read_text().splitlines()]
+    assert [e['event_type'] for e in events if e['event_type'] in ('reviews_suspended', 'controller_review')] == ['reviews_suspended']
+    assert ct.inputs == []
+    item.resume_reviews()
+    again = [json.loads(line) for line in (tmp_path/'session'/'events'/'session.jsonl').read_text().splitlines()]
+    assert [e['event_type'] for e in again if e['event_type'] == 'reviews_resumed'] == ['reviews_resumed']
+    assert item.state.get('reviews_suspended') is None

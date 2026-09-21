@@ -2199,6 +2199,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             if checked:
                 gate = dict(gate, ok=False, problems=checked)
         unticked = open_checklists(evidence(session))
+        evidence_ok = gate['ok']   # the readings are in; what is left, if anything, is bookkeeping
         if unticked:
             gate = dict(gate, ok=False, problems=gate['problems']+unticked)
         previous = rounds[-1].get('problems') if rounds else None
@@ -2209,11 +2210,19 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
                            problems=gate['problems'], final_text=status['final_text']))
         if status['status'] != 'complete' or gate['ok']:
             break
-        session.continue_with(red_message(gate, project, map_id, task_unknown_ids(task)), label='gate red: repair round')
+        if evidence_ok:
+            # The readings are in and the red is checklists only: the reviewer's question (are the probes honest)
+            # has been answered; it held a worker 24 turns inside a round about seven unticked boxes.
+            session.suspend_reviews('gate red on checklists only; the readings are in')
+        else:
+            session.resume_reviews()
+        session.continue_with(red_message(gate, project, map_id, task_unknown_ids(task)),
+                              label='gate red: '+('tick the walks you opened' if evidence_ok else 'repair round'))
     budget = cap
     if gate['ok'] and budget-status['completed_worker_turns'] > 0:
         # Only after green: the method goes into the library, and only through the harvest.
         followed = procedures_used(root)
+        session.suspend_reviews('gate green: the write-up is not measurement')
         session.continue_with(green_message(gate, task_unknown_ids(task), followed, tool_fight(root),
                                             checklist_skips(evidence(session)),
                                             uncovered_by_procedures(config, followed, unknowns),

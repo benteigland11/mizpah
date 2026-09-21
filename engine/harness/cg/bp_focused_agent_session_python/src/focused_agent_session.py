@@ -827,7 +827,7 @@ class FocusedSession:
             self.session.append_image('read '+image['path']+' (image):', image['mime'], image['data'])
             self._event('image_shown', dict(path=image['path'], mime=image['mime'], bytes=len(image['data'])*3//4))
         final = self.state['proposed_final'] is not None
-        review = self.settings.reference is not None and (
+        review = self.settings.reference is not None and not self.state.get('reviews_suspended') and (
             self.progress.due() or (final and self.settings.review_on_completion))
         self.state['phase'] = 'review' if review else ('complete' if final else 'worker')
         if final and not review:
@@ -1563,6 +1563,23 @@ class FocusedSession:
             self._event('continued', dict(window=self.session.window_index, characters=len(message), label=label or ''))
             self._save()
             return self.status()
+
+    def suspend_reviews(self, reason: str) -> None:
+        """No review boundaries until `resume_reviews`: the host knows the remaining work is not what the
+        reviewer reviews (a checklist to tick, the write-up after green, a library merge), and a reviewer
+        that kept finding one more thing in a probe held a worker 24 turns inside a round that was about
+        seven unticked boxes. Recorded on the journal either way."""
+        with self._locked():
+            self.state['reviews_suspended'] = reason or 'suspended'
+            self._event('reviews_suspended', dict(reason=reason, turn=self.progress.turns))
+            self._save()
+
+    def resume_reviews(self) -> None:
+        with self._locked():
+            if self.state.get('reviews_suspended'):
+                self.state['reviews_suspended'] = None
+                self._event('reviews_resumed', dict(turn=self.progress.turns))
+                self._save()
 
     def interject(self, message: str, label: str = '') -> dict[str, Any]:
         """Hand the worker host text at a paused turn boundary, without withdrawing anything.
