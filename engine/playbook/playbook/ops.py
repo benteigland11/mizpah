@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from typing import Any, Mapping
 
-from playbook import store
+from playbook import library, store
 from playbook.bm25_ngram import Field, search as rank_search
 from playbook.widget_api import widget
 
@@ -55,9 +55,21 @@ MAX_SEARCH_LIMIT = 50
 WEAK_SEARCH_LIMIT = 3
 
 
-def search_procedures(query: str, limit: int | None = None) -> dict[str, Any]:
-    """Search the global store. Empty query lists procedures (summaries only)."""
+def search_procedures(query: str, limit: int | None = None, include_retired: bool = False) -> dict[str, Any]:
+    """Search the global store. Empty query lists procedures (summaries only).
+
+    Retired procedures (use it or lose it: see playbook.library) are left out unless asked
+    for; every procedure that appears in the result is touched as searched."""
     catalog = _load_catalog()
+    if not include_retired:
+        retired = library.retired_ids()
+        catalog = {k: v for k, v in catalog.items() if k not in retired}
+    result = _search(catalog, query, limit)
+    library.touch([h["id"] for h in result.get("hits", [])], "search")
+    return result
+
+
+def _search(catalog: dict[str, dict[str, Any]], query: str, limit: int | None) -> dict[str, Any]:
     capped = _clamp_limit(limit)
     if not query.strip():
         ordered = sorted(catalog)
@@ -204,6 +216,7 @@ def create_procedure(
     if steps:
         document = _append_steps(document, steps)
     write_document(target, document)
+    library.touch([procedure_id], "edit")
     return target
 
 
@@ -249,6 +262,7 @@ def load_procedure(procedure_id: str, full: bool = True) -> dict[str, Any]:
     """Return the whole procedure in one call. full=False gives step titles only."""
     document = read_document(store.procedure_path(procedure_id))
     _require_valid(document, procedure_id)
+    library.touch([procedure_id], "use")
     steps = document.get("steps") if isinstance(document.get("steps"), list) else []
     listing = []
     for step in steps:
@@ -276,6 +290,7 @@ def start_procedure(procedure_id: str, title: str | None = None, step: int | Non
     """
     document = read_document(store.procedure_path(procedure_id))
     _require_valid(document, procedure_id)
+    library.touch([procedure_id], "use")
     steps = document.get("steps") if isinstance(document.get("steps"), list) else []
     if step is not None:
         if not isinstance(step, int) or not 1 <= step <= len(steps) or not isinstance(steps[step-1], dict):
@@ -359,6 +374,7 @@ def edit_meta(
     document = read_document(target)
     updated = widget.edit_procedure(document, title=title, description=description, tags=tags)
     write_document(target, updated)
+    library.touch([procedure_id], "edit")
     return {
         "ok": True,
         "id": updated["id"],
@@ -386,6 +402,7 @@ def add_steps(
     document = read_document(target)
     updated = _append_steps(document, steps, after=after)
     write_document(target, updated)
+    library.touch([procedure_id], "edit")
     added = [str(entry["title"]).strip() for entry in steps]
     titles = [item.get("title") for item in updated["steps"]]
     return {"ok": True, "id": updated["id"], "added": added, "steps": titles}
@@ -404,6 +421,7 @@ def edit_step(
         _require_procedure(procedure, owner=str(document.get("id") or procedure_id))
     updated = widget.edit_step(document, title, new_title=new_title, do=do, procedure=procedure)
     write_document(target, updated)
+    library.touch([procedure_id], "edit")
     marker = (new_title or title).strip()
     step = next(item for item in updated["steps"] if item.get("title") == marker)
     return {"ok": True, "id": updated["id"], "step_id": step["id"], "title": step["title"]}
@@ -414,8 +432,56 @@ def remove_step(procedure_id: str, title: str) -> dict[str, Any]:
     document = read_document(target)
     updated = widget.remove_step(document, title)
     write_document(target, updated)
+    library.touch([procedure_id], "edit")
     titles = [step.get("title") for step in updated["steps"]]
     return {"ok": True, "id": updated["id"], "removed": title, "steps": titles}
+
+
+def move_step(procedure_id: str, title: str, position: int) -> dict[str, Any]:
+    """Move a step (by its unique title) to a 1-based position; the others keep their order."""
+    target = store.procedure_path(procedure_id)
+    document = read_document(target)
+    steps = document.get("steps")
+    if not isinstance(steps, list):
+        raise ValueError("document steps must be an array")
+    wanted = title.strip()
+    indices = [i for i, step in enumerate(steps) if isinstance(step, Mapping) and step.get("title") == wanted]
+    if len(indices) != 1:
+        raise ValueError(f"step title must match exactly one step, matched {len(indices)}: {wanted!r}")
+    if not 1 <= position <= len(steps):
+        raise ValueError(f"position must be 1..{len(steps)}, got {position}")
+    step = steps.pop(indices[0])
+    steps.insert(position - 1, step)
+    result = widget.validate_procedure(document)
+    if not result.valid:
+        raise ValueError("; ".join(str(e) for e in result.errors))
+    write_document(target, document)
+    library.touch([procedure_id], "edit")
+    titles = [s.get("title") for s in steps]
+    return {"ok": True, "id": document["id"], "moved": wanted, "position": position, "steps": titles}
+
+
+def delete_procedure(procedure_id: str) -> dict[str, Any]:
+    """Remove a procedure from the store. Refused while another procedure's step still links it:
+    the link would dangle, and the next worker following that step would find nothing."""
+    target = store.procedure_path(procedure_id)
+    if not target.exists():
+        raise ValueError(f"no procedure {procedure_id!r}")
+    linkers: list[str] = []
+    for path in sorted(store.procedures_dir().glob("*.json")):
+        if path == target:
+            continue
+        try:
+            other = read_document(path)
+        except Exception:  # noqa: BLE001 — a bad neighbour is not this one's problem
+            continue
+        if any(isinstance(step, Mapping) and step.get("procedure") == procedure_id for step in other.get("steps") or []):
+            linkers.append(str(other.get("id") or path.stem))
+    if linkers:
+        raise ValueError(f"{procedure_id!r} is linked by a step of: {', '.join(linkers)} — unlink those steps first")
+    target.unlink()
+    library.forget(procedure_id)
+    return {"ok": True, "deleted": procedure_id}
 
 
 def read_document(path: str | Path) -> dict[str, Any]:
@@ -436,25 +502,96 @@ def write_document(path: str | Path, document: Mapping[str, Any]) -> None:
 OPEN_DIR = ".playbook/open"
 
 
-def open_procedure(procedure_id: str, purpose: str, target_dir: str | Path = ".") -> dict[str, Any]:
+_STEP_LINE = re.compile(r"^- \[( |x|-)\] \*\*(\d+)\. (.*?)\*\*\s*$")
+
+
+def walk_steps(path: Path) -> list[tuple[str, int, str]]:
+    """(mark, number, title) for every step line of an open walk."""
+    found = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        m = _STEP_LINE.match(line)
+        if m:
+            found.append((m.group(1), int(m.group(2)), m.group(3)))
+    return found
+
+
+def open_walks(procedure_id: str, target_dir: str | Path = ".") -> list[dict[str, Any]]:
+    """Walks of this procedure under the working tree that still have unticked steps, oldest first."""
+    out_dir = Path(target_dir) / OPEN_DIR
+    if not out_dir.is_dir():
+        return []
+    result = []
+    for path in sorted(out_dir.glob(f"{procedure_id}--*.md"), key=lambda p: p.stat().st_mtime):
+        steps = walk_steps(path)
+        left = [(n, t) for mark, n, t in steps if mark == " "]
+        if left:
+            result.append(dict(path=str(path), steps=len(steps), unticked=len(left), next=f"{left[0][0]}. {left[0][1]}"))
+    return result
+
+
+def skip_walk(target: str, because: str, target_dir: str | Path = ".") -> dict[str, Any]:
+    """Mark every remaining step of an open walk `[-]` not needed, with the reason on the file.
+
+    `target` is the walk file or the procedure id (its one unfinished walk). A worker that opened a
+    procedure the search ranked first and found it did not apply looked for this verb twice and
+    found nothing; the gate then held the task on the unticked boxes.
+    """
+    because = str(because or "").strip()
+    if not because:
+        raise ValueError("skip needs --because: why this walk was not needed here (one line; it goes on the file)")
+    path = Path(target)
+    if not path.is_file():
+        walks = open_walks(target, target_dir)
+        if not walks:
+            raise ValueError(f"no open walk of '{target}' with unticked steps under {Path(target_dir) / OPEN_DIR}")
+        if len(walks) > 1:
+            raise ValueError(f"'{target}' has {len(walks)} unfinished walks; name the file: "
+                             + ", ".join(w["path"] for w in walks))
+        path = Path(walks[0]["path"])
+    lines = path.read_text(encoding="utf-8").splitlines()
+    skipped = 0
+    for i, line in enumerate(lines):
+        m = _STEP_LINE.match(line)
+        if m and m.group(1) == " ":
+            lines[i] = line.replace("- [ ]", "- [-]", 1)
+            skipped += 1
+    lines += ["", f"skipped: {because}"]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return {"ok": True, "path": str(path), "skipped": skipped, "because": because}
+
+
+def open_procedure(procedure_id: str, purpose: str, target_dir: str | Path = ".", again: bool = False) -> dict[str, Any]:
     """Materialise a whole procedure as a checklist file in the working tree, to be read once and followed.
 
     `start --step` drips one step per call, which a small-window model needed; a capable model spends a
     turn per step for nothing. Every open is its own copy, named and headed by what it is for, so a
-    procedure walked twice in one task (two artifacts, two sources) keeps two checklists.
+    procedure walked twice in one task (two artifacts, two sources) keeps two checklists — but only on
+    `--again`: a walk still in progress is handed back with its next step, because a worker whose window
+    rolled over opens the same procedure a second time and leaves a fresh unticked copy behind.
     """
     purpose = str(purpose or "").strip()
     if not purpose:
         raise ValueError("open needs --for: what this walk of the procedure is for (an unknown, an artifact, a source)")
+    if not again:
+        unfinished = open_walks(procedure_id, target_dir)
+        if unfinished:
+            walk = unfinished[-1]
+            return {"ok": True, "id": procedure_id, "already_open": True, "path": walk["path"], "next": walk["next"],
+                    "unticked": walk["unticked"],
+                    "note": ("this procedure is already open here; continue from its next step, tick `[x]` done or `[-]` "
+                             "not needed, or `playbook skip <path> --because ...` if it does not apply. `--again` opens a "
+                             "second walk for a second thing.")}
     document = read_document(store.procedure_path(procedure_id))
     _require_valid(document, procedure_id)
+    library.touch([procedure_id], "use")
     steps = [s for s in (document.get("steps") or []) if isinstance(s, dict)]
     lines = [f"# {document.get('title') or procedure_id}", "", f"procedure: `{procedure_id}`", f"for: {purpose}", ""]
     if document.get("description"):
         lines += [str(document["description"]).strip(), ""]
     if document.get("tags"):
         lines += ["tags: " + ", ".join(str(t) for t in document["tags"]), ""]
-    lines += ["Follow the steps in order. Tick each box before you finish: `[x]` done, `[-]` not needed here. "
+    lines += ["Follow the steps in order. Tick each box before you finish: `[x]` done, `[-]` not needed here "
+              "(`playbook skip <this file> --because ...` marks everything left `[-]` when the walk does not apply). "
               "Improve the procedure afterwards with `playbook edit-step` / `add-step` where a step fell short.", ""]
     for i, step in enumerate(steps, 1):
         lines += [f"- [ ] **{i}. {step.get('title', '')}**", "", f"  {str(step.get('do', '')).strip()}", ""]

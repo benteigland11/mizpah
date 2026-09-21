@@ -283,3 +283,44 @@ def test_a_step_may_not_link_its_own_procedure(tmp_path: Path, monkeypatch, caps
     path.write_text(json.dumps(document), encoding="utf-8")
     assert main(["validate", "size-pack"]) != 0
     assert "links to its own procedure" in capsys.readouterr().out
+
+
+def test_open_hands_back_an_unfinished_walk_and_skip_marks_the_rest(tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """A worker whose window rolled over opened the same procedure again and left a fresh unticked copy for
+    the gate to hold the task on; and it looked twice for a verb to mark a walk not needed."""
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    assert main(["create", "tune-pedal", "--title", "Tune the pedal", "--description", "d", "--tags", "midi"]) == 0
+    assert main(["add-step", "tune-pedal", "--title", "Find harmonies", "--do", "List the harmony changes."]) == 0
+    assert main(["add-step", "tune-pedal", "--title", "Place pedal", "--do", "Pedal at each change."]) == 0
+    capsys.readouterr()
+    assert main(["open", "tune-pedal", "--for", "the piece", "--dir", str(tmp_path)]) == 0
+    first = json.loads(capsys.readouterr().out)["path"]
+    # A second open, whatever the purpose, hands the unfinished walk back with its next step.
+    assert main(["open", "tune-pedal", "--for", "the piece after the handoff", "--dir", str(tmp_path)]) == 0
+    reply = json.loads(capsys.readouterr().out)
+    assert reply["already_open"] and reply["path"] == first and reply["next"] == "1. Find harmonies" and reply["unticked"] == 2
+    assert len(list((tmp_path/".playbook"/"open").glob("tune-pedal--*.md"))) == 1
+    # Tick the first step by hand; the next step moves on.
+    path = Path(first)
+    path.write_text(path.read_text().replace("- [ ] **1.", "- [x] **1.", 1))
+    assert main(["open", "tune-pedal", "--for", "again", "--dir", str(tmp_path)]) == 0
+    assert json.loads(capsys.readouterr().out)["next"] == "2. Place pedal"
+    # --again is a deliberate second walk for a second thing.
+    assert main(["open", "tune-pedal", "--for", "the second piece", "--dir", str(tmp_path), "--again"]) == 0
+    second = json.loads(capsys.readouterr().out)["path"]
+    assert second != first and len(list((tmp_path/".playbook"/"open").glob("tune-pedal--*.md"))) == 2
+    # Two unfinished walks: skip by id is ambiguous, skip by file is not.
+    assert main(["skip", "tune-pedal", "--because", "not needed", "--dir", str(tmp_path)]) == 1
+    assert "2 unfinished walks" in capsys.readouterr().out
+    assert main(["skip", second, "--because", "the piece has no pedal part", "--dir", str(tmp_path)]) == 0
+    assert json.loads(capsys.readouterr().out)["skipped"] == 2
+    text = Path(second).read_text()
+    assert "- [-] **1." in text and "- [-] **2." in text and "skipped: the piece has no pedal part" in text
+    # The first walk is now the only unfinished one: skip by id works and marks only what is left.
+    assert main(["skip", "tune-pedal", "--because", "measured another way", "--dir", str(tmp_path)]) == 0
+    assert json.loads(capsys.readouterr().out)["skipped"] == 1
+    assert "- [x] **1." in path.read_text() and "- [-] **2." in path.read_text()
+    # Nothing unfinished: a plain open makes a fresh walk, and skip has nothing to skip.
+    assert main(["open", "tune-pedal", "--for", "a third piece", "--dir", str(tmp_path)]) == 0
+    assert "already_open" not in json.loads(capsys.readouterr().out)
+    assert main(["skip", "no-such", "--because", "x", "--dir", str(tmp_path)]) == 1

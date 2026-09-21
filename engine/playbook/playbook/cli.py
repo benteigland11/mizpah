@@ -8,7 +8,7 @@ import os
 import sys
 from typing import Any, Sequence
 
-from playbook import ops
+from playbook import library, ops
 
 # The working tree remembers that the playbook was searched from here (create checks for it), the way
 # Cartograph's cg/.searched does: a method is looked for before it is written.
@@ -79,6 +79,8 @@ def _build_parser() -> argparse.ArgumentParser:
         default=ops.DEFAULT_SEARCH_LIMIT,
         help=f"max hits (default {ops.DEFAULT_SEARCH_LIMIT}, max {ops.MAX_SEARCH_LIMIT})",
     )
+    search.add_argument("--all", dest="include_retired", action="store_true",
+                        help="include decayed procedures (a person looking, not a worker)")
     search.set_defaults(handler=_cmd_search)
 
     load = sub.add_parser("load", help="print the whole procedure: title, description, and every step do")
@@ -97,7 +99,14 @@ def _build_parser() -> argparse.ArgumentParser:
     open_.add_argument("id")
     open_.add_argument("--for", dest="purpose", required=True, help="what this walk is for (an unknown, an artifact, a source); names the file")
     open_.add_argument("--dir", default=".", help="working tree to write under (default: .)")
+    open_.add_argument("--again", action="store_true", help="a second walk for a second thing; without it an unfinished walk is handed back")
     open_.set_defaults(handler=_cmd_open)
+
+    skip = sub.add_parser("skip", help="mark every remaining step of an open walk [-] not needed, with the reason on the file")
+    skip.add_argument("target", help="the walk file under .playbook/open/, or the procedure id of its one unfinished walk")
+    skip.add_argument("--because", required=True, help="why this walk was not needed here")
+    skip.add_argument("--dir", default=".", help="working tree the walk is under (default: .)")
+    skip.set_defaults(handler=_cmd_skip)
 
     validate = sub.add_parser("validate", help="validate a procedure in the global store")
     validate.add_argument("id")
@@ -134,7 +143,54 @@ def _build_parser() -> argparse.ArgumentParser:
     remove_step.add_argument("--title", required=True, help="unique title to remove")
     remove_step.set_defaults(handler=_cmd_remove_step)
 
+    move_step = sub.add_parser("move-step", help="move a step by its unique title to a 1-based position; others keep their order")
+    move_step.add_argument("id")
+    move_step.add_argument("--title", required=True, help="unique title to move")
+    move_step.add_argument("--to", type=int, required=True, help="new 1-based position")
+    move_step.set_defaults(handler=_cmd_move_step)
+
+    delete = sub.add_parser("delete", help="remove a procedure from the store; refused while another procedure links it")
+    delete.add_argument("id")
+    delete.set_defaults(handler=_cmd_delete)
+
+    lib = sub.add_parser("library", help="use it or lose it: the ledger of touches, pins and decay beside the store")
+    lib_sub = lib.add_subparsers(dest="library_command", required=True)
+    st = lib_sub.add_parser("status", help="clock, policy and every procedure's standing (or one id's)")
+    st.add_argument("id", nargs="?", default=None)
+    st.set_defaults(handler=lambda a: library.status(a.id))
+    tc = lib_sub.add_parser("touch", help="record a touch by hand (the app opening a procedure counts as a search)")
+    tc.add_argument("id")
+    tc.add_argument("kind", choices=library.KINDS)
+    tc.set_defaults(handler=_cmd_library_touch)
+    pn = lib_sub.add_parser("pin", help="never retire this procedure by decay")
+    pn.add_argument("id")
+    pn.set_defaults(handler=lambda a: library.pin(a.id, True))
+    up = lib_sub.add_parser("unpin", help="let it decay again")
+    up.add_argument("id")
+    up.set_defaults(handler=lambda a: library.pin(a.id, False))
+    rt = lib_sub.add_parser("decay", help="decay it by hand: hidden from search and from workers until revived")
+    rt.add_argument("id")
+    rt.set_defaults(handler=lambda a: library.retire(a.id, "manual"))
+    rv = lib_sub.add_parser("revive", help="bring a decayed procedure back with full grace")
+    rv.add_argument("id")
+    rv.set_defaults(handler=lambda a: library.revive(a.id))
+    tk = lib_sub.add_parser("tick", help="one more green gate: see new procedures, decay what ran out of grace")
+    tk.add_argument("--protect", action="append", default=None, metavar="PREFIX",
+                    help="id prefixes that never retire (replaces the policy's list when given)")
+    tk.set_defaults(handler=lambda a: library.tick(a.protect))
+    pl = lib_sub.add_parser("policy", help="turn decay on or off and set how many gates a touch lasts")
+    pl.add_argument("--on", dest="enabled", action="store_true", default=None)
+    pl.add_argument("--off", dest="enabled", action="store_false")
+    pl.add_argument("--grace", type=int, default=None, help="gates a search-touch lasts; use lasts 2x, edit 3x")
+    pl.add_argument("--protect", action="append", default=None, metavar="PREFIX")
+    pl.set_defaults(handler=lambda a: library.set_policy(enabled=a.enabled, grace=a.grace, protect=a.protect))
+
     return parser
+
+
+def _cmd_library_touch(args: argparse.Namespace) -> dict[str, Any]:
+    library.touch([args.id], args.kind)
+    return {"ok": True, **library.standing(args.id)}
 
 
 def _cmd_create(args: argparse.Namespace) -> dict[str, Any]:
@@ -162,7 +218,7 @@ def _cmd_edit(args: argparse.Namespace) -> dict[str, Any]:
 
 def _cmd_search(args: argparse.Namespace) -> dict[str, Any]:
     _note_search(" ".join(args.query))
-    return ops.search_procedures(" ".join(args.query), limit=args.limit)
+    return ops.search_procedures(" ".join(args.query), limit=args.limit, include_retired=args.include_retired)
 
 
 def _cmd_load(args: argparse.Namespace) -> dict[str, Any]:
@@ -172,7 +228,11 @@ def _cmd_load(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _cmd_open(args: argparse.Namespace) -> dict[str, Any]:
-    return ops.open_procedure(args.id, args.purpose, args.dir)
+    return ops.open_procedure(args.id, args.purpose, args.dir, again=args.again)
+
+
+def _cmd_skip(args: argparse.Namespace) -> dict[str, Any]:
+    return ops.skip_walk(args.target, args.because, args.dir)
 
 
 def _cmd_start(args: argparse.Namespace) -> dict[str, Any]:
@@ -201,6 +261,14 @@ def _cmd_edit_step(args: argparse.Namespace) -> dict[str, Any]:
     if new_title is None and do_text is None and args.procedure is None:
         raise ValueError("edit-step requires --rename, --do and/or --procedure")
     return ops.edit_step(args.id, args.title, new_title=new_title, do=do_text, procedure=args.procedure)
+
+
+def _cmd_delete(args: argparse.Namespace) -> dict[str, Any]:
+    return ops.delete_procedure(args.id)
+
+
+def _cmd_move_step(args: argparse.Namespace) -> dict[str, Any]:
+    return ops.move_step(args.id, args.title, args.to)
 
 
 def _cmd_remove_step(args: argparse.Namespace) -> dict[str, Any]:
