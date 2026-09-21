@@ -9,7 +9,7 @@ class _Health:
     def __init__(self, answers):
         self.answers = list(answers)
 
-    def wait_for_model(self, base_url, *, wait_seconds):
+    def wait_for_model(self, base_url, *, wait_seconds, attempt=1):
         return self.answers.pop(0)
 
 
