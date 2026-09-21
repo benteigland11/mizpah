@@ -1,7 +1,5 @@
 # Unknowns
 
-What the controller decides when it mints one.
-
 ## Parts
 
 - **id** — a slug. Its probe is `<id>_probe`; the probe returns `{"<id>": value}`.
