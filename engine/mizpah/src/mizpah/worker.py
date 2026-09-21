@@ -1986,6 +1986,13 @@ REFUSED_PATTERNS = (
      'provides the toolchain and its packages (see the enablers of your task); a package it lacks is `terra route block` naming '
      'the package, so the person can add it to the environment'),
     (r'\bcurl\b[^|;&]*(/stop\b|/shutdown\b|/slots\b)', 'the model server is not yours to signal'),
+    # A tick is a claim like a reading: it comes from the step's own work, in the command that did it. Fifty
+    # boxes in one loop is not a walk (attempt 4: `for n in 1..50; do playbook tick --done $n; done`, then route
+    # complete).
+    (r'\bfor\b[^|&]*\bdo\b[^|&]*\bplaybook\s+tick\b|\bwhile\b[^|&]*\bdo\b[^|&]*\bplaybook\s+tick\b|\bxargs\b[^|;&]*\bplaybook\s+tick\b',
+     'a walk is not ticked in a loop: tick a step in the command that does it, with what it found'),
+    (r'(\bplaybook\s+tick\b.*){4,}',
+     'four or more ticks in one command is a list closed after the fact: tick a step in the command that does it'),
 )
 
 

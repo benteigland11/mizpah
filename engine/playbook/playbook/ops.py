@@ -645,6 +645,9 @@ def tick_walk(target: str, done: list[int] | None = None, not_needed: list[int] 
         raise ValueError("tick needs --done and/or --skip with step numbers, e.g. --done 1,3 --skip 2 --because ...")
     if len(not_needed) > 1:
         raise ValueError("skip one step per call, each with its own --because: a step is its own decision")
+    if len(done) > TICK_AT_ONCE:
+        raise ValueError(f"tick at most {TICK_AT_ONCE} steps in one call: a tick is a claim like a reading, made in the command "
+                         "that did the step's work — fifty boxes at once is a list closed after the fact, not a walk")
     because = str(because or "").strip()
     if not_needed and not because:
         raise ValueError("--skip needs --because: why this step does not apply to what is in front of you (one line; it goes under the step)")
@@ -688,6 +691,7 @@ def tick_walk(target: str, done: list[int] | None = None, not_needed: list[int] 
     return {"ok": True, "path": str(path), "marked": marked, "unticked": left}
 
 
+TICK_AT_ONCE = 6   # steps one tick call may close: several that closed together, never a walk at once
 FLAT_LIMIT = 50   # steps in one walk: past this the method is several work orders, and the route carries the rest
 # The loop's own procedures: a step that links one runs the framework, and its steps are not part of a domain
 # method (a voicing walk with the generic resolve-an-unknown checklist inlined in the middle of it is not voicing).
