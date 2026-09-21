@@ -1976,6 +1976,15 @@ REFUSED_PATTERNS = (
 )
 
 
+def review_cadence(config: dict[str, Any]) -> ReviewPolicy:
+    """When the reviewer looks. At the worker's completion claim only: the periodic look was the v10 drift guard
+    for a small model; on Luna it produced "stub not implemented yet" corrections mid-work and pulled workers back
+    into measurement inside bookkeeping rounds. `checkin_periodic: true` restores it. (The bootstrap look at turn
+    1 goes with it: there is nothing to review before the first turn.)"""
+    return ReviewPolicy(**(config['review_policy'] if config['mizpah'].get('checkin_periodic', False)
+                           else dict(config['review_policy'], update_interval=10**6, bootstrap_after_turns=10**6)))
+
+
 def build_settings(config: dict[str, Any], assignment: str, reference: str,
                    unknowns: list[dict[str, Any]] = ()) -> SessionSettings:
     # The check-in controller reviews on the v10 cadence against the task reference; routing and
@@ -1985,12 +1994,7 @@ def build_settings(config: dict[str, Any], assignment: str, reference: str,
     checkins = config['mizpah']['scaffolding']['checkins']
     return SessionSettings(assignment, config['mizpah']['worker_policy'], reference if checkins else None,
         config['worker']['generation'], SessionPolicy(**config['session_policy']),
-        # The reviewer looks when the worker claims done, not every N turns: the periodic look was the v10 drift
-        # guard for a small model; on Luna it produced "stub not implemented yet" corrections mid-work and
-        # pulled workers back into measurement inside bookkeeping rounds. `checkin_periodic: true` restores it.
-        # (The bootstrap look at turn 1 goes with it: there is nothing to review before the first turn.)
-        ReviewPolicy(**(config['review_policy'] if config['mizpah'].get('checkin_periodic', False)
-                        else dict(config['review_policy'], update_interval=10**6, bootstrap_after_turns=10**6))),
+        review_cadence(config),
         checkin_settings(config) if checkins else None,
         config['review_on_completion'], config['guidance_prefix'],
         maximum_generation_retries=config.get('maximum_generation_retries', 0),
@@ -2168,9 +2172,12 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         if session.controller_client is not None and session.settings.controller is not None:
             fresh = checkin_settings(config)
             held = session.settings.controller
-            if held.system_prompt != fresh.system_prompt or held.maximum_completion_corrections != fresh.maximum_completion_corrections:
-                session.settings = replace(session.settings, controller=replace(held, system_prompt=fresh.system_prompt,
-                                                                                 maximum_completion_corrections=fresh.maximum_completion_corrections))
+            cadence = review_cadence(config)   # when the reviewer looks: the config's, not the session's
+            if held.system_prompt != fresh.system_prompt or held.maximum_completion_corrections != fresh.maximum_completion_corrections \
+                    or session.settings.review_policy != cadence:
+                session.settings = replace(session.settings, review_policy=cadence,
+                                           controller=replace(held, system_prompt=fresh.system_prompt,
+                                                              maximum_completion_corrections=fresh.maximum_completion_corrections))
                 session.state['settings'] = asdict(session.settings)
                 session.state.setdefault('review_log', []).append(dict(turn=session.progress.turns, boundary='policy',
                                                                        operation='policy_changed', correction='resumed: current review policy', evidence=''))
