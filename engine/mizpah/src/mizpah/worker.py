@@ -1731,7 +1731,9 @@ def green_message(gate: dict[str, Any], unknown_id: str | list[str], used: list[
     lines += ['- '+t for t in todo]
     lines.append('The store changes only through `playbook edit-step` / `add-step` / `remove-step` / `create`; the checklist '
                  'under `.playbook/open/` is a rendered copy. Make all your edits, then `playbook validate <id>` once per procedure you touched, and '
-                 'reply with their ids (comma separated) and nothing else.')
+                 'reply with their ids (comma separated) and nothing else. A correction from the reviewer is answered by making '
+                 'the edit once and replying with the ids — the reply is what brings the reviewer back to look; an edit that '
+                 'returned ok landed, and a held correction is not a reason to make it again.')
     return '\n'.join(lines)+'\n'
 
 

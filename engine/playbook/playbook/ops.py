@@ -434,7 +434,10 @@ def edit_step(
     library.touch([procedure_id], "edit")
     marker = (new_title or title).strip()
     step = next(item for item in updated["steps"] if item.get("title") == marker)
-    return {"ok": True, "id": updated["id"], "step_id": step["id"], "title": step["title"]}
+    # The step as it now reads, so the caller sees the edit landed: a worker that got only the title back
+    # re-edited the same step thirteen times answering a correction it could not see it had met.
+    return {"ok": True, "id": updated["id"], "step_id": step["id"], "title": step["title"], "do": step.get("do", ""),
+            **({"procedure": step["procedure"]} if step.get("procedure") else {})}
 
 
 def remove_step(procedure_id: str, title: str) -> dict[str, Any]:

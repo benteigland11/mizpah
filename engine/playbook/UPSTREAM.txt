@@ -5,3 +5,4 @@ diverged: `playbook library …` (status, touch, pin, unpin, decay, revive, tick
 diverged: `open` hands back a walk of the same procedure still in progress (path, next step, unticked count) instead of writing a `-2` copy; `--again` is a deliberate second walk. `skip <file|id> --because …` marks every remaining step `[-]` and writes the reason on the file — a worker whose window rolled over re-opened its procedures, left four fresh unticked copies, and searched the CLI twice for a verb to mark them not needed
 diverged: `search` is local first — unfinished walks under the working tree (`--dir`, default .) come back as `open_here` ahead of the hits, each with its next step
 diverged: `tick <file|id> --done N,M --skip K` marks several steps of an open walk in one call
+diverged: `edit-step` echoes the step as it now reads (`do`, linked `procedure`), not just its title

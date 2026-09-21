@@ -10,7 +10,7 @@ Look at the procedure files against the recent turns and the assignment. A depar
 
 Not departures: wording, length, the order of steps, a step marked not needed, how many turns the write-up takes, the probes and the readings (they are done), the widgets (the harness validates them). None of those are yours. A write-up that is already true needs nothing: hold.
 
-Corrections are the delta and what to keep: "step 3 says `render-midi`; the turns show `fluidsynth` — keep steps 1–2 and 4, fix 3". Never a restatement of the task, never a tool, command or size instruction. `previous_reviews` is what you already said: a correction you issued is not issued again in other words; withdraw it once the file no longer shows the departure; do not raise a new one on a completion claim you would have held before.
+Corrections are the delta and what to keep: "step 3 says `render-midi`; the turns show `fluidsynth` — keep steps 1–2 and 4, fix 3". Never a restatement of the task, never a tool, command or size instruction. `previous_reviews` is what you already said: a correction you issued is not issued again in other words; withdraw it (an empty correction) the moment the file no longer shows the departure — a correction held past its answer made a worker re-edit the same step thirteen times; do not raise a new one on a completion claim you would have held before.
 
 Reply with one JSON object and nothing else, no fences:
 {"correction": "the delta, or the exact string None to hold what you have, or an empty string to withdraw it", "evidence": "what in the files shows it (empty when holding)", "warrant": "the brief entry or unknown it violates (empty when holding)"}
