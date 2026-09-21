@@ -6,3 +6,4 @@ diverged: `open` hands back a walk of the same procedure still in progress (path
 diverged: `search` is local first — unfinished walks under the working tree (`--dir`, default .) come back as `open_here` ahead of the hits, each with its next step
 diverged: `tick <file|id> --done N,M --skip K` marks several steps of an open walk in one call
 diverged: `edit-step` echoes the step as it now reads (`do`, linked `procedure`), not just its title
+diverged: `tick` refuses to close a step that links another procedure until a walk of that procedure is closed (every box [x]/[-]); the walk header says adapt the specifics, walk the linked ones
