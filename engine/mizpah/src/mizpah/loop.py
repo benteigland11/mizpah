@@ -45,8 +45,10 @@ def pickable(config: dict[str, Any], project: Path, root: Path | None = None) ->
     """Tasks to run next: this agent's own in-progress tasks with a session on disk first (a killed run
     resumes where it paused), then the route's pickable ones."""
     tasks = terra(config, project, 'route', 'next')['tasks']
+    # This agent's in-progress tasks come first: with a session on disk they resume; without one (a start that
+    # never reached a turn, or a session the person threw away to start the task over) they start fresh.
     resumable = [t for t in tasks if root is not None and t.get('status') == 'in_progress'
-                 and t.get('owner_agent') == config['mizpah']['agent'] and (root/'tasks'/t['id']/'state.sqlite3').exists()]
+                 and t.get('owner_agent') == config['mizpah']['agent']]
     if root is not None:
         # Done on the route with a session that never reported (killed after `route complete`, in the review or
         # the write-up): resumed first, so the write-up lands instead of being skipped for the next task.
