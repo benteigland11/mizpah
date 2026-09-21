@@ -115,7 +115,8 @@ def test_cli_models_and_use(tmp_path: Path, capsys: pytest.CaptureFixture, monke
     worker = written['worker']
     assert worker['provider'] == 'subscription' and worker['subscription'] == 'xai_api' and 'known_issues' not in worker
     assert worker['endpoint']['base_url'] == 'https://api.x.ai/v1' and worker['endpoint']['maximum_response_bytes'] == 5
-    assert worker['generation'] == {'model': 'grok-4.5', 'temperature': 0.5}
+    # Sampling knobs do not travel to a hosted seat: the codex backend answers 'Unsupported parameter: temperature'.
+    assert worker['generation'] == {'model': 'grok-4.5'}
     assert written['controller'] == {'generation': {'model': '/x.gguf'}}
     monkeypatch.setattr(providers.ProviderSession, 'list_model_info', lambda self: [ModelInfo('gpt-6-astra')])
     providers.session_for('openai_chatgpt', {}).store.put('openai_chatgpt', {'access_token': 't'}, {})

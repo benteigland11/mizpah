@@ -1,0 +1,1 @@
+Other briefs on this machine are your library for phrasing: before writing needs for a kind of artifact, look at what a finished brief asked for the same kind (`find /work -maxdepth 3 -name brief.json` and the other mounts you see; `terra brief show` in a project prints one). Take the shape, not the entries.

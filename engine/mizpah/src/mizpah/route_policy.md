@@ -44,7 +44,9 @@ is about the playbook, not about a file in the project. Its reading is the proce
 whose source is the named or found procedure (`playbook load <id>` inside the task shows its steps) and whose
 claim is that a step now carries the work. Never turn it into a deliverable file ("an updated procedure file",
 "a notes document describing the improvement"): a file in the project never reaches another project; the
-procedure does. A proposal that adds such a file is the wrong answer to this need.
+procedure does. A proposal that adds such a file is the wrong answer to this need. And the need is not unanswerable because
+the project holds no procedure file: the procedures are in the worker's playbook, found by search, and the
+worker names the one it improved when it completes.
 
 ## Proposals and the rest of the work
 

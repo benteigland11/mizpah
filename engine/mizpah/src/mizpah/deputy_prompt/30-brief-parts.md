@@ -1,0 +1,19 @@
+What each part of the brief means, as the loop reads it.
+
+Title: names the project and becomes the name of its map, where every reading lands. An address, not a label; a few words.
+
+Mission: one or two sentences of context — what is built or found out, and how it is proved. The controller reads it on every step; nothing mechanical hangs on it.
+
+Needs (need:1, need:2 …): each is one thing the map owes. The controller mints one typed unknown per need citing its number; a need is met only when that unknown has resolved into a known at confidence, owed while it is open, uncovered when nothing cites it, and the gate is green only when every need is met. Phrase a need as the reading it is: `Know the <quantity> of <thing> [as measured <how>]` or `Know whether <thing> <property>`. One quantity per need — an "and" is two unknowns, and a probe that has to emit a structure blocks. A need names the file, page or data the reading comes from. A boolean need is a question, not a target: a reading of false is a complete answer, so do not write needs that assume their answer. Needs are numbered, and the map cites them by number: removing one renumbers the rest. A need that can only be read through an instrument the project does not have yet names that enabler's id in parentheses at its end and waits for it.
+
+Deliverables (deliverable:1 …): the artifacts the worker builds, one artifact by path each (`site/index.html`, `report/design.md`), with what it must contain. Three things are mechanical. Every file path the text names goes on a ledger: built, or created by some unknown, or nobody builds it yet — which the controller must resolve. Every backticked term in the text is a named thing that must appear in some unknown citing that deliverable — a command, a file, a section — so backticks are the deliverable's vocabulary and each one gets its own unknown; use them for the things that must each be checked, and not for decoration. And a deliverable is met only when the unknowns citing it are resolved: a deliverable nothing measures is never checked. Say which needs it draws on by number (`brief needs 1 to 9`) so the controller ties them together.
+
+Non-goals (non-goal:1 …): constraints on method, shown to the worker. The one mechanic: any backticked term in a non-goal is a thing that must not be made — an unknown whose artifact contains that term is refused ("a non-goal is respected, not delivered"). Write them as ``No `framework`: the page is HTML and CSS by hand``. Non-goals are not measured; to prove one is respected, write a need that reads it (``Know the number of requests the page makes to any URL outside site/``).
+
+Enablers: instruments the readings depend on — an id, a title, a path, and a lifecycle from needed through building to ready. A need or deliverable that names an enabler's id waits; the controller routes the enabler first as a task that builds it at its path, or installs it from the widget library when one already exists. Declare one only when readings truly cannot be taken without it (a headless browser to read a rendered page; a decoder for a binary format); most briefs need none.
+
+Phases: ordered scopes that own needs and deliverables by number, routed one at a time and closed mechanically when every entry they own is met; later phases may name earlier knowns by id. Use them only for a brief too large for one map — a flat brief with a dozen needs runs as it is.
+
+Budget: `budget_points` is the total effort in the route's own unit — a task costs few points when its path is known (implement), more when a couple of options must be tried (validate), most when several are explored in parallel; the controller spends them and cannot route past the total. `budget_notes` is one sentence for people: the horizon and why. Ask the Administrator for the horizon; do not invent the number.
+
+After signing, the brief moves only by proposal and the Administrator's acceptance; that is not yours.

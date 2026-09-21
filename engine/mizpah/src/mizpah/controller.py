@@ -283,7 +283,8 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
         lines.append('Open proposals (queued for the person; the map\'s record that a need cannot be met as written; '
                      'the project cannot be judged met while one is open):')
         for p in proposals:
-            lines.append('  '+str(p.get('id'))+' '+str(p.get('summary') or '').split(' \u2014 evidence:')[0][:200])
+            lines.append('  '+str(p.get('id'))+' '+str(p.get('summary') or '').split(' \u2014 evidence:')[0][:200]
+                         +(' (the same ask as '+str(p['same_as'])+'; asking again adds nothing)' if p.get('same_as') else ''))
     decided = brief.get('decided') or []
     if decided:
         # What the person decided and why: a rejected proposal is not re-proposed, an accepted one is now the brief.
@@ -1051,6 +1052,15 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
                 refusals.append(label+': budget_points is a whole number of points'); continue
             if points < 0:
                 refusals.append(label+': budget_points is a whole number of points'); continue
+            # The number is the new total, and a proposal only ever asks for more: the changing-meter gym's
+            # CR-001 carried budget_points 3 (the price of the task it added) beside a need and a deliverable,
+            # was accepted for those, and cut the budget from 120 to 3. A cut is the person's alone, in the app.
+            current = observation['brief'].get('budget_points')
+            if current is not None and points <= int(current):
+                refusals.append(label+': budget_points is the new total and a proposal asks for more than the current '
+                                +str(current)+' (a task\'s price is its bucket, not a budget); to cut the budget is the person\'s, not yours'); continue
+            if any(k != 'budget_points' for k in fields):
+                refusals.append(label+': a budget change is budget_points alone; carry the need, deliverable or non-goal in a proposal of its own'); continue
             fields['budget_points'] = str(points)
         if fields.get('budget_points') and any(re.search(r'\b(points?|budget)\b', v, re.I) for k, v in fields.items() if k != 'budget_points'):
             refusals.append(label+': a budget change is budget_points alone; do not also add a need or deliverable about points'); continue

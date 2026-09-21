@@ -179,6 +179,17 @@ def test_a_budget_ask_is_its_own_patch(gym: Path) -> None:
     smuggled = dict(proposals=[dict(summary='more points', evidence='x', budget_points=66, need='Provide six more budget points.')])
     accepted, refusals = controller.guard(smuggled, observation, gym)
     assert not accepted['proposals'] and any('budget_points alone' in r for r in refusals)
+    # The number is the new total and only ever more: budget 3 beside a need (the changing-meter gym's CR-001,
+    # accepted for the need, cut 120 to 3) and a plain cut are both refused.
+    cut = dict(proposals=[dict(summary='name the procedure file', evidence='x', budget_points=3,
+                               need='Improve the named procedure in a project file.', deliverable='An updated procedure file.')])
+    accepted, refusals = controller.guard(cut, observation, gym)
+    assert not accepted['proposals'] and any('new total' in r and 'more than the current 60' in r for r in refusals)
+    accepted, refusals = controller.guard(dict(proposals=[dict(summary='less', evidence='x', budget_points=30)]), observation, gym)
+    assert not accepted['proposals'] and any('new total' in r for r in refusals)
+    same = dict(proposals=[dict(summary='more', evidence='x', budget_points=66, deliverable='report.md')])
+    accepted, refusals = controller.guard(same, observation, gym)
+    assert not accepted['proposals'] and any('budget_points alone' in r for r in refusals)
     controller.apply(CONFIG, gym, controller.guard(ok, observation, gym)[0])
     brief = json.loads((gym/'.terra'/'brief.json').read_text())
     assert brief['proposals'][-1]['patch'] == {'budget_points': 66, 'was_budget_points': 60}

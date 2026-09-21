@@ -20,6 +20,9 @@ from mizpah.providers import (available_models, credential_path, local_profile, 
 
 
 LLAMA_ONLY_GENERATION_KEYS = ('reasoning_format', 'reasoning_budget_tokens', 'chat_template_kwargs', 'top_k', 'min_p', 'seed')
+# The subscription backends reject sampling knobs on reasoning models ('Unsupported parameter: temperature'):
+# a hosted seat gets the model and its effort, nothing else.
+SUBSCRIPTION_UNSUPPORTED_GENERATION_KEYS = LLAMA_ONLY_GENERATION_KEYS + ('temperature', 'top_p')
 
 
 def _config(path: Path | None) -> dict[str, Any]:
@@ -121,7 +124,7 @@ def cmd_models(args: argparse.Namespace) -> int:
 
 
 def cmd_use(args: argparse.Namespace) -> int:
-    """Point a harness config's worker and/or controller at a provider, model and effort.
+    """Point a harness config's worker, controller and/or deputy at a provider, model and effort.
 
     Rewrites the harness config the engine config names (or --harness directly). A hosted profile
     becomes provider "subscription"; a local llama.cpp profile (no auth, tokenize counting) becomes
@@ -159,14 +162,24 @@ def cmd_use(args: argparse.Namespace) -> int:
         return 2
     if effort is not None and not efforts:
         effort = None  # the model does not take an effort; do not send one
+    # --project: the choice is this task's, not the user's. The same role spec goes under models.<role>
+    # in the project's .mizpah/config.json; the loop layers it over the user config when it starts.
+    project = getattr(args, 'project', None)
     harness_path = args.harness
-    if harness_path is None:
+    if project is None and harness_path is None:
         if args.config is None:
             _emit(dict(event='error', error='pass --config (the engine config) or --harness (the harness config)'))
             return 2
         harness_path = (args.config.parent/json.loads(args.config.read_text())['harness_config']).resolve()
-    harness = json.loads(harness_path.read_text())
-    roles = ('worker', 'controller') if args.role == 'both' else (args.role,)
+    if project is not None:
+        from . import init as init_module, layout
+        state = layout.state(Path(project))
+        cfg_path = state/'config.json'
+        project_cfg = init_module.project_config(Path(project))
+        harness = project_cfg.setdefault('models', {})
+    else:
+        harness = json.loads(harness_path.read_text())
+    roles = ('worker', 'controller') if args.role == 'both' else ('worker', 'controller', 'deputy') if args.role == 'all' else (args.role,)
     native = profile.auth.kind == 'none' and profile.token_count == 'tokenize_endpoint'
     override = ((config.get('mizpah') or {}).get('providers') or {}).get(profile.name) or {}
     for role in roles:
@@ -188,13 +201,19 @@ def cmd_use(args: argparse.Namespace) -> int:
             spec['provider'] = 'subscription'
             spec['subscription'] = profile.name
             spec.pop('known_issues', None)
-            for key in LLAMA_ONLY_GENERATION_KEYS:
+            for key in SUBSCRIPTION_UNSUPPORTED_GENERATION_KEYS:
                 generation.pop(key, None)
         generation['model'] = model
         if effort is None:
             generation.pop('reasoning_effort', None)
         else:
             generation['reasoning_effort'] = effort
+    if project is not None:
+        cfg_path.parent.mkdir(parents=True, exist_ok=True)
+        cfg_path.write_text(json.dumps(project_cfg, indent=1)+'\n')
+        _emit(dict(event='using', provider=profile.name, model=model, effort=effort, roles=list(roles),
+                   transport='llama_client' if native else 'subscription', project=str(project), project_config=str(cfg_path)))
+        return 0
     harness_path.write_text(json.dumps(harness, indent=2)+'\n')
     _emit(dict(event='using', provider=profile.name, model=model, effort=effort, roles=list(roles),
                transport='llama_client' if native else 'subscription', harness_config=str(harness_path)))
@@ -404,7 +423,9 @@ def main(argv: list[str] | None = None) -> int:
     models = commands.add_parser('models'); models.add_argument('provider'); models.set_defaults(run=cmd_models)
     use = commands.add_parser('use', help='point the harness config at a provider and model')
     use.add_argument('provider'); use.add_argument('model', nargs='?', default=None)
-    use.add_argument('--role', choices=('worker', 'controller', 'both'), default='both')
+    use.add_argument('--role', choices=('worker', 'controller', 'deputy', 'both', 'all'), default='both')
+    use.add_argument('--project', type=Path, default=None,
+                     help='make the choice this task\'s only: written to its .mizpah/config.json, layered over your config when it runs')
     use.add_argument('--effort', default=None, help="reasoning effort when the model takes one; 'none' removes it")
     use.add_argument('--harness', type=Path, default=None, help='harness config to rewrite (default: the one --config names)')
     use.set_defaults(run=cmd_use)
