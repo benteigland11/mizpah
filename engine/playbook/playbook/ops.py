@@ -687,11 +687,16 @@ def tick_walk(target: str, done: list[int] | None = None, not_needed: list[int] 
     if missing:
         raise ValueError(f"no such step(s) {missing}; the walk has steps {sorted(seen)}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    nxt = _render_walk(path)
     left = [n for mark, n, _ in walk_steps(path) if mark == " "]
-    return {"ok": True, "path": str(path), "marked": marked, "unticked": left}
+    result = {"ok": True, "path": str(path), "marked": marked, "unticked": left}
+    if nxt:
+        result["next"] = nxt   # the step now open: its text, so the walk goes on without a read
+    return result
 
 
 TICK_AT_ONCE = 6   # steps one tick call may close: several that closed together, never a walk at once
+REVEAL = 3         # steps whose text is open at once: the current one and the two after it; the rest open as you tick
 FLAT_LIMIT = 50   # steps in one walk: past this the method is several work orders, and the route carries the rest
 # The loop's own procedures: a step that links one runs the framework, and its steps are not part of a domain
 # method (a voicing walk with the generic resolve-an-unknown checklist inlined in the middle of it is not voicing).
@@ -759,8 +764,10 @@ _GUIDANCE = ("This procedure is the validation of your work: each step is a chec
              "per call, the reason written under it — \"already done\" and \"covered by the probe\" are not reasons: do the "
              "step and show what it found. There is no way to close a walk whole. The steps are knowledge earned on another "
              "task: adapt their specifics (names, keys, counts, the probe they mention) to what is in front of you, and do "
-             "them. Improve a step that fell short where you stand: `playbook edit-step --walk <this file> --step N --do ...` "
-             "(`add-step --walk ... --after N`, `remove-step --walk ... --step N`) changes the procedure the step came from.")
+             "them. Only the step you are on and the two after it show their text; the rest open as you tick — a walk is done "
+             "one step at a time, never taken in at once. Improve a step that fell short where you stand: `playbook edit-step "
+             "--walk <this file> --step N --do ...` (`add-step --walk ... --after N`, `remove-step --walk ... --step N`) changes "
+             "the procedure the step came from.")
 
 
 def _step_block(number: int, entry: Mapping[str, Any]) -> list[str]:
@@ -847,7 +854,10 @@ def open_procedure(procedure_id: str, purpose: str, target_dir: str | Path = "."
         path = out_dir / f"{procedure_id}--{slug}-{n}.md"
         n += 1
     path.write_text("\n".join(lines))
+    nxt = _render_walk(path) if not nested else None
     result = {"ok": True, "id": procedure_id, "title": document.get("title"), "for": purpose, "steps": count, "path": str(path)}
+    if nxt:
+        result["next"] = nxt
     if remaining:
         result["continues"] = len(remaining)
         result["next_walk"] = f"playbook open {procedure_id} --from {start + count} --for ..."
@@ -910,6 +920,54 @@ def _renumber(lines: list[str]) -> list[str]:
     return out
 
 
+def _source_entry(procedure_id: str, step: int) -> dict[str, Any]:
+    document = read_document(store.procedure_path(procedure_id))
+    steps = [st for st in (document.get("steps") or []) if isinstance(st, dict)]
+    if not 1 <= step <= len(steps):
+        raise ValueError(f"{procedure_id} has {len(steps)} steps; the walk names step {step} — the procedure changed under the walk")
+    st = steps[step - 1]
+    linked = str(st.get("procedure") or "")
+    return dict(source=procedure_id, step=step, title=str(st.get("title") or ""), do=str(st.get("do") or "").strip(),
+                linked=linked or None, framework=linked in FRAMEWORK, inlined=bool(linked and linked not in FRAMEWORK))
+
+
+def _render_walk(path: Path) -> dict[str, Any] | None:
+    """Re-render a flat walk from its source procedures: every step's title and source, the text of the step
+    the worker is on and the REVEAL-1 after it, and a closed line for the rest. A worker shown fifty steps at
+    once read them as a spec and wrote one script for all of them; a step it cannot see yet, it cannot fold in.
+    Returns the next open step (number, title, do), or None when every box is closed."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    blocks = _walk_blocks(path)
+    if not blocks or any(b["source"] is None for b in blocks):
+        return None   # a nested walk keeps its shape
+    first_open = next((i for i, b in enumerate(blocks) if b["mark"] == " "), len(blocks))
+    body: list[str] = []
+    nxt = None
+    for i, b in enumerate(blocks):
+        entry = _source_entry(b["source"], b["step"])
+        head = f"- [{b['mark']}] **{b['number']}. {entry['title']}**"
+        if i < first_open + REVEAL:
+            block = _step_block(b["number"], entry)
+            block[0] = head
+            # a skipped step keeps the reason written under it
+            reason = next((ln for ln in lines[b["start"]:b["end"]] if ln.strip().startswith("not needed here:")), None)
+            if reason:
+                block.insert(len(block) - 1, reason)
+                block.insert(len(block) - 1, "")
+            if entry.get("inlined"):
+                block.insert(len(block) - 1, f"  (links `{entry['linked']}`: its steps are inlined where it first appears in this walk)")
+                block.insert(len(block) - 1, "")
+            if i == first_open:
+                nxt = dict(number=b["number"], title=entry["title"], do=entry["do"])
+        else:
+            block = [head, "", f"  source: `{entry['source']}` · step {entry['step']}", "", "  (opens when the steps before it are ticked)", ""]
+        body += block
+    footer = lines[blocks[-1]["end"]:]
+    head_lines = lines[:blocks[0]["start"]]
+    path.write_text("\n".join(head_lines + body + footer).rstrip("\n") + "\n", encoding="utf-8")
+    return nxt
+
+
 def walk_edit_step(walk: str, number: int, new_title: str | None = None, do: str | None = None,
                    procedure: str | None = None) -> dict[str, Any]:
     """Edit the step where the worker stands: the change writes through to the procedure the step came from,
@@ -922,6 +980,7 @@ def walk_edit_step(walk: str, number: int, new_title: str | None = None, do: str
     fresh[0] = re.sub(r"^- \[ \]", f"- [{block['mark']}]", fresh[0], count=1)
     lines[block["start"]:block["end"]] = fresh
     path.write_text("\n".join(lines) + ("\n" if not "\n".join(lines).endswith("\n") else ""), encoding="utf-8")
+    _render_walk(path)
     return {**result, "walk": str(path), "walk_step": number}
 
 
@@ -931,15 +990,16 @@ def walk_add_step(walk: str, after: int, title: str, do: str, procedure: str | N
     path, block, _ = _walk_step(walk, after)
     result = add_step(block["source"], title, do, after=_source_title(block["source"], block["step"]), procedure=procedure)
     lines = path.read_text(encoding="utf-8").splitlines()
+    # Later steps of the same procedure moved down one in the source; then the new block goes in after this one.
+    for i, line in enumerate(lines):
+        k = _SOURCE_LINE.match(line)
+        if k and k.group(1) == block["source"] and int(k.group(2)) > block["step"]:
+            lines[i] = f"  source: `{block['source']}` · step {int(k.group(2)) + 1}"
     entry = dict(source=block["source"], step=block["step"] + 1, title=title, do=do)
     lines[block["end"]:block["end"]] = _step_block(after + 1, entry)
     lines = _renumber(lines)
-    # Later steps of the same procedure moved down one in the source.
-    for i, line in enumerate(lines):
-        k = _SOURCE_LINE.match(line)
-        if k and k.group(1) == block["source"] and int(k.group(2)) > block["step"] and i > block["end"] + 1:
-            lines[i] = f"  source: `{block['source']}` · step {int(k.group(2)) + 1}"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _render_walk(path)
     return {**result, "walk": str(path), "walk_step": after + 1}
 
 
@@ -955,4 +1015,5 @@ def walk_remove_step(walk: str, number: int) -> dict[str, Any]:
             lines[i] = f"  source: `{block['source']}` · step {int(k.group(2)) - 1}"
     lines = _renumber(lines)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _render_walk(path)
     return {**result, "walk": str(path), "removed_walk_step": number}

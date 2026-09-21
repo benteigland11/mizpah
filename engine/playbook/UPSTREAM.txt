@@ -10,3 +10,4 @@ diverged: `tick` refuses to close a step that links another procedure until a wa
 diverged: the whole-walk `skip` verb is gone; `tick --skip N --because ...` skips one step per call with the reason written under it
 diverged: a link that leads back to the linking procedure (through any chain) is refused by add-step/edit-step and reported by validate
 diverged: `open` is flat by default — the procedure and everything it links as one straight list of at most 50 steps (each step names its source; cut at a boundary; `--from N` opens the next walk; `--nested` keeps the older shape); `reach` measures a method through its links; `edit-step/add-step/remove-step --walk FILE --step N` write through to the source procedure
+diverged: a flat walk shows the text of the step the worker is on and the two after it; the rest open as steps are ticked (tick re-renders and returns the next step); tick closes at most six steps a call
