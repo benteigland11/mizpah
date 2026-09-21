@@ -2010,6 +2010,11 @@ def review_cadence(config: dict[str, Any]) -> ReviewPolicy:
 
 def build_settings(config: dict[str, Any], assignment: str, reference: str,
                    unknowns: list[dict[str, Any]] = ()) -> SessionSettings:
+    # What the reviewer may read of the focus files, from the reviewer's own window: three quarters of its
+    # tokens in characters (~a quarter of the window at three characters a token), a quarter of that per
+    # file. Fixed at 24000/6000 — a 60K number — the reviewer saw a 9 KB measure.py cut at 6000, could not
+    # see the boolean its correction was about, and held the correction the worker had already answered.
+    focus_budget = max(24000, int(config['controller']['context_capacity'])*3//4)
     # The check-in controller reviews on the v10 cadence against the task reference; routing and
     # project eval are separate steps in controller.py and never enter the session.
     # Check-ins are scaffolding: ~115 reviews across two runs issued no correction and held on the two
@@ -2026,7 +2031,7 @@ def build_settings(config: dict[str, Any], assignment: str, reference: str,
         final_tools=('done',),
         repeated_failure_rollover=config['mizpah'].get('repeated_failure_rollover'),
         repeated_success_rollover=config['mizpah'].get('repeated_success_rollover'),
-        review_focus_globs=focus_globs(list(unknowns)), review_focus_characters=24000, review_focus_file_characters=6000,
+        review_focus_globs=focus_globs(list(unknowns)), review_focus_characters=focus_budget, review_focus_file_characters=focus_budget//4,
         protected_paths=PROTECTED_PATHS,
         **{key: config[key] for key in ('worker_tools', 'maximum_tool_argument_characters', 'maximum_write_characters',
                                         'maximum_edit_characters', 'maximum_read_lines') if key in config})
