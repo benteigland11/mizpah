@@ -1083,23 +1083,42 @@ def test_repeated_failures_force_a_rollover_that_breaks_the_period(tmp_path):
 
 def test_review_envelope_carries_focus_files_bounded(tmp_path):
     settings, worker, shell, controller, wt, ct = setup(tmp_path, total=2, enabled=True, rollover=False)
-    settings = replace(settings, review_focus_globs=('probes/*/probe.py',), review_focus_characters=30)
+    # Glob order is priority order: the widget glob comes first here, so its file is shown first
+    # even though the probe sorts before it in the workspace.
+    settings = replace(settings, review_focus_globs=('cg/*/src/*.py', 'probes/*/probe.py'),
+                       review_focus_characters=90, review_focus_file_characters=30)
     seed = write_workspace_file(b'', 'probes/a/probe.py', b'def measure(ctx):\n    return {"x": 1}\n', byte_limit=1000000, file_limit=1000)
     seed = write_workspace_file(seed, 'probes/b/probe.py', b'def measure(ctx):\n    return {"y": 2}\n', byte_limit=1000000, file_limit=1000)
+    seed = write_workspace_file(seed, 'cg/w/src/w.py', b'def f(x):\n    return x\n', byte_limit=1000000, file_limit=1000)
     seed = write_workspace_file(seed, 'notes.md', b'not a focus file', byte_limit=1000000, file_limit=1000)
     item = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, controller=controller,
                                  initial_workspace=seed)
     assert item.run()['status'] == 'complete'
     focus = ct.inputs[0]['proposed_input']['focus_files']
-    assert list(focus) == ['probes/a/probe.py', 'probes/b/probe.py']
-    assert focus['probes/a/probe.py'].startswith('def measure(ctx):') and '[truncated at 30 characters' in focus['probes/a/probe.py']
-    assert focus['probes/b/probe.py'].startswith('[omitted: review focus budget exhausted')
+    assert list(focus) == ['cg/w/src/w.py', 'probes/a/probe.py', 'probes/b/probe.py']
+    assert focus['cg/w/src/w.py'] == 'def f(x):\n    return x\n'  # under the per-file cap: whole
+    # over the cap: cut at the cap, and the marker says how much follows — a cut is not the end of the file
+    a = focus['probes/a/probe.py']
+    assert a.startswith('def measure(ctx):') and '[cut here at 30 of 38 characters; the file continues for 8 more' in a
+    # the per-file cap keeps the second probe inside the total budget too
+    assert focus['probes/b/probe.py'].startswith('def measure(ctx):') and 'cut here at 30' in focus['probes/b/probe.py']
+    tight, *_ = setup(tmp_path/'tight', total=2, enabled=True, rollover=False)
+    tight = replace(tight, review_focus_globs=('probes/*/probe.py',), review_focus_characters=30, review_focus_file_characters=30)
+    t_settings, t_worker, t_shell, t_controller, _, t_ct = setup(tmp_path/'tight2', total=2, enabled=True, rollover=False)
+    t_settings = replace(t_settings, review_focus_globs=('probes/*/probe.py',), review_focus_characters=30, review_focus_file_characters=30)
+    other = FocusedSession.create(tmp_path/'tight2'/'session', t_settings, worker=t_worker, shell=t_shell, controller=t_controller,
+                                  initial_workspace=seed)
+    assert other.run()['status'] == 'complete'
+    focus = t_ct.inputs[0]['proposed_input']['focus_files']
+    assert focus['probes/b/probe.py'].startswith('[not shown: the review focus budget is spent')
     plain, plain_worker, plain_shell, plain_controller, _, plain_ct = setup(tmp_path/'plain', total=2, enabled=True, rollover=False)
-    other = FocusedSession.create(tmp_path/'plain'/'session', plain, worker=plain_worker, shell=plain_shell, controller=plain_controller)
-    other.run()
+    another = FocusedSession.create(tmp_path/'plain'/'session', plain, worker=plain_worker, shell=plain_shell, controller=plain_controller)
+    another.run()
     assert plain_ct.inputs[0]['proposed_input']['focus_files'] == {}
     with pytest.raises(ValueError):
         replace(settings, review_focus_characters=0)
+    with pytest.raises(ValueError):
+        replace(settings, review_focus_file_characters=0)
 
 
 class LoopingTransport(FileToolTransport):
@@ -1596,3 +1615,42 @@ def test_shared_seed_is_stored_once_and_read_by_every_session(tmp_path):
     assert (shared/(b.state['workspace']+'.sqlite3')).exists()
     reopened = FocusedSession.open(tmp_path/'b', worker=worker, shell=shell, controller=controller, shared_workspaces=shared)
     assert reopened.workspace() == seed
+
+
+def test_rebind_accepts_a_new_model_and_rolls_the_window_over_to_it(tmp_path):
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, total=3, enabled=False, rollover=False)
+    root = tmp_path/'session'
+    session = FocusedSession.create(root, settings, worker=worker, shell=shell)
+    paused = session.run(maximum_worker_turns=2)
+    assert paused['status'] == 'paused' and paused['completed_worker_turns'] == 2
+    other_transport = WorkerTransport(total=3, rollover=False)
+    other_transport.turns = 2   # the same scripted worker, continuing where the first one was
+    other = ModelClient(replace(worker.config, base_url='http://other.invalid'), transport=other_transport)
+    with pytest.raises(ValueError, match='bindings'):
+        FocusedSession.open(root, worker=other, shell=shell)
+    rebound = FocusedSession.rebind(root, worker=other, shell=shell, generation=dict(model='other'))
+    assert rebound.status()['status'] == 'ready'
+    events = [json.loads(line) for line in (root/'events'/'session.jsonl').read_text().splitlines()]
+    marks = [e['payload'] for e in events if e['event_type'] == 'rebound']
+    assert marks == [dict(worker=True, generation=dict(before='worker', after='other'), rollover=True, window=0)]
+    done = rebound.run()
+    assert done['status'] == 'complete' and done['handoffs'] == 1
+    # The new model wrote the memory and continued on it: its first request is the handoff, the rest carry
+    # its own generation block and no request ever went to the old endpoint again.
+    assert 'tools' not in other_transport.requests[0] and other_transport.handoffs == 1
+    assert all(r['model'] == 'other' for r in other_transport.requests)
+    assert len(wt.requests) == 2
+    # Same bindings again: a plain open, nothing requested.
+    again = FocusedSession.rebind(root, worker=other, shell=shell, generation=dict(model='other'))
+    assert again.state.get('rollover_requested') is None
+    assert len([e for e in events if e['event_type'] == 'rebound']) == 1
+
+
+def test_rebind_with_an_empty_window_needs_no_rollover(tmp_path):
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, total=1, enabled=False, rollover=False)
+    root = tmp_path/'session'
+    FocusedSession.create(root, settings, worker=worker, shell=shell)
+    other = ModelClient(replace(worker.config, base_url='http://other.invalid'), transport=WorkerTransport(total=1, rollover=False))
+    rebound = FocusedSession.rebind(root, worker=other, shell=shell)
+    assert rebound.state.get('rollover_requested') is None
+    assert rebound.run()['status'] == 'complete' and rebound.status()['handoffs'] == 0

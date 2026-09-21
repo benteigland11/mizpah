@@ -1705,14 +1705,18 @@ def declare_artifact_deps(config: dict[str, Any], project: Path, unknowns: list[
 
 
 def focus_globs(unknowns: list[dict[str, Any]]) -> tuple[str, ...]:
-    """Probes, widget sources, and every artifact this task's unknowns say it creates."""
-    globs = [d+'/map/probes/*/probe.py' for d in (layout.STATE_DIRNAME, layout.LEGACY_DIRNAME)] \
-        + [d+'/map/probes/*/measure.py' for d in (layout.STATE_DIRNAME, layout.LEGACY_DIRNAME)] + ['cg/*/src/*.py']
+    """What the check-in reads, most decisive first: this task's own measures, then the artifacts its
+    unknowns say it creates, then widget sources. Order is priority — the harness fills the focus budget
+    in glob order — so a task's `measure.py` is never crowded out by a project's other probes or an
+    installed widget (the changing-meter gym's reviewer saw twenty probes and a widget cut at line 76)."""
+    ids = [uid for unknown in unknowns for uid in ([unknown.get('id')] if unknown.get('id') else [])]
+    globs = [d+'/map/probes/'+uid+'_probe/measure.py' for uid in ids for d in (layout.STATE_DIRNAME, layout.LEGACY_DIRNAME)]
     for unknown in unknowns:
         creates = unknown_notes(unknown).get('creates')
         if creates:
             globs.append(creates)
             globs.append(creates.rstrip('/')+'/*')
+    globs.append('cg/*/src/*.py')
     return tuple(dict.fromkeys(globs))
 
 
@@ -1848,7 +1852,7 @@ def build_settings(config: dict[str, Any], assignment: str, reference: str,
         command_tools=COMMAND_TOOLS if config['mizpah']['scaffolding'].get('command_tools', True) else (),
         repeated_failure_rollover=config['mizpah'].get('repeated_failure_rollover'),
         repeated_success_rollover=config['mizpah'].get('repeated_success_rollover'),
-        review_focus_globs=focus_globs(list(unknowns)), review_focus_characters=12000,
+        review_focus_globs=focus_globs(list(unknowns)), review_focus_characters=24000, review_focus_file_characters=6000,
         protected_paths=PROTECTED_PATHS,
         **{key: config[key] for key in ('worker_tools', 'maximum_tool_argument_characters', 'maximum_write_characters',
                                         'maximum_edit_characters', 'maximum_read_lines') if key in config})

@@ -120,6 +120,11 @@ class SessionSettings:
     # decisive evidence is in the envelope rather than behind an investigation budget.
     review_focus_globs: tuple[str, ...] = ()
     review_focus_characters: int = 4000
+    # No one file may take the whole budget: the glob order is the priority order, and a file past its
+    # own cap is cut with a marker that says how much follows. A cut is never the end of a file — the
+    # v10-era marker read as one, and a reviewer told the widget "stops after computing means" four
+    # times over thirty turns about a file that was cut at line 76.
+    review_focus_file_characters: int = 6000
 
     def __post_init__(self) -> None:
         for name in ('repeated_failure_rollover', 'repeated_success_rollover'):
@@ -129,6 +134,8 @@ class SessionSettings:
         object.__setattr__(self, 'review_focus_globs', tuple(self.review_focus_globs))
         if type(self.review_focus_characters) is not int or self.review_focus_characters <= 0:
             raise ValueError('review_focus_characters must be a positive integer')
+        if type(self.review_focus_file_characters) is not int or self.review_focus_file_characters <= 0:
+            raise ValueError('review_focus_file_characters must be a positive integer')
         if not self.assignment.strip() or not self.worker_system.strip() or not self.guidance_prefix.strip():
             raise ValueError('Explicit worker assignment, system text and guidance prefix are required')
         tools = tuple(self.worker_tools)
@@ -610,6 +617,54 @@ class FocusedSession:
             encoded = base64.b64encode(value).decode('ascii')
             store.commit(0, lambda _: dict(content=encoded))
         return digest
+
+    @classmethod
+    def rebind(cls, root: str | Path, *, worker: ModelClient, shell: SandboxedShell,
+               controller: ModelClient | None = None, generation: dict[str, Any] | None = None) -> FocusedSession:
+        """Open a session under bindings that may have changed: another model, another endpoint, new mounts.
+
+        `open` refuses a changed binding because a window's native state (tool calls, counts) belongs to the
+        model that made it. A seat that lives across model choices — a person's standing conversation — needs
+        the other answer: accept the change, and when the window holds any work, make the next worker step a
+        forced rollover, so the new model writes the memory it continues from and starts a fresh window on
+        it. Nothing is archived and nothing replays. Unchanged bindings open exactly as `open` does. Refused
+        while an operation is pending: a rebind happens at a resolved boundary or not at all.
+        """
+        result = cls(root, worker, shell, controller)
+        with result._locked():
+            if result.journal.drop_torn_tail('session'):
+                result.journal.append(session_id='session', event_type='torn_tail_dropped', payload={})
+            result._restore()
+            changed: dict[str, Any] = {}
+            if result.state['worker_identity'] != _identity(worker):
+                changed['worker'] = True
+                result.state['worker_identity'] = _identity(worker)
+            if result.state['shell_config'] != _shell_identity(shell):
+                changed['shell'] = True
+                result.state['shell_config'] = _shell_identity(shell)
+            expected = _identity(controller) if result.settings.reference is not None else None
+            if result.state['controller_identity'] != expected:
+                changed['controller'] = True
+                result.state['controller_identity'] = expected
+            if generation is not None and dict(generation) != dict(result.settings.generation):
+                changed['generation'] = dict(before=result.settings.generation.get('model'), after=generation.get('model'))
+                result.settings = replace(result.settings, generation=dict(generation))
+                result.session.generation = deepcopy(dict(generation))
+                result.state['settings'] = asdict(result.settings)
+            capabilities = _capabilities(worker)
+            if capabilities != result.state.get('capabilities'):
+                changed['capabilities'] = True
+                result.state['capabilities'] = capabilities
+                result.session.tools = worker_tools(result.settings.worker_tools, result.settings, capabilities)
+            if changed:
+                if result.state['pending_io'] is not None:
+                    raise ValueError('Rebind only at a resolved boundary; recover the pending operation first')
+                rollover = len(result.session.messages) > len(result.session.base_messages)+1
+                if rollover and not result.state.get('rollover_requested'):
+                    result.state['rollover_requested'] = dict(reason='rebind', name='worker', count=0)
+                result._event('rebound', dict(changed, rollover=rollover, window=result.session.window_index))
+                result._save()
+        return result
 
     def workspace(self) -> Any:
         """Return the verified opaque worker workspace, never host controller files.
@@ -1115,25 +1170,37 @@ class FocusedSession:
         self._save(commit=False)
 
     def _focus_files(self) -> dict[str, str]:
-        """Bounded content of the workspace files the settings mark as decisive for review."""
+        """Bounded content of the workspace files the settings mark as decisive for review.
+
+        Globs are walked in order — the first glob is the most decisive file — so a probe's measure is
+        never crowded out by an installed widget. Each file is cut at its own cap and the cut is marked
+        with how much follows; the total budget then omits the rest, by name, so the reviewer knows what
+        it has not seen."""
         globs = self.settings.review_focus_globs
         if not globs:
             return {}
         limits = self.shell.config.limits
         options = dict(byte_limit=limits.workspace_bytes, file_limit=limits.max_files)
         snapshot = self.workspace()
+        names = workspace_files(snapshot, **options)
+        ordered: list[str] = []
+        for pattern in globs:
+            ordered += [name for name in names if fnmatch.fnmatch(name, pattern) and name not in ordered]
         result: dict[str, str] = {}
         budget = self.settings.review_focus_characters
-        for name in workspace_files(snapshot, **options):
-            if any(fnmatch.fnmatch(name, pattern) for pattern in globs):
-                if budget <= 0:
-                    result[name] = '[omitted: review focus budget exhausted; read it with workspace_read]'
-                    continue
-                text = read_workspace_file(snapshot, name, **options).decode('utf-8', errors='replace')
-                if len(text) > budget:
-                    text = text[:budget]+'\n[truncated at '+str(budget)+' characters; read the rest with workspace_read]'
-                budget -= len(text)
-                result[name] = text
+        cap = self.settings.review_focus_file_characters
+        for name in ordered:
+            if budget <= 0:
+                result[name] = '[not shown: the review focus budget is spent; this file exists and was not read]'
+                continue
+            text = read_workspace_file(snapshot, name, **options).decode('utf-8', errors='replace')
+            keep = min(cap, budget)
+            shown = min(keep, len(text))
+            if len(text) > keep:
+                text = text[:keep]+('\n[cut here at '+str(keep)+' of '+str(len(text))+' characters; the file continues '
+                                   'for '+str(len(text)-keep)+' more — this is a cut, not the end of the file]')
+            budget -= shown  # the marker is free; only what the reviewer can read is spent
+            result[name] = text
         return result
 
     def _review_payload(self, session: PersistentSession, review: dict[str, Any]) -> tuple[dict[str, Any], int]:
