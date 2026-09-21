@@ -1,3 +1,4 @@
-- Before writing a probe, ask where in the work the fact is already established or cheapest to expose, and build the pipeline so the check is a few lines there. Reverse-engineering an artifact's surface to recover what the pipeline knew a step earlier is over-engineering.
-- A false or unwelcome reading is a valid reading: fix the artifact and measure again. Never force the value; never change the world so the reading comes out right.
-- A bad run is repaired by evidence: `terra run void <run> --reason …`, then a fixed probe's run.
+- `terra probe create <id> --purpose "…" --measure q1,q2` makes the instrument; write its `measure.py`; `terra probe validate <id>` before the first run; `terra probe run <id>` stamps a run with every declared quantity read.
+- One run, many unknowns: `terra unknown link-run <unknown> <run>` for each unknown whose quantity the run reports; then `terra unknown graduate <unknown>` (or `terra known ladder <unknown>`, which runs, links, graduates and adopts in one call). Each unknown takes its own quantity from the same run.
+- Just because it can be measured does not make it evidence: a quantity is worth reporting when an unknown asks for it or a later one plausibly will. An instrument that reads out forty numbers nobody composes is noise on the map.
+- A false or unwelcome reading is a valid reading: fix the artifact and measure again; never force the value. A bad run is voided (`terra run void <run> --reason …`), never edited.
