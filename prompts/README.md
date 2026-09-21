@@ -8,10 +8,12 @@ glossary, the blocks that seat needs, then its policy — composed at load, neve
 
 `wip/` holds what is not settled: the old policies as they run today, and blocks still being written. A file
 moves up out of `wip/` when it is finished — written in the glossary's words, one meaning per term, nothing in
-it the engine does not do. `glossary.md`, `unknowns.md` and the probes pieces are there now.
+it the engine does not do. 
 
-A file's name says who gets it: no tag (`probes.md`) — every seat; a seat tag (`probes_worker.md`,
-`probes_reviewer.md`, `unknowns_controller.md`) — that seat only, composed under the shared piece of the same name.
+A file's name says where it goes and who gets it: `NN_name[_seat].md`. The number is its place in the prompt
+(`00_glossary`, `10_…`, `20_unknowns`, `30_probes`); no seat tag — every seat; a seat tag (`30_probes_worker.md`,
+`30_probes_reviewer.md`) — that seat only, composed right after the shared piece of the same number and name.
+A seat's prompt is `ls prompts/*.md` in order, keeping the untagged files and its own tag.
 
 Terms are used in the glossary's sense and no other, by every seat. A block explains; a policy instructs; the
 glossary names. Engine configs name the policy files by path (`*_policy_file`); the engine reads them from here.
