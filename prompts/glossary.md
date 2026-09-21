@@ -51,9 +51,8 @@ The words every seat in this loop uses, with one meaning each. A term below is u
 - **Work Order** — A route entry that includes the unknowns it resolves, bucket, dependencies that is handed to the worker and is the main unit of progress.
 - **Library** — Units of knowledge persisting across all projects. Includes widgets, blueprints, and procedures.
 - **Instrument** — Items that get checked in to the library and can be reused and improved.
-- **Repo** — the requestor's own project: a repository the team works in, where the deliverables are theirs.
-- **Gym** — a sandboxed, pre-configured environment the team is dropped into to get better at something, apart from any repo. Its deliverables are practice; only what reaches the library transfers.
-- **Harvest** — at green, the host's collection of what the worker minted while working: widgets validated and checked in, procedures created or improved merged to the store.
+- **Repo** — Existing folder on user's device that a task is performed in to make permanent changes.
+- **Gym** — A sandboxed, pre-configured environment a task is performed in to get better at something. Its deliverables are practice; only what reaches the library transfers.
 - **Controller** — owns brief, unknowns, route. Never uses the playbook; never sees the worker's transcript; never instructs the worker.
 - **Worker** — owns procedures, widgets, probes, knowns, map writes. Works one work order in a sandbox with `bash`, `read`, `write`, `edit` and the tools' commands.
 - **Reviewer** — the controller's look over the worker's shoulder at a completion claim: are the probes honest — does the reading come from the named source, and would a wrong artifact fail it. It never judges execution, order, or turns.
