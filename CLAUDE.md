@@ -4,7 +4,7 @@ Mizpah is a self-improving engineering loop for domains where the answer cannot 
 verified but the method and the evidence can. Three forked tools do the work; a harness
 with a controller/worker split drives them; a Flutter app is where the user holds the
 reference. This file is the orientation for a fresh session. Read it, then
-`prompts/00_glossary.md` — the words every seat and every design conversation uses, one meaning
+`prompts/glossary.md` — the words every seat and every design conversation uses, one meaning
 each; use them in that sense here too — then `docs/DESIGN.md`, then `docs/lineage/LINEAGE.md`
 if you need the evidence behind a rule.
 

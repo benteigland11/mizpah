@@ -10,10 +10,9 @@ glossary, the blocks that seat needs, then its policy — composed at load, neve
 moves up out of `wip/` when it is finished — written in the glossary's words, one meaning per term, nothing in
 it the engine does not do. 
 
-A file's name says where it goes and who gets it: `NN_name[_seat].md`. The number is its place in the prompt
-(`00_glossary`, `10_…`, `20_unknowns`, `30_probes`); no seat tag — every seat; a seat tag (`30_probes_worker.md`,
-`30_probes_reviewer.md`) — that seat only, composed right after the shared piece of the same number and name.
-A seat's prompt is `ls prompts/*.md` in order, keeping the untagged files and its own tag.
+A file's name says who gets it: `name[_seat].md`. No seat tag (`probes.md`) — every seat; a seat tag
+(`probes_worker.md`, `probes_reviewer.md`) — that seat only, composed right after the shared piece of the same
+name. The order of the pieces in a prompt is `order.txt`, one name per line; it is written when the pieces are.
 
 Terms are used in the glossary's sense and no other, by every seat. A block explains; a policy instructs; the
 glossary names. Engine configs name the policy files by path (`*_policy_file`); the engine reads them from here.
