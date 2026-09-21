@@ -552,15 +552,7 @@ def skip_walk(target: str, because: str, target_dir: str | Path = ".") -> dict[s
     because = str(because or "").strip()
     if not because:
         raise ValueError("skip needs --because: why this walk was not needed here (one line; it goes on the file)")
-    path = Path(target)
-    if not path.is_file():
-        walks = open_walks(target, target_dir)
-        if not walks:
-            raise ValueError(f"no open walk of '{target}' with unticked steps under {Path(target_dir) / OPEN_DIR}")
-        if len(walks) > 1:
-            raise ValueError(f"'{target}' has {len(walks)} unfinished walks; name the file: "
-                             + ", ".join(w["path"] for w in walks))
-        path = Path(walks[0]["path"])
+    path = _walk_file(target, target_dir)
     lines = path.read_text(encoding="utf-8").splitlines()
     skipped = 0
     for i, line in enumerate(lines):
@@ -571,6 +563,47 @@ def skip_walk(target: str, because: str, target_dir: str | Path = ".") -> dict[s
     lines += ["", f"skipped: {because}"]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return {"ok": True, "path": str(path), "skipped": skipped, "because": because}
+
+
+def _walk_file(target: str, target_dir: str | Path) -> Path:
+    path = Path(target)
+    if path.is_file():
+        return path
+    walks = open_walks(target, target_dir)
+    if not walks:
+        raise ValueError(f"no open walk of '{target}' with unticked steps under {Path(target_dir) / OPEN_DIR}")
+    if len(walks) > 1:
+        raise ValueError(f"'{target}' has {len(walks)} unfinished walks; name the file: " + ", ".join(w["path"] for w in walks))
+    return Path(walks[0]["path"])
+
+
+def tick_walk(target: str, done: list[int] | None = None, not_needed: list[int] | None = None,
+              target_dir: str | Path = ".") -> dict[str, Any]:
+    """Mark steps of an open walk in one call: `done` get `[x]`, `not_needed` get `[-]`. A worker ticking by
+    hand spent thirteen turns of grep, read and edit on seven boxes."""
+    done = list(done or []); not_needed = list(not_needed or [])
+    if not done and not not_needed:
+        raise ValueError("tick needs --done and/or --skip with step numbers, e.g. --done 1,3 --skip 2")
+    if set(done) & set(not_needed):
+        raise ValueError("a step is done or not needed, not both: " + ", ".join(str(n) for n in sorted(set(done) & set(not_needed))))
+    path = _walk_file(target, target_dir)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    seen: set[int] = set(); marked = []
+    for i, line in enumerate(lines):
+        m = _STEP_LINE.match(line)
+        if not m:
+            continue
+        n = int(m.group(2)); seen.add(n)
+        mark = "x" if n in done else "-" if n in not_needed else None
+        if mark is not None:
+            lines[i] = re.sub(r"^- \[( |x|-)\]", f"- [{mark}]", line, count=1)
+            marked.append(n)
+    missing = sorted((set(done) | set(not_needed)) - seen)
+    if missing:
+        raise ValueError(f"no such step(s) {missing}; the walk has steps {sorted(seen)}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    left = [n for mark, n, _ in walk_steps(path) if mark == " "]
+    return {"ok": True, "path": str(path), "marked": marked, "unticked": left}
 
 
 def open_procedure(procedure_id: str, purpose: str, target_dir: str | Path = ".", again: bool = False) -> dict[str, Any]:
@@ -603,8 +636,9 @@ def open_procedure(procedure_id: str, purpose: str, target_dir: str | Path = "."
         lines += [str(document["description"]).strip(), ""]
     if document.get("tags"):
         lines += ["tags: " + ", ".join(str(t) for t in document["tags"]), ""]
-    lines += ["Follow the steps in order. Tick each box before you finish: `[x]` done, `[-]` not needed here "
-              "(`playbook skip <this file> --because ...` marks everything left `[-]` when the walk does not apply). "
+    lines += ["Follow the steps in order. Tick each box before you finish: `[x]` done, `[-]` not needed here — "
+              "`playbook tick <this file> --done 1,3 --skip 2` marks several in one call; `playbook skip <this file> "
+              "--because ...` marks everything left `[-]` when the walk does not apply. "
               "Improve the procedure afterwards with `playbook edit-step` / `add-step` where a step fell short.", ""]
     for i, step in enumerate(steps, 1):
         lines += [f"- [ ] **{i}. {step.get('title', '')}**", "", f"  {str(step.get('do', '')).strip()}", ""]

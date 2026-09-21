@@ -103,6 +103,13 @@ def _build_parser() -> argparse.ArgumentParser:
     open_.add_argument("--again", action="store_true", help="a second walk for a second thing; without it an unfinished walk is handed back")
     open_.set_defaults(handler=_cmd_open)
 
+    tick = sub.add_parser("tick", help="mark steps of an open walk in one call: --done N,M get [x], --skip N get [-]")
+    tick.add_argument("target", help="the walk file under .playbook/open/, or the procedure id of its one unfinished walk")
+    tick.add_argument("--done", default="", help="step numbers done, comma separated")
+    tick.add_argument("--skip", default="", help="step numbers not needed here, comma separated")
+    tick.add_argument("--dir", default=".", help="working tree the walk is under (default: .)")
+    tick.set_defaults(handler=_cmd_tick)
+
     skip = sub.add_parser("skip", help="mark every remaining step of an open walk [-] not needed, with the reason on the file")
     skip.add_argument("target", help="the walk file under .playbook/open/, or the procedure id of its one unfinished walk")
     skip.add_argument("--because", required=True, help="why this walk was not needed here")
@@ -231,6 +238,12 @@ def _cmd_load(args: argparse.Namespace) -> dict[str, Any]:
 
 def _cmd_open(args: argparse.Namespace) -> dict[str, Any]:
     return ops.open_procedure(args.id, args.purpose, args.dir, again=args.again)
+
+
+def _cmd_tick(args: argparse.Namespace) -> dict[str, Any]:
+    def numbers(text: str) -> list[int]:
+        return [int(x) for x in text.replace(" ", "").split(",") if x]
+    return ops.tick_walk(args.target, numbers(args.done), numbers(args.skip), args.dir)
 
 
 def _cmd_skip(args: argparse.Namespace) -> dict[str, Any]:

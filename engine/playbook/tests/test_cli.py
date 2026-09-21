@@ -344,3 +344,21 @@ def test_search_lists_open_walks_here_first(tmp_path: Path, monkeypatch, capsys:
     capsys.readouterr()
     assert main(["search", "pedal", "--dir", str(tmp_path)]) == 0
     assert "open_here" not in json.loads(capsys.readouterr().out)
+
+
+def test_tick_marks_several_steps_in_one_call(tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    assert main(["create", "tune-pedal", "--title", "Tune the pedal", "--description", "d", "--tags", "midi"]) == 0
+    for n in ("One", "Two", "Three"):
+        assert main(["add-step", "tune-pedal", "--title", n, "--do", n.lower()]) == 0
+    capsys.readouterr()
+    assert main(["open", "tune-pedal", "--for", "the piece", "--dir", str(tmp_path)]) == 0
+    path = json.loads(capsys.readouterr().out)["path"]
+    assert main(["tick", "tune-pedal", "--done", "1,3", "--skip", "2", "--dir", str(tmp_path)]) == 0
+    reply = json.loads(capsys.readouterr().out)
+    assert reply["marked"] == [1, 2, 3] and reply["unticked"] == []
+    text = Path(path).read_text()
+    assert "- [x] **1." in text and "- [-] **2." in text and "- [x] **3." in text
+    assert main(["tick", path, "--done", "9", "--dir", str(tmp_path)]) == 1
+    assert "no such step" in capsys.readouterr().out
+    assert main(["tick", path, "--done", "1", "--skip", "1", "--dir", str(tmp_path)]) == 1
