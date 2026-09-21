@@ -50,8 +50,8 @@
     "subscription": "xai_grok"
   },
   "session_policy": {
-    "context_capacity": 200000,
-    "rollover_threshold": 160000,
+    "context_capacity": 61440,
+    "rollover_threshold": 50000,
     "worker_output_tokens": -1,
     "handoff_output_tokens": -1,
     "output_headroom_tokens": 10000,
