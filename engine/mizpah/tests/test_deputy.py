@@ -318,3 +318,13 @@ def test_adopt_copies_a_green_environment_gym_into_the_bases(gyms: Path, tmp_pat
     env = cfg['mizpah']['sandbox']['environment']
     assert env['PATH'].split(':')[:2] == [str(base/'venv'/'bin'), str(base/'bin')] and env['TOOL_HOME'] == str(base/'tools')
     assert str(base) in cfg['mizpah']['sandbox']['read_only_binds']
+
+
+def test_the_seat_hears_the_desk_with_every_line(gyms: Path, tmp_path: Path) -> None:
+    root = tmp_path/'deputy'
+    root.mkdir()
+    assert deputy.situation(root) == '[Desk, from the host: no drafts; the desk is clear]'
+    draft.new('etude', 'Etude', 'm', 'none')
+    (root/'showing.json').write_text('{"draft": "etude"}\n')
+    line = deputy.situation(root)
+    assert line.startswith('[Desk, from the host: drafts: etude (Etude, 0 needs, 0 deliverables)') and line.endswith('; on the desk: etude]')

@@ -122,7 +122,7 @@ def shell_for(config: dict[str, Any], root: Path) -> SandboxedShell:
         scratch_root=str(scratch), limits=ShellLimits(**config['shell']['limits']), read_only_binds=binds,
         environment=environment, share_network=False, services=None,
         refused_paths=tuple(sandbox.get('refused_paths') or ()),
-        refused_patterns=((r'(>>?|\btee\b|-i)\s*[^|;&]*\.mizpah/brief\.json', 'a brief is written with `terra brief set`, never as a file'),
+        refused_patterns=((r'(>>?|\btee\b|(?<=\s)-i(?=\s))\s*[^|;&]*\.mizpah/brief\.json', 'a brief is written with `terra brief set`, never as a file'),
                           (r'\bterra\s+brief\s+set\b[^|;&]*--status\s+active', 'issuing a brief is the Administrator\'s signature, on the desk'),
                           (r'\bmizpah\.(loop|worker|init)\b|\bmizpah\.draft\s+authorize\b', 'loops start on the Administrator\'s signature, never from this seat')),
         workspace_dir=str(gyms), cache_dirs=(), state_dirs=('.tool-output', '.session-history', '.home'))))
@@ -274,16 +274,35 @@ def showing_after(session: FocusedSession, since: int) -> dict[str, Any] | None 
     return result
 
 
+def situation(root: Path) -> str:
+    """What the desk holds, appended to each line the model hears: the drafts by slug and title, and the one on the
+    desk. Read off disk by the host, so the seat never spends turns surveying /work to learn what it has."""
+    drafts = [draft_module.summary(p) for p in draft_module.listing()]
+    showing_path = root/'showing.json'
+    shown = None
+    if showing_path.exists():
+        try:
+            shown = (json.loads(showing_path.read_text()) or {}).get('draft')
+        except ValueError:
+            shown = None
+    lines = ['[Desk, from the host: '+('drafts: '+'; '.join(
+        d['slug']+' ('+(d['title'] or 'untitled')+', '+str(d['needs'])+' needs, '+str(d['deliverables'])+' deliverables'
+        +(', env '+d['environment'] if d.get('environment') else '')+')' for d in drafts) if drafts else 'no drafts')
+        +('; on the desk: '+shown if shown else '; the desk is clear')+']']
+    return '\n'.join(lines)
+
+
 def say(config: dict[str, Any], text: str, *, turn_cap: int | None = None) -> dict[str, Any]:
     root = deputy_root()
     if not text.strip():
         raise SystemExit(json.dumps(dict(status='error', error='nothing said')))
+    heard = text.rstrip()+'\n\n'+situation(root)   # the record keeps the words as typed; the model hears the desk too
     cap = turn_cap or (config['mizpah'].get('deputy') or {}).get('turn_cap') or DEFAULT_TURN_CAP
     (root/'STOP').unlink(missing_ok=True)   # a stop is for one turn; a stale one must not end the next
     # The person's line goes on record once the seat is open: a seat that fails to open leaves the error
     # on the record instead of a line nobody answered.
     try:
-        session, fresh = open_or_create(config, root, text)
+        session, fresh = open_or_create(config, root, heard)
     except Exception as error:  # noqa: BLE001 — whatever it was, the person sees it where they spoke
         line = _turn(root, 'system', 'The seat could not be opened: '+str(error)[:300], error=True)
         return dict(status='error', error=str(error), turn=line)
@@ -302,14 +321,32 @@ def say(config: dict[str, Any], text: str, *, turn_cap: int | None = None) -> di
     try:
         if not fresh:
             status = session.status()
+            if status.get('pending_io') is not None:
+                # The last turn was cut off mid-call (the app closed, the process was killed). The torn call is
+                # dropped and the seat continues from where it was; nothing about its memory changes.
+                discarded = session.discard_pending()
+                if discarded:
+                    (root/'discarded.jsonl').open('a').write(json.dumps(discarded)+'\n')
+                    _turn(root, 'system', 'The previous turn was cut off before it finished; its last '
+                          +('command' if discarded.get('kind') == 'tool' else 'model call')+' was discarded and the seat continues.')
+                status = session.status()
             if status['status'] == 'blocked':
+                # Only a session the harness itself blocked (the window cannot fit, retries spent) starts over.
                 _archive(root, status.get('blocked_reason') or 'the session was blocked')
-                session, fresh = open_or_create(config, root, text)
+                session, fresh = open_or_create(config, root, heard)
                 since, before = 0, 0
             elif status['phase'] == 'complete':
-                session.continue_with(text)
+                session.continue_with(heard)
+            elif status['phase'] == 'worker':
+                session.interject(heard)
             else:
-                session.interject(text)
+                # Cut off inside a tool batch or a handoff: run that boundary through first, then the person's line
+                # lands as guidance at the next worker step.
+                session.run(maximum_worker_turns=1, stop_when=lambda: False)
+                if session.state['phase'] == 'complete':
+                    session.continue_with(heard)
+                else:
+                    session.interject(heard)
         outcome = session.run(maximum_worker_turns=cap, stop_when=lambda: (root/'STOP').exists())
     except ModelTransportError as error:
         from . import ops

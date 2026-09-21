@@ -2448,3 +2448,23 @@ meter audible section accented beats louder others groups twos where threes same
 Read piece.mid and verify the requested three-section shared-pulse passage, repeated melody, meters, and left-hand grouping
 approximately beat consecutive contains eight events grouping hand idea left matching melodic
 piece mid contains one approximately eight note melodic idea restated in three consecutive sections in 3 4  6 8  and 5 4  with meter events  one shared pulse  and left hand beat grouping matching each section s meter 
+piece
+Re-read piece.mid with the MIDI probe and verify that it exists as a readable file containing the requested three-section solo piano passage in 3/4, 6/8, and 5/4.
+containing exists file midi passage piano piece readable requested section three
+ piece mid  exists as a readable midi file containing the requested three section piano passage 
+names onset piece others order midi reading claim
+solo piano passage steady tempo eight bars left hand plays pulse beat right melody same line played twice first syncopated most onsets least note tied across ba
+audible downbeat louder subdivisions beat offbeats
+rhythm accounts melody onset rest piece order document midi reading claim
+improve existing musical compositional procedures fold rhythm work
+syncopation audible beat melody notes played louder ones left hand pulse stays even time velocity underneath
+Improve a compositional procedure to include rhythm work
+been compositional existing explicitly improved incorporate musical procedure rhythm steps work
+an existing musical compositional procedure has been improved so that its steps explicitly incorporate rhythm work 
+Validate piece.mid against the requested eight-bar syncopated passage structure
+across barline beat eight first full hand least left line melody most
+piece mid is an eight bar  4 4 solo piano passage at one steady tempo in which the left hand plays on every beat and the right hand melody is the same eight bar line twice  first on the beat  then syncopated with most onsets off the beat  at least one note tied across a barline  and at least one full beat rest in every phrase 
+Ensure the MIDI makes downbeats louder than beats and offbeats
+beats downbeat louder offbeats passage subdivisions
+the downbeat of every bar is louder than subdivisions  and beats are louder than offbeats in the passage 
+Compare meters.md's three section counts, groupings, and accent onsets against piece.mid onset for onset

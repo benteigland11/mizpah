@@ -338,15 +338,18 @@ def render_assignment(task: dict[str, Any], unknowns: list[dict[str, Any]], map_
                      'API that names the decisions it makes (for a piece: `apply_pedal_per_harmony(...)`, `shape_phrase_velocity(...)`, '
                      '`ritardando(...)`; for a document: the sections it lays down), tests that assert those decisions on its '
                      'output, and a README that is its interface. Name the widget for the skill, what it does to the thing '
-                     '(`music-pedal-per-harmony`, not `nine-bar-progression`), and let each function take the thing it acts '
-                     'on as input and return it changed; the body may be as specific as today\'s piece — the next piece '
-                     'that needs the skill finds it by name and improves it, which is how it becomes general. Then produce '
-                     'the artifact by calling it. Widgets are not a '
+                     '(`music-pedal-per-harmony`, not `nine-bar-progression`). The widget is the general logic: every '
+                     'function takes the thing it acts on — the notes, the chords, the strokes, the document — as an argument '
+                     'and returns it changed. What is specific to this project (this piece\'s notes, this file\'s name, this '
+                     'run\'s tempo) is glue: a short script in the project that calls the widget with that material. A widget '
+                     'that carries the material fails `cartograph validate` (a literal melody or chord list in src/, a function '
+                     'that writes a file and takes nothing but a path). If a widget you install carries hardcoded values that '
+                     'should be parameters, that is the improvement: change it to take them, keep its tests passing, call it '
+                     'from your glue — the harvest checks it in. Then produce the artifact by calling it. Widgets are not a '
                      'clean-up after the work: they are how the work meets the bar — `cartograph validate` passing on the '
                      'maker is the reading that its rules hold, before the artifact is measured. Search first (`cartograph '
-                     'search`, several terms — the maker may exist and only need one more function); a script at the project '
-                     'root is invisible to the library and lost when the task ends. After green the widget is checked in and '
-                     'the next worker installs it.')
+                     'search`, two or three words for the skill); a script at the project root is invisible to the library '
+                     'and lost when the task ends. After green the widget is checked in and the next worker installs it.')
     lines.append('Your map is `'+map_id+'` (TERRA_MAP is set): probes are shared, but the unknowns, your runs and '
                  'the knowns you graduate live there.')
     ids = [u['id'] for u in unknowns]
@@ -490,7 +493,22 @@ def pack_workspace(project: Path, playbook_store: Path | None = None, *, only: t
                 if path.stem in retired:
                     continue
                 archive.add(path, arcname=PLAYBOOK_PREFIX+'/playbook/procedures/'+path.name, recursive=False)
+        # Mizpah's widget rules ride into the workspace at Cartograph's global rules path (XDG_DATA_HOME is the
+        # playbook prefix in the sandbox), so the worker's own `cartograph validate` says what the harvest's will.
+        if CG_RULES.is_file():
+            archive.add(CG_RULES, arcname=PLAYBOOK_PREFIX+'/cartograph/rules/rules.py', recursive=False)
     return buffer.getvalue()
+
+
+CG_RULES = Path(__file__).parent/'cg_rules'/'rules.py'   # material in the instrument is a block; see the file
+
+
+def cartograph_env() -> dict[str, str]:
+    """The host's `cartograph validate` with Mizpah's rules alongside the user's own (CARTOGRAPH_ORG_RULES)."""
+    if not CG_RULES.is_file():
+        return dict(os.environ)
+    org = os.environ.get('CARTOGRAPH_ORG_RULES', '')
+    return dict(os.environ, CARTOGRAPH_ORG_RULES=str(CG_RULES.parent)+(os.pathsep+org if org else ''))
 
 
 LIBRARY_LEDGER = '.library.json'
@@ -872,7 +890,8 @@ def _harvest_widgets(snapshot: bytes, root: Path, config: dict[str, Any], projec
                 path = target/name[len(prefix):]
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(data)
-            check = sp.run([config['mizpah']['cartograph'], 'validate', str(target)], capture_output=True, text=True, cwd=temp)
+            check = sp.run([config['mizpah']['cartograph'], 'validate', str(target)], capture_output=True, text=True, cwd=temp,
+                           env=cartograph_env())
             if check.returncode != 0 or '"status": "success"' not in check.stdout:
                 result['rejected'].append(widget_id+': '+(check.stdout or check.stderr).strip()[:300])
                 continue
@@ -1001,7 +1020,8 @@ def widget_problems(config: dict[str, Any], project: Path, root: Path) -> list[s
         target = project/'cg'/directory
         if not (target/'widget.json').exists():
             continue
-        check = sp.run([config['mizpah']['cartograph'], 'validate', str(target)], capture_output=True, text=True, cwd=project)
+        check = sp.run([config['mizpah']['cartograph'], 'validate', str(target)], capture_output=True, text=True, cwd=project,
+                       env=cartograph_env())
         if check.returncode != 0 or '"status": "success"' not in check.stdout:
             text = (check.stdout or check.stderr).strip()
             try:
@@ -1940,9 +1960,9 @@ REFUSED_PATTERNS = (
     (r'--freehand\b', 'a claim-shaped task completes on map evidence (--run/--known), never on prose'),
     (r'\bcartograph\s+(checkin|publish)\b', 'widgets are checked in by the harness after green, never by the worker'),
     (r'\bplaybook\s+(remove-step|edit)\s+mizpah-', 'the bootstrap procedure is not yours to rewrite'),
-    (r'(>>?|\btee\b|-i)\s*[^|;&]*\.(terra|mizpah)/(brief|route)\.json', 'the brief moves by proposal and the route by terra route; neither is a file to write'),
-    (r'(>>?|\btee\b|-i)\s*[^|;&]*\.(terra|mizpah)/map/(knowns|runs|unknowns)/', 'knowns, runs and unknowns are born by terra commands, never by writing their files'),
-    (r'(>>?|\btee\b|-i|\bmv\b|\bcp\b)\s*[^|;&]*\.playbook/playbook/procedures/', 'the store is not a file to write: improving a procedure is `playbook edit-step` / `add-step`'),
+    (r'(>>?|\btee\b|(?<=\s)-i(?=\s))\s*[^|;&]*\.(terra|mizpah)/(brief|route)\.json', 'the brief moves by proposal and the route by terra route; neither is a file to write'),
+    (r'(>>?|\btee\b|(?<=\s)-i(?=\s))\s*[^|;&]*\.(terra|mizpah)/map/(knowns|runs|unknowns)/', 'knowns, runs and unknowns are born by terra commands, never by writing their files'),
+    (r'(>>?|\btee\b|(?<=\s)-i(?=\s)|\bmv\b|\bcp\b)\s*[^|;&]*\.playbook/playbook/procedures/', 'the store is not a file to write: improving a procedure is `playbook edit-step` / `add-step`'),
     (r'\bsystemctl\b|\bsystemd-run\b|\bloginctl\b', 'the host\'s service manager is outside the sandbox; services start with `svc start`'),
     (r'\b(pip3?|python3?\s+-m\s+pip|uv\s+pip|pipx|conda)\s+install\b', 'nothing installs in the sandbox: there is no pip and no network. The gym environment '
      'provides the toolchain and its packages (see the enablers of your task); a package it lacks is `terra route block` naming '
@@ -1963,8 +1983,9 @@ def build_settings(config: dict[str, Any], assignment: str, reference: str,
         # The reviewer looks when the worker claims done, not every N turns: the periodic look was the v10 drift
         # guard for a small model; on Luna it produced "stub not implemented yet" corrections mid-work and
         # pulled workers back into measurement inside bookkeeping rounds. `checkin_periodic: true` restores it.
+        # (The bootstrap look at turn 1 goes with it: there is nothing to review before the first turn.)
         ReviewPolicy(**(config['review_policy'] if config['mizpah'].get('checkin_periodic', False)
-                        else dict(config['review_policy'], update_interval=10**6))),
+                        else dict(config['review_policy'], update_interval=10**6, bootstrap_after_turns=10**6))),
         checkin_settings(config) if checkins else None,
         config['review_on_completion'], config['guidance_prefix'],
         maximum_generation_retries=config.get('maximum_generation_retries', 0),

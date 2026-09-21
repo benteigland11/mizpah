@@ -37,7 +37,7 @@ def test_bind_mode_binds_the_project_keeps_caches_and_writes_state_back(tmp_path
     assert shell.config.workspace_dir == str(project.resolve()) and shell.config.state_dirs == worker.state_dirs(project)
     initial = worker.pack_workspace(project, only=worker.state_dirs(project))
     from cg.infra_sandboxed_shell_execution_python.src.sandboxed_shell_execution import workspace_files
-    assert workspace_files(initial, byte_limit=10**8, file_limit=10**5) == ('.terra/brief.json',)
+    assert workspace_files(initial, byte_limit=10**8, file_limit=10**5) == ('.terra/brief.json', '.playbook/cartograph/rules/rules.py')
     try:
         r = shell.run('cat .terra/brief.json; mkdir -p build; dd if=/dev/zero of=build/big.bin bs=1M count=8 status=none; '
                       'echo "y = 2" > src/b.py; f=.terra/brie; f="$f"f.json; echo \'{"title": "tampered"}\' > "$f"; '
@@ -140,13 +140,13 @@ def test_a_bind_session_seeds_its_state_part_and_finds_it_again_after_open(tmp_p
     settings = worker.build_settings(config, 'assignment', 'reference', [])
     initial = worker.pack_workspace(project, only=worker.state_dirs(project))
     session = FocusedSession.create(root/'s', settings, worker=model, shell=shell, controller=None, initial_workspace=initial)
-    assert workspace_files(session.workspace().state, byte_limit=10**8, file_limit=10**5) == ('.mizpah/brief.json',)
+    assert workspace_files(session.workspace().state, byte_limit=10**8, file_limit=10**5) == ('.mizpah/brief.json', '.playbook/cartograph/rules/rules.py')
     result = shell.run('cat /work/.mizpah/brief.json', session.workspace())
     assert result.status == 'ok' and 'reference' in result.stdout, (result.status, result.stderr)
     shell.close()
     model2, _, shell2 = worker.bindings(config, root, 'm1', checkins=False, project=project)
     reopened = FocusedSession.open(root/'s', worker=model2, shell=shell2, controller=None)
-    assert workspace_files(reopened.workspace().state, byte_limit=10**8, file_limit=10**5) == ('.mizpah/brief.json',)
+    assert workspace_files(reopened.workspace().state, byte_limit=10**8, file_limit=10**5) == ('.mizpah/brief.json', '.playbook/cartograph/rules/rules.py')
     shell2.close()
 
 
