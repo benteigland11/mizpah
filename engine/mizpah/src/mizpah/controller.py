@@ -383,6 +383,7 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
         lines.append('# '+name+' (you asked to see this)')
         lines += ['  '+ln for ln in text.splitlines()]
     lines.append('Knowns:'+('' if observation['knowns'] else ' (none)'))
+    claims = {u['id']: u.get('claim') for u in observation['unknowns']}
     for k in observation['knowns']:
         value = k['mean'] if k['mean'] is not None else k['rate']
         if k['type'] == 'label':
@@ -392,7 +393,11 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
         elif isinstance(value, float):
             value = round(value, 4)
         stale = ' STALE: '+'; '.join(str(r)[:80] for r in k['stale_reasons'][:2]) if k.get('stale') else ''
-        lines.append('  '+str(k['id'])+' = '+str(value)+' ('+str(k['confidence'])+', n='+str(k['n'])+')'+stale)
+        # The claim is what has been read: without it the controller saw ids and numbers, could not tell that an
+        # entry's clauses were already covered, and minted a validation per clause (changing-meter, three tasks
+        # on deliverable 2's four clauses in one night).
+        claim = str(claims.get(k['id']) or '').strip()
+        lines.append('  '+str(k['id'])+' = '+str(value)+' ('+str(k['confidence'])+', n='+str(k['n'])+')'+stale+(': '+claim if claim else ''))
     if any(k.get('stale') for k in observation['knowns']):
         lines.append('A STALE known is no longer believed: a file it depends on changed after its readings. It is owed '
                      'again under the SAME id — route a task that lists the stale known\'s id among its unknowns; the '
@@ -419,6 +424,10 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
                      'was), retype it: "retype": [{"unknown": "<id>", "type": "number|boolean|label", "claim": "<sharper '
                      'claim, optional>"}] — the same id, asked right, and its task is released. Otherwise propose the '
                      'change and leave it — the artifacts that depend on the map may still be built.')
+    if observation['knowns']:
+        lines.append('A known\'s claim is what its probe reads, reviewed against the brief entry it cites when the reading '
+                     'stood. An entry with several clauses that one reading covers is answered; it is not owed a '
+                     'reading per clause. Mint a reading for an entry only for something no known\'s claim says.')
     lines.append('Route tasks:'+('' if observation['tasks'] else ' (none)'))
     finished = [t for t in observation['tasks'] if t['status'] in ('done', 'cancelled')]
     if finished:
@@ -432,6 +441,13 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
                      ((' (blocked by the harness, not the worker: '+reason+' — it is retried on the next run; nothing about the '
                        'source or the brief follows from it)') if reason.startswith(DRIVER_BLOCK) else
                       (' (blocked: '+reason+')' if reason else '')))
+    worker_blocked = [t for t in observation['tasks'] if t not in finished and t.get('blocked_reason')
+                      and not str(t['blocked_reason']).startswith(DRIVER_BLOCK)]
+    if worker_blocked:
+        lines.append('A worker that blocked saying the artifact cannot satisfy the claim as it is has found a defect in the '
+                     'artifact, not in the reading: the answer is a repair task that lists the artifact\'s own unknown (its '
+                     'builder\'s id, reopened) with the defect in its title, never the same validation routed again — a '
+                     'validation re-routed onto an unchanged artifact blocks again for the same reason.')
     if observation.get('workspaces'):
         lines.append('Worker workspaces this loop holds (a task may continue one — "continue_from": "<task>" — so its worker '
                      'resumes with its probes, its walk and its widgets in hand instead of starting from nothing):')
