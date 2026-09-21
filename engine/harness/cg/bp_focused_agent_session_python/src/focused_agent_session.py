@@ -409,6 +409,8 @@ def _identity(client: ModelClient | None) -> dict[str, Any] | None:
 
 
 HOST_SHELL_KEYS = ('refused_patterns', 'scratch_root')
+EVENT_TEXT = 4000   # a continuation's or interjection's text rides in its journal event, so a trace can say why the host spoke
+
 
 
 def _shell_binding(saved: dict[str, Any] | None) -> dict[str, Any]:
@@ -1649,7 +1651,7 @@ class FocusedSession:
                 raise ValueError('Only a completed session can be continued')
             self.session.append_guidance(message, standing=True)   # the current objective; survives a handoff
             self.state.update(phase='worker', proposed_final=None, final_text='')
-            self._event('continued', dict(window=self.session.window_index, characters=len(message), label=label or ''))
+            self._event('continued', dict(window=self.session.window_index, characters=len(message), label=label or '', text=message[:EVENT_TEXT]))
             self._save()
             return self.status()
 
@@ -1707,7 +1709,7 @@ class FocusedSession:
             if self.state['phase'] != 'worker' or self.state['pending_io'] is not None:
                 raise ValueError('Only a paused worker session can take an interjection')
             self.session.append_guidance(message)
-            self._event('interjected', dict(window=self.session.window_index, characters=len(message), label=label or ''))
+            self._event('interjected', dict(window=self.session.window_index, characters=len(message), label=label or '', text=message[:EVENT_TEXT]))
             self._save()
             return self.status()
 

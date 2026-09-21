@@ -1041,7 +1041,7 @@ def test_completed_session_continues_on_host_text_and_survives_reopen(tmp_path):
     assert request[-2]['role'] == 'assistant' and request[-2]['content'] == 'Verified final report.'
     events = [json.loads(line) for line in (tmp_path/'session'/'events'/'session.jsonl').read_text().splitlines()]
     continued = [e['payload'] for e in events if e['event_type'] == 'continued']
-    assert continued == [dict(window=0, characters=72, label='')]
+    assert continued == [dict(window=0, characters=72, label='', text='Gate red: the reading is missing its unit; keep the probe, add the unit.')]
     turns = [e['payload'] for e in events if e['event_type'] == 'worker_turn']
     assert turns[3]['applied_input'][-1]['content'].startswith('Gate red')
 
@@ -1392,7 +1392,7 @@ def test_paused_session_takes_an_interjection_at_the_turn_boundary(tmp_path):
     with pytest.raises(ValueError, match='paused worker session'):
         reopened.interject('after completion')
     events = [json.loads(line) for line in (tmp_path/'session'/'events'/'session.jsonl').read_text().splitlines()]
-    assert [e['payload'] for e in events if e['event_type'] == 'interjected'] == [dict(window=0, characters=71, label='')]
+    assert [e['payload'] for e in events if e['event_type'] == 'interjected'] == [dict(window=0, characters=71, label='', text='Effort check: past the estimate; decide whether to keep going or block.')]
 
 
 def test_retune_changes_wire_view_policy_on_a_saved_session(tmp_path):
@@ -1762,3 +1762,14 @@ def test_reopen_accepts_another_scratch_root_and_other_refusal_wording(tmp_path)
     rebound.config = dc_replace(rebound.config, read_only_binds=('/elsewhere',))
     with pytest.raises(ValueError, match='Reopen requires'):
         FocusedSession.open(root, worker=worker, shell=rebound)
+
+
+def test_a_continuation_and_an_interjection_journal_their_text(tmp_path):
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, total=1, enabled=False, rollover=False)
+    root = tmp_path/'session'
+    session = FocusedSession.create(root, settings, worker=worker, shell=shell)
+    session.run()
+    session.continue_with('Gate red. Missing:\n- known x has not been graduated', label='gate red: repair round')
+    events = [json.loads(line) for line in (root/'events'/'session.jsonl').read_text().splitlines()]
+    [cont] = [e for e in events if e['event_type'] == 'continued']
+    assert cont['payload']['label'] == 'gate red: repair round' and cont['payload']['text'].startswith('Gate red. Missing:')
