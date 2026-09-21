@@ -653,7 +653,7 @@ def procedure_merge_message(merges: list[dict[str, Any]]) -> str:
         lines.append('- `'+m['id']+'`: '+'; '.join(m['conflicts']))
     lines.append('For each: `playbook load <id>` to read the merged procedure, then `playbook edit-step <id> --title "…" --do "…"` '
                  'to carry what yours did onto their version of the step (keep what they added; say both things if both '
-                 'are true), `playbook validate <id>`, then reply that you are done; do not start other work.')
+                 'are true), `playbook validate <id>`, then call `done`; do not start other work.')
     return '\n'.join(lines)
 
 
@@ -918,8 +918,8 @@ def merge_message(conflicts: list[dict[str, Any]]) -> str:
                  'yours — then re-apply your improvement on top: keep every function and test they added, keep every one you '
                  'added, and where you both changed the same function, keep theirs and add what yours did as a parameter or a '
                  'new function rather than replacing it. Set nothing about version (the check-in bumps it). Delete the `'
-                 +UPSTREAM+'/` directory, `cartograph validate cg/<dir>` (both sets of tests must pass), then reply that you '
-                 'are done; do not start other work.')
+                 +UPSTREAM+'/` directory, `cartograph validate cg/<dir>` (both sets of tests must pass), then call `done`; '
+                 'do not start other work.')
     return '\n'.join(lines)
 
 
@@ -1684,7 +1684,7 @@ def refusal_message(refused: list[tuple[str, str]]) -> str:
         lines.append('- '+kind+' '+reason)
     lines.append('A widget must validate (`cartograph validate cg/<dir>`): tests under tests/ that pass, no project names or '
                  'paths in src/, every dependency declared. A procedure must validate (`playbook validate <id>`). '
-                 'Fix, validate, then reply that you are done; do not start other work.')
+                 'Fix, validate, then call `done`; do not start other work.')
     return '\n'.join(lines)
 
 
@@ -1731,9 +1731,9 @@ def green_message(gate: dict[str, Any], unknown_id: str | list[str], used: list[
     lines += ['- '+t for t in todo]
     lines.append('The store changes only through `playbook edit-step` / `add-step` / `remove-step` / `create`; the checklist '
                  'under `.playbook/open/` is a rendered copy. Make all your edits, then `playbook validate <id>` once per procedure you touched, and '
-                 'reply with their ids (comma separated) and nothing else. A correction from the reviewer is answered by making '
-                 'the edit once and replying with the ids — the reply is what brings the reviewer back to look; an edit that '
-                 'returned ok landed, and a held correction is not a reason to make it again.')
+                 'call `done` with their ids. A correction from the reviewer is answered by making the edit once and calling '
+                 '`done` again — that call is what brings the reviewer back to look; an edit that returned ok landed, and a '
+                 'held correction is not a reason to make it again.')
     return '\n'.join(lines)+'\n'
 
 
@@ -1901,6 +1901,13 @@ COMMAND_TOOLS: tuple[dict[str, Any], ...] = (
                                                         knowns=dict(type='array', items=dict(type='string'), flag='--known',
                                                                     description='every known id the task carries')),
                          required=['task', 'run', 'knowns'])),
+    dict(name='done', description='Say you are done. This is the only way a stretch of work ends: after `terra route '
+         'complete` reported success (summary: the run and known ids); after the write-up (summary: the procedure ids '
+         'you touched); after answering a correction from the reviewer (summary: what you changed). The reviewer looks '
+         'at this claim; nothing else brings it back. An edit that returned ok landed — do not make it again, call done.',
+         command='echo done: {summary}',
+         parameters=dict(type='object', properties=dict(summary=string('the ids, or one line on what you finished')),
+                         required=['summary'])),
     dict(name='terra_route_block', description='The honest exit: the source cannot be read as the unknown asks, or '
          'the question is not answerable from this workspace. Say what you needed and could not read; then stop.',
          command='terra route block {task} --reason {reason}',
@@ -1978,6 +1985,7 @@ def build_settings(config: dict[str, Any], assignment: str, reference: str,
         maximum_generation_retries=config.get('maximum_generation_retries', 0),
         write_existing_files=not config['mizpah']['scaffolding']['small_edits'], edit_requires_read=config['mizpah']['scaffolding']['small_edits'],
         command_tools=COMMAND_TOOLS if config['mizpah']['scaffolding'].get('command_tools', True) else (),
+        final_tools=('done',),
         repeated_failure_rollover=config['mizpah'].get('repeated_failure_rollover'),
         repeated_success_rollover=config['mizpah'].get('repeated_success_rollover'),
         review_focus_globs=focus_globs(list(unknowns)), review_focus_characters=24000, review_focus_file_characters=6000,

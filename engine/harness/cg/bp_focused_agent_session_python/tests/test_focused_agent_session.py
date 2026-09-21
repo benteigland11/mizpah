@@ -1725,3 +1725,24 @@ def test_completion_corrections_are_budgeted_and_the_reviewer_can_change_questio
     item.continue_with('write it up', label='gate green')
     item.run()
     assert transport.requests[-1]['messages'][0]['content'] == 'Review the write-up, not the probes.'
+
+
+class DoneToolTransport(FileToolTransport):
+    """Scripted worker: one bash call, then a `done` call with a summary and no text."""
+
+    def __init__(self):
+        super().__init__()
+        self.script = [('bash', dict(command='echo work')), ('done', dict(summary='run r1, known k1'))]
+
+
+def test_a_final_tool_call_is_a_completion_claim(tmp_path):
+    settings, _, shell, controller, _, ct = setup(tmp_path, total=0, enabled=False, rollover=False)
+    settings = replace(settings, worker_tools=('bash',), final_tools=('done',),
+                       command_tools=(dict(name='done', description='say you are done', command='echo done: {summary}',
+                                           parameters=dict(type='object', properties=dict(summary=dict(type='string')), required=['summary'])),))
+    transport = DoneToolTransport()
+    worker = ModelClient(EndpointConfig('http://example.invalid', 5, 1000000, {}, '/complete', '/template', '/tokenize', False, True), transport=transport)
+    item = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, controller=controller)
+    result = item.run()
+    assert result['status'] == 'complete' and result['final_text'] == 'run r1, known k1'
+    assert any(c.startswith('echo done:') and 'run r1' in c for c in shell.calls)   # the call ran like any command tool

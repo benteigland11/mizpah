@@ -102,6 +102,11 @@ class SessionSettings:
     # Typed aliases for CLI commands: each is a tool with a schema and a description the model sees on
     # every turn, rendered to a shell command and run exactly like bash. One vocabulary, discoverable.
     command_tools: tuple[dict[str, Any], ...] = ()
+    # Tools that are a completion claim: a turn that calls one is taken as final, its `summary` argument
+    # (else its arguments) as the proposed completion, exactly as a reply with no tool call would be. A
+    # model that always calls a tool never "replies with nothing else"; a worker that had answered a held
+    # correction re-edited the same step thirteen times for want of a way to say it was done.
+    final_tools: tuple[str, ...] = ()
     maximum_tool_argument_characters: int | None = None
     maximum_write_characters: int | None = None
     maximum_edit_characters: int | None = None
@@ -148,6 +153,7 @@ class SessionSettings:
             raise ValueError('Explicit worker assignment, system text and guidance prefix are required')
         tools = tuple(self.worker_tools)
         object.__setattr__(self, 'worker_tools', tools)
+        object.__setattr__(self, 'final_tools', tuple(self.final_tools))
         if not tools or 'bash' not in tools or len(set(tools)) != len(tools) or set(tools) - set(WORKER_TOOLS):
             raise ValueError('worker_tools must be distinct names from '+', '.join(WORKER_TOOLS)+' and include bash')
         names = [t.get('name') for t in self.command_tools]
@@ -827,6 +833,18 @@ class FocusedSession:
                                  'commands, or leave it')
 
     def _finish_turn(self) -> None:
+        if self.state['proposed_final'] is None and self.settings.final_tools:
+            for call in (self.state['active_turn'].get('response') or {}).get('tool_calls') or []:
+                fn = (call.get('function') or call)
+                if fn.get('name') in self.settings.final_tools:
+                    raw = fn.get('arguments')
+                    try:
+                        args = json.loads(raw) if isinstance(raw, str) else (raw or {})
+                    except ValueError:
+                        args = {}
+                    summary = str(args.get('summary') or raw or fn['name']).strip() or fn['name']
+                    self.state['proposed_final'] = summary
+                    break
         self.progress.observe(self.state['active_turn'])
         self._event('worker_turn', deepcopy(self.state['active_turn']))
         self.state['active_turn'] = None
