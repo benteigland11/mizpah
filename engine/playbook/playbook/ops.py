@@ -211,6 +211,44 @@ def _load_catalog() -> dict[str, dict[str, Any]]:
     return catalog
 
 
+_GENERIC = frozenset("a an the and or of for to in on with by from as is are be this that make build write create new run use using get set".split())
+
+
+def _skill_words(*texts: str) -> set[str]:
+    words: set[str] = set()
+    for text in texts:
+        for w in re.findall(r"[a-z0-9]+", str(text or "").lower().replace("-", " ").replace("_", " ")):
+            if len(w) >= 4 and w not in _GENERIC:
+                words.add(w[:6])   # a rough stem: compose/composition, pedal/pedalling
+    return words
+
+
+def _twin_of(procedure_id: str, title: str, tags: list[str]) -> str | None:
+    """A procedure in the store whose id and title share the new one's skill words: three or more stems in
+    common (two when the id's own words all match). `compose-nine-bar-block-chord-midi` against
+    `compose-eight-bar-piano-midi`: compose, midi, bar — a twin."""
+    mine = _skill_words(procedure_id, title)
+    mine_tags = {t.lower() for t in tags or []}
+    if not mine:
+        return None
+    best: tuple[int, str] | None = None
+    for path in store.procedures_dir().glob("*.json"):
+        if path.name.startswith("."):
+            continue
+        try:
+            document = read_document(path)
+        except (OSError, ValueError):
+            continue
+        other_id = str(document.get("id") or path.stem)
+        theirs = _skill_words(other_id, str(document.get("title") or ""))
+        shared = len(mine & theirs)
+        tag_shared = len(mine_tags & {str(t).lower() for t in (document.get("tags") or [])})
+        score = shared + (1 if tag_shared >= 2 else 0)
+        if score >= 3 and (best is None or score > best[0]):
+            best = (score, other_id)
+    return best[1] if best else None
+
+
 def create_procedure(
     procedure_id: str,
     title: str,
@@ -218,10 +256,20 @@ def create_procedure(
     tags: list[str],
     steps: list[Mapping[str, Any]] | None = None,
 ) -> Path:
-    """Write a new procedure. Pass steps to author the whole thing in one call."""
+    """Write a new procedure. Pass steps to author the whole thing in one call.
+
+    A twin of a procedure already in the store — same skill words in the id, title or tags — is refused with
+    the way out: improve that one, or create something narrower and link it from there. Four gyms each minted
+    their own "compose … piano … midi" leaf (gravity 0, one gym's piece as method) beside one another instead of
+    growing one composition method that links pedal, voicing and rubato under it."""
     target = store.procedure_path(procedure_id)
     if target.exists():
         raise FileExistsError(f"already exists: {target}")
+    twin = _twin_of(procedure_id, title, tags)
+    if twin:
+        raise ValueError(f"`{twin}` already covers this skill: improve it (`playbook add-step {twin} ...`, `edit-step`), or create "
+                         f"something narrower — one decision, one instrument — and link it from `{twin}` with a step; a "
+                         "second top-level method for the same skill is a sibling nobody walks")
     document = widget.new_procedure(procedure_id, title, description, tags)
     if steps:
         document = _append_steps(document, steps)

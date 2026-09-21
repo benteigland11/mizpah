@@ -536,3 +536,16 @@ def test_a_procedure_names_the_widgets_its_method_calls(tmp_path: Path, monkeypa
     assert main(["open", "compose", "--for", "the piece", "--dir", str(tmp_path)]) == 0
     text = Path(_json.loads(capsys.readouterr().out)["path"]).read_text()
     assert text.index("widgets: `data-music-broken-chord-piano-python`, `data-binary-midi-parser-python`") < text.index("- [ ] **1.")
+
+
+def test_a_twin_procedure_is_refused_with_the_one_to_improve(tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """One composition method that grows, not a sibling per gym: a create whose id and title share the skill words
+    of a procedure in the store is refused, naming it; a narrower procedure (one decision) is not a twin."""
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    assert main(["create", "compose-eight-bar-piano-midi", "--title", "Compose eight-bar piano MIDI with repeated melody", "--description", "d", "--tags", "midi,piano,composition"]) == 0
+    capsys.readouterr()
+    assert main(["create", "compose-nine-bar-block-chord-midi", "--title", "Compose a nine-bar block-chord MIDI", "--description", "d", "--tags", "midi,composition,chords,piano"]) == 1
+    out = capsys.readouterr().out
+    assert "compose-eight-bar-piano-midi" in out and "improve it" in out
+    assert main(["create", "midi-pedal-per-harmony", "--title", "Apply MIDI pedal per harmony", "--description", "d", "--tags", "midi,pedal"]) == 0
+    assert main(["create", "midi-closing-ritardando", "--title", "Set MIDI closing ritardando", "--description", "d", "--tags", "midi,tempo"]) == 0
