@@ -18,7 +18,7 @@ name per line.
 The reviewer is a different kind of seat: it reads files and answers one question. Nothing reaches it by
 default. Its prompt is `order_reviewer.txt`, an explicit list of exactly what it gets (the glossary, unknowns,
 probes, `probes_reviewer.md`, `policy_reviewer.md`) — a `_reviewer` tag marks a piece written for it, and only that list
-includes it. Both order files are written when the pieces are.
+includes it. The engine composes at load (`mizpah.prompts.compose`); a piece not yet finished is taken from `wip/` so the loop runs while it is written.
 
 Terms are used in the glossary's sense and no other, by every seat. A block explains; a policy instructs; the
-glossary names. Engine configs name the policy files by path (`*_policy_file`); the engine reads them from here.
+glossary names. Engine configs name this folder (`prompts_dir`); the engine composes each seat's prompt from it.

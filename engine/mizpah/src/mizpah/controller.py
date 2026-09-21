@@ -1688,7 +1688,7 @@ def ready_order(project: Path, tasks: list[dict[str, Any]]) -> list[dict[str, An
 def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dict[str, Any]:
     """One controller step: observe, decide, guard (one resubmission), apply, journal."""
     project = project.resolve()
-    system = config['mizpah']['route_policy'] if mode == 'route' else config['mizpah']['eval_policy']
+    system = config['mizpah']['controller_policy']
     client = model_client(config)
     # What each call cost: model, prompt/completion/cached tokens, so the run can say what its controller spent.
     usage: list[dict[str, Any]] = []

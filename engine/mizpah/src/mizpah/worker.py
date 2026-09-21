@@ -95,7 +95,10 @@ def load_config(path: str | Path) -> dict[str, Any]:
     config = json.loads(path.read_text())
     harness_path = (path.parent/config['harness_config']).resolve()
     harness = json.loads(harness_path.read_text())
-    config['worker_policy'] = (path.parent/config['worker_policy_file']).read_text()
+    from . import prompts as _prompts
+    prompts_dir = (path.parent/config.get('prompts_dir', '../../prompts')).resolve()
+    config['prompts_dir'] = str(prompts_dir)
+    config['worker_policy'] = _prompts.compose('worker', prompts_dir)
     # Scaffolding is method the host imposes; each piece is a toggle so a model that can orchestrate
     # can be run without it and compared. Verification guards are not toggles.
     scaffolding = dict(bootstrap=True, small_edits=True, checkins=True, command_tools=True) | (config.get('scaffolding') or {})
@@ -111,9 +114,8 @@ def load_config(path: str | Path) -> dict[str, Any]:
         config['worker_policy'] = config['worker_policy'].replace(SMALL_EDITS, WHOLE_FILES, 1)
         for key, limit in WHOLE_FILE_BOUNDS:
             harness[key] = max(int(harness.get(key) or 0), limit)
-    config['route_policy'] = (path.parent/config['route_policy_file']).read_text()
-    config['eval_policy'] = (path.parent/config['eval_policy_file']).read_text()
-    config['checkin_policy'] = (path.parent/config['checkin_policy_file']).read_text()  # tool-less; no v10 text
+    config['controller_policy'] = _prompts.compose('controller', prompts_dir)   # one controller, one loop: no route/eval modes
+    config['checkin_policy'] = _prompts.compose('reviewer', prompts_dir)
     config['playbook_store'] = str(Path(config['playbook_store']).expanduser())
     config['widget_library'] = str(Path(config['widget_library']).expanduser())
     return dict(harness, mizpah=config, harness_config_path=str(harness_path), mizpah_config_path=str(Path(path).resolve()))
