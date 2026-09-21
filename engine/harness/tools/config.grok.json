@@ -110,7 +110,7 @@
       "workspace_bytes": 268435456,
       "temporary_bytes": 268435456,
       "output_bytes": 1048576,
-      "visible_output_bytes": 262144,
+      "visible_output_bytes": 8192,
       "processes": 256,
       "cpu_percent": 200,
       "command_seconds": 90,
