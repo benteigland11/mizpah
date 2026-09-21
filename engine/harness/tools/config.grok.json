@@ -1,7 +1,7 @@
 {
   "worker": {
     "endpoint": {
-      "timeout_seconds": 300,
+      "timeout_seconds": 45,
       "maximum_response_bytes": 16000000
     },
     "generation": {
@@ -19,7 +19,7 @@
   },
   "controller": {
     "endpoint": {
-      "timeout_seconds": 300,
+      "timeout_seconds": 45,
       "maximum_response_bytes": 16000000
     },
     "generation": {
