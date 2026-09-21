@@ -157,8 +157,7 @@ def pick_task(config: dict[str, Any], project: Path, task_id: str | None = None)
             return mine[0]
         # Done on the route but its session never finished (killed after `route complete`, in the review or
         # the write-up): resumed too, so the write-up lands; `route next` does not list done tasks.
-        done = [t for t in terra(config, project, 'route', 'status')['tasks'] if t['id'] == task_id and t.get('status') == 'done'
-                and t.get('owner_agent') == config['mizpah']['agent']]
+        done = [t for t in terra(config, project, 'route', 'status')['tasks'] if t['id'] == task_id and t.get('status') == 'done']
         if done:
             return done[0]
     pickable = [task for task in tasks if task.get('pickable')]
