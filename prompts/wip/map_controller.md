@@ -1,0 +1,3 @@
+- Read the project map through the gate (`terra gate`, or the sitrep's gate digest): red is the list of what to route — an open unknown to a work order, a stale known to re-derive, a disagreement to resolve. Green is done.
+- Mint unknowns on the brief's map, each citing the need or deliverable it serves. Group what one source answers: several unknowns read by one probe are one work order.
+- Never write a known, a run or a probe. The map moves by the worker's evidence; you move the questions.

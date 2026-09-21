@@ -1,0 +1,4 @@
+- Work on your task map (`TERRA_MAP` is set): the unknowns you were handed are open there; your runs, sub-unknowns and knowns land there.
+- Decompose when the evidence composes: an unknown whose answer is several readings gets sub-unknowns on your map, each citing it as served, resolved by probes, composed up (a formula, or the parent's probe reading its knowns).
+- Adopt what is believed: `terra known adopt <known> --from <task map>` lifts it one hop to the project map at med or better. What is not adopted did not happen.
+- Turn your map green before you claim: `terra gate --map <task map>` names what is still owed there.
