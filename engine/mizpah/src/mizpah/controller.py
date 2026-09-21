@@ -300,6 +300,20 @@ def task_workspaces(root: Path) -> list[dict[str, Any]]:
                     # and the sitrep said a worker had walked cad-gpu-headlight-ibl on a piano piece.
                     walks += [m for m in re.findall(r'playbook open (?:--\S+ )*([a-z][a-z0-9-]+)', line)
                               if m not in ('help',)]
+                if '"playbook_open"' in line:
+                    # The typed verb: the id is in that call's arguments, read from the call, not the line.
+                    try:
+                        calls = ((json.loads(line).get('payload') or {}).get('response') or {}).get('tool_calls') or []
+                    except ValueError:
+                        calls = []
+                    for call in calls:
+                        fn = call.get('function') or {}
+                        if fn.get('name') == 'playbook_open':
+                            try:
+                                walks.append(str(json.loads(fn.get('arguments') or '{}').get('id') or ''))
+                            except ValueError:
+                                pass
+                    walks = [w for w in walks if w]
                 for m in re.findall(r'cg/([a-z0-9_]+)/src/', line):
                     widgets.append(m)
         except OSError:
