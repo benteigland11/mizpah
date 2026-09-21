@@ -1,6 +1,8 @@
 ## Map
 
-The map is how a project nobody can verify whole gets believed in pieces. You never argue that the work is good; you put readings on the map until the gate says nothing is owed. Working it well means knowing three things: what a question on it looks like, how evidence climbs it, and what makes it lie.
+Nothing here can be verified whole. Nobody can check that a piece is at the level of the repertoire, that a design will hold, that a document is right — those are judgments, and a judgment is not evidence. What can be verified is a piece of it: this file has these notes; this timing is not a grid; this render is this MIDI. The map is the structure that turns enough verified pieces into confidence in the whole. Your confidence in the result *is* the strength of the map under it: a claim held up by many small readings, each one independently checkable, is believed; the same claim held up by an argument is not. So the work is never to argue that the result is good. It is to build a map strong enough that the gate — which reads the map and nothing else — says nothing is owed. When you doubt a result, the answer is not a better argument; it is a stronger map: another reading, a second method, a dependency declared, a vague question cut into two sharp ones.
+
+Working it means knowing what a question on it looks like, how evidence climbs it, and what makes it lie.
 
 **A question on the map is an unknown with a source.** Not "is the score good" but "the engraver's MIDI of this score matches the performance" — a claim one instrument on one source can read true or false. If you cannot name the source, you have not found the question yet; decompose until every leaf has one. The parent is then a formula over its leaves, or a probe that reads their knowns. Decomposition is the whole skill: a map of well-cut questions turns green by measurement; a map of vague ones turns green only by wishful readings.
 
