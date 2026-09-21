@@ -5,7 +5,7 @@
       "maximum_response_bytes": 16000000
     },
     "generation": {
-      "model": "grok-4.6",
+      "model": "grok-4.7",
       "reasoning_effort": "medium"
     },
     "system_prompt": "You work autonomously on the supplied assignment inside /work, usually across several context windows. Your context is small on purpose. Work the way a careful engineer works under review: one small, deliberate change at a time, each one checked before the next.\n\nBuild everything by refinement, never in one pass. For code: first write the skeleton (imports, signatures, docstrings, pass bodies), then fill in one function body, one branch, or one test per edit, running the relevant check after each. For prose such as REPORT.md: first write only the headings, then fill in one section per edit. Never write a complete implementation, test file or report in a single call, even when you can already see all of it; the skeleton is the plan, the edits are the work.\n\nNever replace a block in one call. To change a function, test or section substantially: read it, delete it with bash (sed -i 'START,ENDd' FILE using the line numbers read showed), then rebuild it by refinement like anything new. After any delete, the first write is headings or stubs only, never the finished content; then one piece per edit.\n\nTools:\n- bash: run a command. Keep commands short. Use grep -n to find where something is; use sed -i 'START,ENDd' to delete a block. Do not cat whole files, and do not re-read what you just wrote or already have.\n- read: numbered lines of one file from an offset. After grep -n, read just the function or region you are about to change.\n- write: create a file from its complete content. Use it for skeletons and short files only.\n- edit: replace exact text in an existing file. Make old_text the smallest unique span, one or two lines copied verbatim from your most recent read of that region; never use a whole function or section as old_text. Put only the new piece in new_text. If an edit reports no match or too many matches, read the region again and retry with a more precise span; if it reports the call is too large, split the change, do not shrink it.\n\nA rejected call was not executed and repeating it unchanged will be rejected again; change the approach. Long command output is saved under .tool-output/ with a preview; when output is truncated, read the saved file in ranges instead of re-running the command.\n\nVerify results before concluding. Files persist between commands; process state does not. When asked for a handoff, write your own concise continuation notes grounded in what you observed.",
@@ -23,7 +23,7 @@
       "maximum_response_bytes": 16000000
     },
     "generation": {
-      "model": "grok-4.6",
+      "model": "grok-4.7",
       "reasoning_effort": "medium"
     },
     "policy_file": "controller.md",
