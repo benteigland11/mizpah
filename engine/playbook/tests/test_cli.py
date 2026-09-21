@@ -17,6 +17,11 @@ def searched_tree(tmp_path: Path, monkeypatch) -> None:
     (tmp_path/".playbook"/".searched").write_text("fixture\n")
 
 
+def _plan(walk: str, n: int = 60) -> None:
+    """The plan a worker writes before its first tick: every step placed under an action."""
+    Path(walk[:-3] + ".plan.md").write_text(f"1. steps 1-{n}: do them against this piece\n")
+
+
 def test_create_is_refused_until_the_tree_has_searched(tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
     (tmp_path/".playbook"/".searched").unlink()
@@ -295,11 +300,12 @@ def test_open_hands_back_an_unfinished_walk_and_steps_skip_one_at_a_time(tmp_pat
     capsys.readouterr()
     assert main(["open", "tune-pedal", "--for", "the piece", "--dir", str(tmp_path)]) == 0
     first = json.loads(capsys.readouterr().out)["path"]
+    _plan(first)
     # A second open, whatever the purpose, hands the unfinished walk back with its next step.
     assert main(["open", "tune-pedal", "--for", "the piece after the handoff", "--dir", str(tmp_path)]) == 0
     reply = json.loads(capsys.readouterr().out)
     assert reply["already_open"] and reply["path"] == first and reply["next"] == "1. Find harmonies" and reply["unticked"] == 2
-    assert len(list((tmp_path/".playbook"/"open").glob("tune-pedal--*.md"))) == 1
+    assert len([p for p in (tmp_path/".playbook"/"open").glob("tune-pedal--*.md") if not p.name.endswith(".plan.md")]) == 1
     # Tick the first step by hand; the next step moves on.
     path = Path(first)
     path.write_text(path.read_text().replace("- [ ] **1.", "- [x] **1.", 1))
@@ -308,7 +314,8 @@ def test_open_hands_back_an_unfinished_walk_and_steps_skip_one_at_a_time(tmp_pat
     # --again is a deliberate second walk for a second thing.
     assert main(["open", "tune-pedal", "--for", "the second piece", "--dir", str(tmp_path), "--again"]) == 0
     second = json.loads(capsys.readouterr().out)["path"]
-    assert second != first and len(list((tmp_path/".playbook"/"open").glob("tune-pedal--*.md"))) == 2
+    _plan(second)
+    assert second != first and len([p for p in (tmp_path/".playbook"/"open").glob("tune-pedal--*.md") if not p.name.endswith(".plan.md")]) == 2
     # Two unfinished walks: tick by id is ambiguous, tick by file is not. A step is skipped one at a time, with its
     # reason written under it; there is no verb that closes a walk whole.
     assert main(["tick", "tune-pedal", "--skip", "1", "--because", "not needed", "--dir", str(tmp_path)]) == 1
@@ -342,7 +349,7 @@ def test_search_lists_open_walks_here_first(tmp_path: Path, monkeypatch, capsys:
     assert main(["search", "pedal", "--dir", str(tmp_path)]) == 0
     assert "open_here" not in json.loads(capsys.readouterr().out)
     assert main(["open", "tune-pedal", "--for", "the piece", "--dir", str(tmp_path)]) == 0
-    capsys.readouterr()
+    _plan(json.loads(capsys.readouterr().out)["path"])
     assert main(["search", "something unrelated", "--dir", str(tmp_path)]) == 0
     reply = json.loads(capsys.readouterr().out)
     assert list(reply)[:2] == ["ok", "open_here"]
@@ -361,6 +368,7 @@ def test_tick_marks_several_steps_in_one_call(tmp_path: Path, monkeypatch, capsy
     capsys.readouterr()
     assert main(["open", "tune-pedal", "--for", "the piece", "--dir", str(tmp_path)]) == 0
     path = json.loads(capsys.readouterr().out)["path"]
+    _plan(path)
     assert main(["tick", "tune-pedal", "--done", "1,3", "--skip", "2", "--because", "no second thing here", "--note", "found it", "--dir", str(tmp_path)]) == 0
     reply = json.loads(capsys.readouterr().out)
     assert reply["marked"] == [1, 2, 3] and reply["unticked"] == []
@@ -384,6 +392,7 @@ def test_a_linked_step_ticks_only_after_its_procedure_is_walked(tmp_path: Path, 
     capsys.readouterr()
     assert main(["open", "compose", "--for", "the piece", "--dir", str(tmp_path), "--nested"]) == 0
     parent = json.loads(capsys.readouterr().out)["path"]
+    _plan(parent)
     assert main(["tick", parent, "--done", "1", "2", "--note", "found it", "--dir", str(tmp_path)]) == 1
     refusal = capsys.readouterr().out
     assert "step(s) 2 are other procedures" in refusal and "playbook open pedal-per-harmony" in refusal
@@ -392,6 +401,7 @@ def test_a_linked_step_ticks_only_after_its_procedure_is_walked(tmp_path: Path, 
     assert "open it before deciding" in capsys.readouterr().out
     assert main(["open", "pedal-per-harmony", "--for", "the piece: Pedal", "--dir", str(tmp_path), "--nested"]) == 0
     child = json.loads(capsys.readouterr().out)["path"]
+    _plan(child)
     assert main(["tick", parent, "--done", "2", "--note", "found it", "--dir", str(tmp_path)]) == 1   # opened but not finished: not done
     capsys.readouterr()
     # Opened is enough to skip it with a reason (the library's links run in circles; a closed-walk rule on both
@@ -450,19 +460,25 @@ def test_a_flat_walk_inlines_links_cuts_at_a_boundary_and_edits_write_through(tm
     assert main(["open", "compose", "--for", "the piece", "--dir", str(tmp_path), "--limit", "4"]) == 0
     reply = _json.loads(capsys.readouterr().out)
     path = Path(reply["path"])
+    _plan(str(path))
     assert reply["steps"] == 5 and reply["continues"] == 1 and "--from 5" in reply["next_walk"]
     text = path.read_text()
     assert "- [ ] **3. pedal 1**" in text and "source: `pedal` · step 1" in text and "continues: 1 more step" in text
     assert "→ this step is another procedure" not in text
-    # Only the step you are on shows its text; the rest open as you tick, and a tick out of order is refused.
-    assert "write them" in text and "do pedal 1" not in text and "(opens when the steps before it are ticked)" in text
-    assert main(["tick", str(path), "--done", "3", "--note", "found it", "--dir", str(tmp_path)]) == 1
-    assert "the walk is on step 1" in capsys.readouterr().out
-    assert main(["tick", str(path), "--done", "1", "2", "--note", "found it", "--dir", str(tmp_path)]) == 0   # in order from the current step
+    # Every step's text is open; nothing ticks before the plan, and the plan must place the step.
+    assert "write them" in text and "do pedal 1" in text
+    Path(str(path)[:-3] + ".plan.md").unlink()
+    assert main(["tick", str(path), "--done", "1", "--note", "x", "--dir", str(tmp_path)]) == 1
+    assert "no plan yet" in capsys.readouterr().out
+    Path(str(path)[:-3] + ".plan.md").write_text("1. steps 1-2: the notes and the pedal call\n2. steps 4-5: the pedal itself\n")
+    assert main(["tick", str(path), "--done", "3", "--note", "x", "--dir", str(tmp_path)]) == 1
+    assert "not in" in capsys.readouterr().out
+    _plan(str(path))
+    assert main(["tick", str(path), "--done", "1", "2", "--note", "found it", "--dir", str(tmp_path)]) == 0
     reply = _json.loads(capsys.readouterr().out)
     assert reply["next"]["number"] == 3 and reply["next"]["do"] == "do pedal 1"
     text = path.read_text()
-    assert "do pedal 1" in text and "do pedal 2" not in text and "- [x] **1. Notes**" in text
+    assert "- [x] **1. Notes**" in text and "done: found it" in text
     assert main(["tick", str(path), "--done", "3", "--note", "found it", "--dir", str(tmp_path)]) == 0
     capsys.readouterr()
     text = path.read_text()
