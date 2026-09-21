@@ -266,3 +266,12 @@ def test_a_task_may_continue_a_workspace_the_loop_holds(gym: Path, tmp_path: Pat
     assert not (new/'result.json').exists() and not (new/'writeup.started').exists()
     assert not worker.adopt_workspace(old, new)   # already holds a session
     assert worker.continue_from(dict(acceptance=['unknown:x', 'continue_from:build_piece_mid'])) == 'build_piece_mid'
+
+
+def test_a_root_adopted_but_never_retargeted_resumes_as_a_continuation() -> None:
+    from mizpah import worker
+    saved = dict(task=dict(id='check_count'), continued_from='check_count')
+    assert worker.half_adopted(saved, 'validate_parts') == 'check_count'
+    assert worker.half_adopted(saved | dict(task=dict(id='validate_parts')), 'validate_parts') == ''
+    assert worker.half_adopted(dict(task=dict(id='check_count')), 'validate_parts') == ''
+

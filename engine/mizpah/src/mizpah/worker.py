@@ -2106,6 +2106,15 @@ def adopt_workspace(source: Path, root: Path) -> bool:
     return True
 
 
+def half_adopted(saved: dict[str, Any], task_id: str | None) -> str:
+    """The source task a root was adopted from when the run died before the new task was written into it (the
+    reopen refused): the root still names the old task. Resumed as saved, it re-reported the old task's
+    completion every cycle while the route's task stayed ready — twenty controller rounds on counting-a-bar."""
+    if task_id and saved.get('continued_from') and (saved.get('task') or {}).get('id') != task_id:
+        return str(saved['continued_from'])
+    return ''
+
+
 def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | None, holder: dict[str, Any]) -> dict[str, Any]:
     """Pick (or resume), open the task map, run until green or the backstop, harvest the playbook, report.
 
@@ -2129,6 +2138,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
     resuming = (root/'state.sqlite3').exists()
     if resuming:
         saved = json.loads((root/'task.json').read_text())
+        continued = continued or half_adopted(saved, task_id)
         if continued:
             # The adopted session, the new task: picked (started on the route), its own map, its own unknowns.
             task = pick_task(config, project, task_id)
