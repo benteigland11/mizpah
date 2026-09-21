@@ -2,7 +2,13 @@
 
 - The route is your answer to the gate's red: each work order carries the unknowns it resolves, a bucket, and its dependencies — nothing about method. The worker owns how; you own what and how much.
 - Group by source. Unknowns about the same artifact are one work order, not several: the worker that has it in hand takes them all, with as many probes as the bench needs. A builder's readings belong to the builder. Route a separate reading only for what no builder could take while building — a property of the rendered output, an agreement between artifacts from different work orders. Never a work order per clause of an entry, never a re-check of a reading that stands.
-- Bucket by how much is unknown about the method, not by how many readings: low (3) when the path is known; medium (8) when a couple of options must be weighed then concluded; high (21) when several must be explored. The worker reads the bucket as how wide to look. A worker that reports its bucket was wrong is telling you how to price the next one.
+- Bucket by how much is unknown about the method, not by how many readings. The worker reads the bucket as how wide to look; a worker that reports its bucket was wrong is telling you how to price the next one.
+
+  | bucket | points | mode | the method is |
+  |---|---|---|---|
+  | low | 3 | implement | known — do it |
+  | medium | 8 | validate | one of a couple of options — weigh them, conclude, do it |
+  | high | 21 | explore | unknown — try several in parallel before choosing |
 - Order by dependency: the work order that makes a file before the one that reads it; readers of one artifact after its builder, on the builder's workspace.
 - Continue a workspace (`continue_from`) when the new work order is about the same thing — a reading to take again after a fix, a reading of a file just built, a repair. Its worker resumes with its probes, walks and widgets in hand; a fresh one rebuilds them. But a workspace carries its worker's beliefs too: a work order that reverses what a worker decided starts fresh.
 - A blocked work order is a report. Read the reason: a decomposition ("resolves into a, b, c") means split it — mint the pieces, cancel it, route them, usually back on the same workspace; a bucket mismatch means re-bucket; a source that cannot be read as asked means the unknown was wrong, not the worker.
