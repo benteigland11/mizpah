@@ -256,7 +256,7 @@ def test_a_step_can_link_another_procedure_and_open_renders_the_walk(tmp_path: P
     document = json.loads(procedure_path("build-page").read_text(encoding="utf-8"))
     assert document["steps"][0]["procedure"] == "measure-gutters"
     capsys.readouterr()
-    assert main(["open", "build-page", "--for", "the landing page", "--dir", str(tmp_path)]) == 0
+    assert main(["open", "build-page", "--for", "the landing page", "--dir", str(tmp_path), "--nested"]) == 0
     text = next((tmp_path/".playbook"/"open").glob("build-page--*.md")).read_text()
     assert 'playbook open measure-gutters --for "the landing page: Gutters"' in text
     # Unlink, and a link to a procedure deleted afterwards shows up in validate.
@@ -382,7 +382,7 @@ def test_a_linked_step_ticks_only_after_its_procedure_is_walked(tmp_path: Path, 
     assert main(["add-step", "compose", "--title", "Notes", "--do", "write them"]) == 0
     assert main(["add-step", "compose", "--title", "Pedal", "--do", "apply", "--procedure", "pedal-per-harmony"]) == 0
     capsys.readouterr()
-    assert main(["open", "compose", "--for", "the piece", "--dir", str(tmp_path)]) == 0
+    assert main(["open", "compose", "--for", "the piece", "--dir", str(tmp_path), "--nested"]) == 0
     parent = json.loads(capsys.readouterr().out)["path"]
     assert main(["tick", parent, "--done", "1", "2", "--dir", str(tmp_path)]) == 1
     refusal = capsys.readouterr().out
@@ -390,7 +390,7 @@ def test_a_linked_step_ticks_only_after_its_procedure_is_walked(tmp_path: Path, 
     assert "- [ ] **2." in Path(parent).read_text()   # nothing ticked, not even step 1
     assert main(["tick", parent, "--skip", "2", "--because", "x", "--dir", str(tmp_path)]) == 1   # skipping it needs the walk opened
     assert "open it before deciding" in capsys.readouterr().out
-    assert main(["open", "pedal-per-harmony", "--for", "the piece: Pedal", "--dir", str(tmp_path)]) == 0
+    assert main(["open", "pedal-per-harmony", "--for", "the piece: Pedal", "--dir", str(tmp_path), "--nested"]) == 0
     child = json.loads(capsys.readouterr().out)["path"]
     assert main(["tick", parent, "--done", "2", "--dir", str(tmp_path)]) == 1   # opened but not finished: not done
     capsys.readouterr()
@@ -428,3 +428,54 @@ def test_a_link_that_leads_back_is_refused_and_reported(tmp_path: Path, monkeypa
     assert main(["validate", "pedal"]) == 2
     reply = _json.loads(capsys.readouterr().out)
     assert not reply["valid"] and any("links a circle" in e["message"] for e in reply["errors"])
+
+
+def test_a_flat_walk_inlines_links_cuts_at_a_boundary_and_edits_write_through(tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """One straight list through the links, each step naming its source; the cut lands where the method comes
+    back to its own steps; edits by walk step change the procedure the step came from and re-render the block."""
+    import json as _json
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    for pid, n in (("pedal", 3), ("compose", 0)):
+        assert main(["create", pid, "--title", pid, "--description", "d", "--tags", "midi"]) == 0
+        for i in range(1, n + 1):
+            assert main(["add-step", pid, "--title", f"{pid} {i}", "--do", f"do {pid} {i}"]) == 0
+    assert main(["add-step", "compose", "--title", "Notes", "--do", "write them"]) == 0
+    assert main(["add-step", "compose", "--title", "Pedal", "--do", "apply", "--procedure", "pedal"]) == 0
+    assert main(["add-step", "compose", "--title", "Rubato", "--do", "slow the end"]) == 0
+    capsys.readouterr()
+    assert main(["reach", "compose"]) == 0
+    r = _json.loads(capsys.readouterr().out)
+    assert r["steps"] == 6 and r["procedures"] == {"compose": 3, "pedal": 3} and r["walks"] == 1
+    # limit 4 would cut inside pedal; the cut moves to where compose's own steps resume (after pedal 3).
+    assert main(["open", "compose", "--for", "the piece", "--dir", str(tmp_path), "--limit", "4"]) == 0
+    reply = _json.loads(capsys.readouterr().out)
+    path = Path(reply["path"])
+    assert reply["steps"] == 5 and reply["continues"] == 1 and "--from 5" in reply["next_walk"]
+    text = path.read_text()
+    assert "- [ ] **3. pedal 1**" in text and "source: `pedal` · step 1" in text and "continues: 1 more step" in text
+    assert "→ this step is another procedure" not in text
+    # edit where you stand: walk step 4 is pedal step 2
+    assert main(["edit-step", "--walk", str(path), "--step", "4", "--do", "release before the next harmony"]) == 0
+    capsys.readouterr()
+    doc = _json.loads((tmp_path/"playbook"/"procedures"/"pedal.json").read_text())
+    assert doc["steps"][1]["do"] == "release before the next harmony"
+    assert "release before the next harmony" in path.read_text() and "- [ ] **4. pedal 2**" in path.read_text()
+    assert main(["tick", str(path), "--done", "1", "2", "--dir", str(tmp_path)]) == 0   # no linked-step rule on a flat walk
+    capsys.readouterr()
+    # add after walk step 3 (pedal 1): goes into pedal after step 1; the walk renumbers and later sources shift
+    assert main(["add-step", "--walk", str(path), "--after", "3", "--title", "pedal 1b", "--do", "half pedal"]) == 0
+    capsys.readouterr()
+    doc = _json.loads((tmp_path/"playbook"/"procedures"/"pedal.json").read_text())
+    assert [s["title"] for s in doc["steps"]] == ["pedal 1", "pedal 1b", "pedal 2", "pedal 3"]
+    text = path.read_text()
+    assert "- [ ] **4. pedal 1b**" in text and "- [ ] **5. pedal 2**" in text and "source: `pedal` · step 3" in text and "- [x] **1. Notes**" in text
+    # remove walk step 6 (pedal 3)
+    assert main(["remove-step", "--walk", str(path), "--step", "6"]) == 0
+    capsys.readouterr()
+    doc = _json.loads((tmp_path/"playbook"/"procedures"/"pedal.json").read_text())
+    assert [s["title"] for s in doc["steps"]] == ["pedal 1", "pedal 1b", "pedal 2"]
+    assert "pedal 3" not in path.read_text() and "continues: 1 more step" in path.read_text()
+    # the continuation is its own walk even while the first is open
+    assert main(["open", "compose", "--for", "the piece", "--dir", str(tmp_path), "--from", "5"]) == 0
+    reply = _json.loads(capsys.readouterr().out)
+    assert "already_open" not in reply and reply["steps"] == 1 and "Rubato" in Path(reply["path"]).read_text()

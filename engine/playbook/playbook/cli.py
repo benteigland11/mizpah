@@ -101,7 +101,14 @@ def _build_parser() -> argparse.ArgumentParser:
     open_.add_argument("--for", dest="purpose", required=True, help="what this walk is for (an unknown, an artifact, a source); names the file")
     open_.add_argument("--dir", default=".", help="working tree to write under (default: .)")
     open_.add_argument("--again", action="store_true", help="a second walk for a second thing; without it an unfinished walk is handed back")
+    open_.add_argument("--nested", action="store_true", help="the procedure alone, linked steps as links to open (default: flat — links inlined, one straight list)")
+    open_.add_argument("--limit", type=int, default=0, help=f"steps in this walk (default {ops.FLAT_LIMIT}); the rest continues in the next walk")
+    open_.add_argument("--from", dest="start", type=int, default=0, help="0-based step of the flattened method to start at (the next walk of a long method)")
     open_.set_defaults(handler=_cmd_open)
+
+    reach = sub.add_parser("reach", help="how long a method really is: steps through its links, and how many walks that is")
+    reach.add_argument("id")
+    reach.set_defaults(handler=_cmd_reach)
 
     tick = sub.add_parser("tick", help="mark steps of an open walk: --done N,M get [x]; --skip N --because ... gets [-] with the reason under it")
     tick.add_argument("target", help="the walk file under .playbook/open/, or the procedure id of its one unfinished walk")
@@ -117,7 +124,8 @@ def _build_parser() -> argparse.ArgumentParser:
     validate.set_defaults(handler=_cmd_validate)
 
     add_step = sub.add_parser("add-step", help="append a serial step (title + do; --procedure links another procedure as the step)")
-    add_step.add_argument("id")
+    add_step.add_argument("id", nargs="?", default="", help="procedure id (or --walk FILE --after N to add where you stand)")
+    add_step.add_argument("--walk", default="", help="an open flat walk: the new step goes into the procedure the --after step came from")
     add_step.add_argument("--title", required=True, help="short trail label")
     add_step.add_argument("--do", dest="do_text", required=True, help="imperative: do this")
     add_step.add_argument("--after", default="", help="insert after this unique title (default: append)")
@@ -135,16 +143,20 @@ def _build_parser() -> argparse.ArgumentParser:
     add_steps.set_defaults(handler=_cmd_add_steps)
 
     edit_step = sub.add_parser("edit-step", help="edit a step by its unique title")
-    edit_step.add_argument("id")
-    edit_step.add_argument("--title", required=True, help="current unique title to target")
+    edit_step.add_argument("id", nargs="?", default="", help="procedure id (or --walk FILE --step N to edit where you stand)")
+    edit_step.add_argument("--walk", default="", help="an open flat walk: the edit writes through to the procedure the step came from")
+    edit_step.add_argument("--step", type=int, default=0, help="with --walk: the step number in that walk")
+    edit_step.add_argument("--title", default="", help="current unique title to target (without --walk)")
     edit_step.add_argument("--rename", default="", help="new title (id stays the same)")
     edit_step.add_argument("--do", dest="do_text", default="", help="new imperative")
     edit_step.add_argument("--procedure", default=None, help="link another procedure to this step ('' to unlink)")
     edit_step.set_defaults(handler=_cmd_edit_step)
 
     remove_step = sub.add_parser("remove-step", help="remove a step by its unique title; remaining steps stay in order")
-    remove_step.add_argument("id")
-    remove_step.add_argument("--title", required=True, help="unique title to remove")
+    remove_step.add_argument("id", nargs="?", default="", help="procedure id (or --walk FILE --step N)")
+    remove_step.add_argument("--walk", default="", help="an open flat walk: the step is removed from the procedure it came from")
+    remove_step.add_argument("--step", type=int, default=0, help="with --walk: the step number in that walk")
+    remove_step.add_argument("--title", default="", help="unique title to remove (without --walk)")
     remove_step.set_defaults(handler=_cmd_remove_step)
 
     move_step = sub.add_parser("move-step", help="move a step by its unique title to a 1-based position; others keep their order")
@@ -233,7 +245,12 @@ def _cmd_load(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _cmd_open(args: argparse.Namespace) -> dict[str, Any]:
-    return ops.open_procedure(args.id, args.purpose, args.dir, again=args.again)
+    return ops.open_procedure(args.id, args.purpose, args.dir, again=args.again, nested=args.nested,
+                              limit=args.limit or ops.FLAT_LIMIT, start=args.start)
+
+
+def _cmd_reach(args: argparse.Namespace) -> dict[str, Any]:
+    return ops.reach(args.id)
 
 
 def _cmd_tick(args: argparse.Namespace) -> dict[str, Any]:
@@ -253,6 +270,12 @@ def _cmd_validate(args: argparse.Namespace) -> dict[str, Any]:
 
 def _cmd_add_step(args: argparse.Namespace) -> dict[str, Any]:
     after = args.after.strip() or None
+    if args.walk:
+        if not after or not after.isdigit():
+            raise ValueError("with --walk, --after is the step number in that walk the new step follows")
+        return ops.walk_add_step(args.walk, int(after), args.title, args.do_text, procedure=args.procedure.strip() or None)
+    if not args.id:
+        raise ValueError("add-step needs a procedure id, or --walk FILE --after N")
     return ops.add_step(args.id, args.title, args.do_text, after=after, procedure=args.procedure.strip() or None)
 
 
@@ -268,6 +291,12 @@ def _cmd_edit_step(args: argparse.Namespace) -> dict[str, Any]:
     do_text = args.do_text.strip() or None
     if new_title is None and do_text is None and args.procedure is None:
         raise ValueError("edit-step requires --rename, --do and/or --procedure")
+    if args.walk:
+        if not args.step:
+            raise ValueError("with --walk, --step N names the step in that walk")
+        return ops.walk_edit_step(args.walk, args.step, new_title=new_title, do=do_text, procedure=args.procedure)
+    if not args.id or not args.title:
+        raise ValueError("edit-step needs a procedure id and --title, or --walk FILE --step N")
     return ops.edit_step(args.id, args.title, new_title=new_title, do=do_text, procedure=args.procedure)
 
 
@@ -280,6 +309,12 @@ def _cmd_move_step(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _cmd_remove_step(args: argparse.Namespace) -> dict[str, Any]:
+    if args.walk:
+        if not args.step:
+            raise ValueError("with --walk, --step N names the step in that walk")
+        return ops.walk_remove_step(args.walk, args.step)
+    if not args.id or not args.title:
+        raise ValueError("remove-step needs a procedure id and --title, or --walk FILE --step N")
     return ops.remove_step(args.id, args.title)
 
 

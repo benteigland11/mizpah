@@ -688,19 +688,82 @@ def tick_walk(target: str, done: list[int] | None = None, not_needed: list[int] 
     return {"ok": True, "path": str(path), "marked": marked, "unticked": left}
 
 
-def open_procedure(procedure_id: str, purpose: str, target_dir: str | Path = ".", again: bool = False) -> dict[str, Any]:
-    """Materialise a whole procedure as a checklist file in the working tree, to be read once and followed.
+FLAT_LIMIT = 50   # steps in one walk: past this the method is several work orders, and the route carries the rest
+# The loop's own procedures: a step that links one runs the framework, and its steps are not part of a domain
+# method (a voicing walk with the generic resolve-an-unknown checklist inlined in the middle of it is not voicing).
+FRAMEWORK = frozenset({"mizpah-resolve-unknown", "mizpah-build-environment", "cartograph-widget", "author-procedure"})
+_SOURCE_LINE = re.compile(r"^\s*source: `([A-Za-z0-9._-]+)` · step (\d+)\s*$")
 
-    `start --step` drips one step per call, which a small-window model needed; a capable model spends a
-    turn per step for nothing. Every open is its own copy, named and headed by what it is for, so a
-    procedure walked twice in one task (two artifacts, two sources) keeps two checklists — but only on
-    `--again`: a walk still in progress is handed back with its next step, because a worker whose window
-    rolled over opens the same procedure a second time and leaves a fresh unticked copy behind.
+
+def expand(procedure_id: str, _ancestors: tuple[str, ...] = (), _seen: set[str] | None = None) -> list[dict[str, Any]]:
+    """The procedure as one straight list of steps: a step that links another procedure is followed, in place,
+    by that procedure's steps (depth first), each entry remembering its source procedure and step number. Each
+    procedure is inlined once per walk — a later link to it says so instead (the music library reaches
+    midi-artifact-validation by four paths; inlining it four times made an eight-step procedure 258 steps long).
+    A link back into the chain being expanded is noted, not followed (the library from before the circle rule)."""
+    document = read_document(store.procedure_path(procedure_id))
+    out: list[dict[str, Any]] = []
+    chain = _ancestors + (procedure_id,)
+    seen = _seen if _seen is not None else {procedure_id}
+    for index, step in enumerate([st for st in (document.get("steps") or []) if isinstance(st, dict)], 1):
+        linked = str(step.get("procedure") or "")
+        out.append(dict(source=procedure_id, step=index, title=str(step.get("title") or ""),
+                        do=str(step.get("do") or "").strip(), depth=len(_ancestors), linked=linked or None,
+                        circular=bool(linked and linked in chain), inlined_above=bool(linked and linked in seen and linked not in chain)))
+        if linked in FRAMEWORK:
+            out[-1]["framework"] = True
+        elif linked and linked not in seen and store.procedure_path(linked).is_file():
+            seen.add(linked)
+            out.extend(expand(linked, chain, seen))
+    return out
+
+
+def reach(procedure_id: str) -> dict[str, Any]:
+    """How long the method really is: steps through links, the procedures it runs, and how many walks that is."""
+    entries = expand(procedure_id)
+    by_source: dict[str, int] = {}
+    for e in entries:
+        by_source[e["source"]] = by_source.get(e["source"], 0) + 1
+    return {"ok": True, "id": procedure_id, "steps": len(entries), "procedures": by_source,
+            "walks": -(-len(entries) // FLAT_LIMIT), "limit": FLAT_LIMIT}
+
+
+_GUIDANCE = ("This procedure is the validation of your work: each step is a check or a change someone found necessary, "
+             "written down so the next piece gets it too. Do the steps in order, against what is in front of you, and tick "
+             "as you go — in the same command as the step's work: `playbook tick <this file> --done N` when a step is done "
+             "(several when several closed together). A step that does not apply here is `--skip N --because \"...\"`, one "
+             "per call, the reason written under it — \"already done\" and \"covered by the probe\" are not reasons: do the "
+             "step and show what it found. There is no way to close a walk whole. The steps are knowledge earned on another "
+             "task: adapt their specifics (names, keys, counts, the probe they mention) to what is in front of you, and do "
+             "them. Improve a step that fell short where you stand: `playbook edit-step --walk <this file> --step N --do ...` "
+             "(`add-step --walk ... --after N`, `remove-step --walk ... --step N`) changes the procedure the step came from.")
+
+
+def _step_block(number: int, entry: Mapping[str, Any]) -> list[str]:
+    lines = [f"- [ ] **{number}. {entry['title']}**", "", f"  source: `{entry['source']}` · step {entry['step']}", "", f"  {entry['do']}", ""]
+    if entry.get("framework"):
+        lines += [f"  (this step runs `{entry['linked']}`, the loop's own procedure — you know it; `playbook open {entry['linked']} --nested` if you need its steps)", ""]
+    elif entry.get("circular"):
+        lines += [f"  (links `{entry['linked']}`, which is already in this chain — not inlined)", ""]
+    elif entry.get("inlined_above"):
+        lines += [f"  (links `{entry['linked']}`, inlined once above — do this step with those steps in mind)", ""]
+    return lines
+
+
+def open_procedure(procedure_id: str, purpose: str, target_dir: str | Path = ".", again: bool = False,
+                   nested: bool = False, limit: int = FLAT_LIMIT, start: int = 0) -> dict[str, Any]:
+    """Materialise a procedure as a checklist file in the working tree, to be read once and followed.
+
+    Flat by default: the procedure and everything its steps link, as one straight list of at most `limit`
+    steps, each step naming the procedure it came from; what falls past the limit is the next walk (`start`)
+    and the route's to carry. `nested` keeps the older shape — the procedure alone, linked steps as links to
+    open. Every open is its own copy, named and headed by what it is for; a walk still in progress is handed
+    back with its next step unless `again`.
     """
     purpose = str(purpose or "").strip()
     if not purpose:
         raise ValueError("open needs --for: what this walk of the procedure is for (an unknown, an artifact, a source)")
-    if not again:
+    if not again and not start:   # a continuation (--from) is the next walk by definition
         unfinished = open_walks(procedure_id, target_dir)
         if unfinished:
             walk = unfinished[-1]
@@ -711,29 +774,52 @@ def open_procedure(procedure_id: str, purpose: str, target_dir: str | Path = "."
                              "second walk for a second thing.")}
     document = read_document(store.procedure_path(procedure_id))
     _require_valid(document, procedure_id)
-    library.touch([procedure_id], "use")
-    steps = [s for s in (document.get("steps") or []) if isinstance(s, dict)]
     lines = [f"# {document.get('title') or procedure_id}", "", f"procedure: `{procedure_id}`", f"for: {purpose}", ""]
     if document.get("description"):
         lines += [str(document["description"]).strip(), ""]
     if document.get("tags"):
         lines += ["tags: " + ", ".join(str(t) for t in document["tags"]), ""]
-    lines += ["This procedure is the validation of your work: each step is a check or a change someone found necessary, "
-              "written down so the next piece gets it too. Do the steps in order, against what is in front of you, and tick "
-              "as you go — in the same command as the step's work: `playbook tick <this file> --done N` when a step is done "
-              "(several when several closed together). A step that does not apply here is `--skip N --because \"...\"`, one "
-              "per call, the reason written under it — \"already done\" and \"covered by the probe\" are not reasons: do the "
-              "step and show what it found. There is no way to close a walk whole. The steps are knowledge earned on another "
-              "task: adapt their specifics (names, keys, counts, the probe they mention) to what is in front of you, and do "
-              "them. A step that is another procedure is walked as well — open it, finish it, then tick here; `tick` refuses "
-              "a linked step whose walk is not closed. Improve the procedure afterwards with `playbook edit-step` / `add-step` "
-              "where a step fell short.", ""]
-    for i, step in enumerate(steps, 1):
-        lines += [f"- [ ] **{i}. {step.get('title', '')}**", "", f"  {str(step.get('do', '')).strip()}", ""]
-        if step.get("procedure"):
-            linked = str(step["procedure"])
-            lines += [f"  → this step is another procedure: `playbook open {linked} --for \"{purpose}: {step.get('title', '')}\"` "
-                      f"— walk that checklist, then tick this box.", ""]
+    remaining: list[dict[str, Any]] = []
+    if nested:
+        library.touch([procedure_id], "use")
+        steps = [st for st in (document.get("steps") or []) if isinstance(st, dict)]
+        lines += [_GUIDANCE + " A step that is another procedure is walked as well — open it, finish it, then tick here; "
+                  "`tick` refuses a linked step whose walk is not closed.", ""]
+        for i, step in enumerate(steps, 1):
+            lines += [f"- [ ] **{i}. {step.get('title', '')}**", "", f"  {str(step.get('do', '')).strip()}", ""]
+            if step.get("procedure"):
+                linked = str(step["procedure"])
+                lines += [f"  → this step is another procedure: `playbook open {linked} --for \"{purpose}: {step.get('title', '')}\"` "
+                          f"— walk that checklist, then tick this box.", ""]
+        count = len(steps)
+    else:
+        entries = expand(procedure_id)
+        if start < 0 or start >= len(entries):
+            raise ValueError(f"--from {start}: the flattened method has {len(entries)} steps (0-based start)")
+        # The cut falls where the method comes back up to its own steps (depth 0), so an inlined procedure is
+        # not split across walks; the walk runs over the limit by at most a third for that.
+        limit = max(1, int(limit))
+        end = min(len(entries), start + limit)
+        if end < len(entries) and entries[end]["depth"] > 0:
+            for k in range(end, min(len(entries), start + limit + limit // 3) + 1):
+                if k == len(entries) or entries[k]["depth"] == 0:
+                    end = k
+                    break
+        chosen = entries[start:end]
+        remaining = entries[end:]
+        library.touch(sorted({e["source"] for e in chosen}), "use")
+        lines += [_GUIDANCE, "", f"flat: steps {start + 1}–{start + len(chosen)} of {len(entries)} through "
+                  f"{len({e['source'] for e in entries})} procedure(s); a step's source is named under it.", ""]
+        for i, e in enumerate(chosen, 1):
+            lines += _step_block(i, e)
+        if remaining:
+            by_source: dict[str, int] = {}
+            for e in remaining:
+                by_source[e["source"]] = by_source.get(e["source"], 0) + 1
+            lines += [f"continues: {len(remaining)} more step(s) — " + "; ".join(f"{k} ({v})" for k, v in by_source.items())
+                      + f" — next walk: `playbook open {procedure_id} --from {start + len(chosen)} --for \"...\"`; "
+                      "the route carries it (`terra route block` naming it when it is more than this task holds)", ""]
+        count = len(chosen)
     out_dir = Path(target_dir) / OPEN_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     slug = re.sub(r"[^a-z0-9]+", "-", purpose.lower()).strip("-")[:48] or "walk"
@@ -743,4 +829,112 @@ def open_procedure(procedure_id: str, purpose: str, target_dir: str | Path = "."
         path = out_dir / f"{procedure_id}--{slug}-{n}.md"
         n += 1
     path.write_text("\n".join(lines))
-    return {"ok": True, "id": procedure_id, "title": document.get("title"), "for": purpose, "steps": len(steps), "path": str(path)}
+    result = {"ok": True, "id": procedure_id, "title": document.get("title"), "for": purpose, "steps": count, "path": str(path)}
+    if remaining:
+        result["continues"] = len(remaining)
+        result["next_walk"] = f"playbook open {procedure_id} --from {start + count} --for ..."
+    return result
+
+
+def _walk_blocks(path: Path) -> list[dict[str, Any]]:
+    """The step blocks of a flat walk: (number, mark, title, source, step, first line index, last line index)."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    blocks: list[dict[str, Any]] = []
+    for i, line in enumerate(lines):
+        m = _STEP_LINE.match(line)
+        if m:
+            if blocks:
+                blocks[-1]["end"] = i
+            blocks.append(dict(number=int(m.group(2)), mark=m.group(1), title=m.group(3), start=i, end=len(lines), source=None, step=None))
+            continue
+        k = _SOURCE_LINE.match(line)
+        if k and blocks and blocks[-1]["source"] is None:
+            blocks[-1]["source"], blocks[-1]["step"] = k.group(1), int(k.group(2))
+    for b in blocks:   # the footer (continues:) is not part of the last block
+        text = lines[b["start"]:b["end"]]
+        for j, ln in enumerate(text):
+            if ln.startswith("continues:"):
+                b["end"] = b["start"] + j
+                break
+    return blocks
+
+
+def _walk_step(walk: str, number: int) -> tuple[Path, dict[str, Any], list[dict[str, Any]]]:
+    path = Path(walk)
+    if not path.is_file():
+        raise ValueError(f"no such walk file: {walk}")
+    blocks = _walk_blocks(path)
+    block = next((b for b in blocks if b["number"] == number), None)
+    if block is None:
+        raise ValueError(f"the walk has no step {number}; it has {[b['number'] for b in blocks]}")
+    if not block["source"]:
+        raise ValueError(f"step {number} names no source procedure (a nested walk?); edit the procedure by id instead")
+    return path, block, blocks
+
+
+def _source_title(procedure_id: str, step: int) -> str:
+    document = read_document(store.procedure_path(procedure_id))
+    steps = [st for st in (document.get("steps") or []) if isinstance(st, dict)]
+    if not 1 <= step <= len(steps):
+        raise ValueError(f"{procedure_id} has {len(steps)} steps; the walk names step {step} — the procedure changed under the walk")
+    return str(steps[step - 1].get("title") or "")
+
+
+def _renumber(lines: list[str]) -> list[str]:
+    n = 0
+    out = []
+    for line in lines:
+        m = _STEP_LINE.match(line)
+        if m:
+            n += 1
+            line = re.sub(r"^- \[( |x|-)\] \*\*\d+\.", lambda mm: f"- [{mm.group(1)}] **{n}.", line, count=1)
+        out.append(line)
+    return out
+
+
+def walk_edit_step(walk: str, number: int, new_title: str | None = None, do: str | None = None,
+                   procedure: str | None = None) -> dict[str, Any]:
+    """Edit the step where the worker stands: the change writes through to the procedure the step came from,
+    and the walk's block re-renders. The walk is a view; the procedure is the truth."""
+    path, block, _ = _walk_step(walk, number)
+    result = edit_step(block["source"], _source_title(block["source"], block["step"]), new_title=new_title, do=do, procedure=procedure)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    entry = dict(source=block["source"], step=block["step"], title=result["title"], do=result.get("do", ""))
+    fresh = _step_block(number, entry)
+    fresh[0] = re.sub(r"^- \[ \]", f"- [{block['mark']}]", fresh[0], count=1)
+    lines[block["start"]:block["end"]] = fresh
+    path.write_text("\n".join(lines) + ("\n" if not "\n".join(lines).endswith("\n") else ""), encoding="utf-8")
+    return {**result, "walk": str(path), "walk_step": number}
+
+
+def walk_add_step(walk: str, after: int, title: str, do: str, procedure: str | None = None) -> dict[str, Any]:
+    """Add a step after the one the worker stands on: it goes into that step's procedure right after it, and
+    appears in the walk as the next number (later steps renumber)."""
+    path, block, _ = _walk_step(walk, after)
+    result = add_step(block["source"], title, do, after=_source_title(block["source"], block["step"]), procedure=procedure)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    entry = dict(source=block["source"], step=block["step"] + 1, title=title, do=do)
+    lines[block["end"]:block["end"]] = _step_block(after + 1, entry)
+    lines = _renumber(lines)
+    # Later steps of the same procedure moved down one in the source.
+    for i, line in enumerate(lines):
+        k = _SOURCE_LINE.match(line)
+        if k and k.group(1) == block["source"] and int(k.group(2)) > block["step"] and i > block["end"] + 1:
+            lines[i] = f"  source: `{block['source']}` · step {int(k.group(2)) + 1}"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return {**result, "walk": str(path), "walk_step": after + 1}
+
+
+def walk_remove_step(walk: str, number: int) -> dict[str, Any]:
+    """Remove the step where the worker stands from the procedure it came from; the walk renumbers."""
+    path, block, _ = _walk_step(walk, number)
+    result = remove_step(block["source"], _source_title(block["source"], block["step"]))
+    lines = path.read_text(encoding="utf-8").splitlines()
+    del lines[block["start"]:block["end"]]
+    for i, line in enumerate(lines):
+        k = _SOURCE_LINE.match(line)
+        if k and k.group(1) == block["source"] and int(k.group(2)) > block["step"]:
+            lines[i] = f"  source: `{block['source']}` · step {int(k.group(2)) - 1}"
+    lines = _renumber(lines)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return {**result, "walk": str(path), "removed_walk_step": number}
