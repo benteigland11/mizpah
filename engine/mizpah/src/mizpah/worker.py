@@ -84,6 +84,11 @@ FREE_METHOD = ('Method lives in the playbook (`playbook search <words>`, then `p
 CONFIDENCE_RANK = dict(low=0, med=1, high=2)
 
 
+# Whole-file bounds: a widget module, a probe with its helpers, a page of prose — one call each. The 60K-era caps
+# (2000/1500/1500) rejected two edits in the first five turns of a benchmark attempt on a model with the room.
+WHOLE_FILE_BOUNDS = (('maximum_write_characters', 20000), ('maximum_edit_characters', 12000), ('maximum_tool_argument_characters', 24000))
+
+
 def load_config(path: str | Path) -> dict[str, Any]:
     """Mizpah config layered over the harness config it names; paths resolve from each file."""
     path = Path(path).resolve()
@@ -104,7 +109,7 @@ def load_config(path: str | Path) -> dict[str, Any]:
         # writes a coherent forty lines in one call where the rule took fourteen (pedal gym, 2026-09-20).
         assert SMALL_EDITS in config['worker_policy'], 'worker policy no longer carries the small-edits paragraph'
         config['worker_policy'] = config['worker_policy'].replace(SMALL_EDITS, WHOLE_FILES, 1)
-        for key, limit in (('maximum_write_characters', 12000), ('maximum_edit_characters', 6000), ('maximum_tool_argument_characters', 12000)):
+        for key, limit in WHOLE_FILE_BOUNDS:
             harness[key] = max(int(harness.get(key) or 0), limit)
     config['route_policy'] = (path.parent/config['route_policy_file']).read_text()
     config['eval_policy'] = (path.parent/config['eval_policy_file']).read_text()
@@ -2187,6 +2192,16 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
                 session.state['settings'] = asdict(session.settings)
                 session.state.setdefault('review_log', []).append(dict(turn=session.progress.turns, boundary='policy',
                                                                        operation='policy_changed', correction='resumed: current review policy', evidence=''))
+        # The payload bounds too: a session saved under the small-edit caps keeps rejecting whole files after the
+        # config lifted them.
+        bounds = {k: config.get(k) for k in ('maximum_tool_argument_characters', 'maximum_write_characters', 'maximum_edit_characters')}
+        bounds |= dict(write_existing_files=not config['mizpah']['scaffolding']['small_edits'],
+                       edit_requires_read=config['mizpah']['scaffolding']['small_edits'])
+        if any(getattr(session.settings, k) != v for k, v in bounds.items()):
+            session.settings = replace(session.settings, **bounds)
+            session.state['settings'] = asdict(session.settings)
+            from cg.bp_focused_agent_session_python.src.focused_agent_session import worker_tools
+            session.session.tools = worker_tools(session.settings.worker_tools, session.settings, session.state.get("capabilities"))
         # The tools too: a session saved without `done` (or a tool since added) keeps looping for want of it.
         current_tools = COMMAND_TOOLS if config['mizpah']['scaffolding'].get('command_tools', True) else ()
         if tuple(t['name'] for t in session.settings.command_tools) != tuple(t['name'] for t in current_tools) \
