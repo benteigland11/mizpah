@@ -185,3 +185,16 @@ def test_focus_globs_put_the_tasks_own_measures_first():
     assert any(g.endswith('/map/probes/piece_mid_built_probe/measure.py') for g in globs)
     assert not any('probes/*/' in g for g in globs)
     assert globs.index('notes.md') < globs.index('cg/*/src/*.py')
+
+
+def test_package_installs_are_refused_with_the_way_out():
+    """No pip, no network: `pip install` failed five times tonight with 'No module named pip' and the worker went
+    hunting (which pip, ensurepip, find / -name mido). The refusal names the environment and the block."""
+    import re
+    from mizpah.worker import REFUSED_PATTERNS
+    hits = [msg for pat, msg in REFUSED_PATTERNS if re.search(pat, "python -m pip install 'mido>=1.3.0' -q && python - <<'PY'")]
+    assert hits and 'route block' in hits[0] and 'environment' in hits[0]
+    for cmd in ('pip install mido', 'pip3 install --target .terra_probe_deps mido', 'uv pip install x', 'python3 -m pip install x'):
+        assert any(re.search(pat, cmd) for pat, _ in REFUSED_PATTERNS), cmd
+    for cmd in ('python -m pip --version', 'pip list', 'cartograph install data-x-python'):
+        assert not any(re.search(pat, cmd) and 'route block' in msg for pat, msg in REFUSED_PATTERNS), cmd

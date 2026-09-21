@@ -31,6 +31,15 @@ and validates) and a task for it, bucketed by how much is unknown about building
 library before building, so an instrument another project graduated is an install. When it is ready, mint the
 readings that name it.
 
+## A need about the library
+
+A need that asks for the method to improve — "improve existing compositional procedures to fold in rhythm work" —
+is about the playbook, not about a file in the project. Its reading is the procedure itself: one boolean unknown
+whose source is the named or found procedure (`playbook load <id>` inside the task shows its steps) and whose
+claim is that a step now carries the work. Never turn it into a deliverable file ("an updated procedure file",
+"a notes document describing the improvement"): a file in the project never reaches another project; the
+procedure does. A proposal that adds such a file is the wrong answer to this need.
+
 ## Proposals and the rest of the work
 
 A proposal does not stop the work: nine times in ten the rest of the brief can proceed around it (one need of sixteen

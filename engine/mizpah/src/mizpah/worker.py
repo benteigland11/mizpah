@@ -1834,6 +1834,9 @@ REFUSED_PATTERNS = (
     (r'(>>?|\btee\b|-i)\s*[^|;&]*\.(terra|mizpah)/map/(knowns|runs|unknowns)/', 'knowns, runs and unknowns are born by terra commands, never by writing their files'),
     (r'(>>?|\btee\b|-i|\bmv\b|\bcp\b)\s*[^|;&]*\.playbook/playbook/procedures/', 'the store is not a file to write: improving a procedure is `playbook edit-step` / `add-step`'),
     (r'\bsystemctl\b|\bsystemd-run\b|\bloginctl\b', 'the host\'s service manager is outside the sandbox; services start with `svc start`'),
+    (r'\b(pip3?|python3?\s+-m\s+pip|uv\s+pip|pipx|conda)\s+install\b', 'nothing installs in the sandbox: there is no pip and no network. The gym environment '
+     'provides the toolchain and its packages (see the enablers of your task); a package it lacks is `terra route block` naming '
+     'the package, so the person can add it to the environment'),
     (r'\bcurl\b[^|;&]*(/stop\b|/shutdown\b|/slots\b)', 'the model server is not yours to signal'),
 )
 
