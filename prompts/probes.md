@@ -4,6 +4,7 @@
 - The readings are what get composed into evidence. One run links to every unknown whose quantity it reports; the same instrument serves a different question tomorrow. Build the instrument general and put the question in the unknown.
 - A reading comes from the source through the instrument — never a constant, a guess, or a value chosen to pass. An instrument that would read the same on a wrong artifact is not measuring it.
 - The reviewer's bar does not move; among the readings that clear it, the one the pipeline gives cheapest is the one to take.
+- The instrument's workings live in widgets; `measure.py` is the few lines that put them on this source and name the quantities. A reading computed inline in a probe is lost when the work order ends; the same reading as a widget function is an instrument the next bench installs.
 
 Create the instrument declaring what it reads; `measure.py` returns exactly those:
 
@@ -12,16 +13,16 @@ terra probe create audio_render --purpose "what the rendered audio is like" --me
 ```
 
 ```python
-# .mizpah/map/probes/audio_render/measure.py — one decode, three readings
-import numpy as np, soundfile as sf
+# .mizpah/map/probes/audio_render/measure.py — the widget decodes and reads; the probe names the quantities
+import sys
+sys.path.insert(0, "cg/data-audio-levels-python")
+from src.audio_levels import duration_seconds, peak_dbfs, is_silent
 
 def measure(ctx):
-    samples, rate = sf.read("piece.wav")
-    peak = float(np.abs(samples).max())
     return {
-        "duration_s": len(samples) / rate,
-        "peak_dbfs": 20 * np.log10(peak) if peak > 0 else -120.0,
-        "is_silent": peak < 1e-4,
+        "duration_s": duration_seconds("piece.wav"),
+        "peak_dbfs": peak_dbfs("piece.wav"),
+        "is_silent": is_silent("piece.wav"),
     }
 ```
 
