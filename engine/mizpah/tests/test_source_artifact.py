@@ -379,3 +379,20 @@ def test_a_task_names_the_walk_its_worker_opens(gym: Path, tmp_path: Path, monke
     assert 'walk:compose-piano@0' in task['acceptance'] and worker.assigned_walk(task) == ('compose-piano', 0)
     text = controller.render_observation(observation, 'route')
     assert 'reach 1 steps through 1 procedure(s) = 1 walk(s)' in text and '"walk": "<procedure id>"' in text
+
+
+def test_a_next_walk_without_a_first_starts_from_zero(gym: Path, tmp_path: Path) -> None:
+    store = tmp_path/'procedures'
+    store.mkdir()
+    (store/'render.json').write_text(json.dumps(dict(id='render', title='Render', description='d', tags=['midi'], steps=[dict(id='s1', title='A', do='a')])))
+    observation = controller.observe(CONFIG, gym) | dict(methods=[dict(id='render', title='Render', steps=81, walks=2, procedures=12)], playbook_store=str(store))
+    decision = dict(unknowns=[dict(id='piece_mp3_built', cites='deliverable:2', type='boolean', creates='piece.mp3', claim='piece.mp3 exists', evidence_needed='ffprobe')],
+                    tasks=[dict(id='render_part2', unknowns=['piece_mp3_built'], bucket='low', title='render, second walk', walk='render', walk_from=50)])
+    accepted, _ = controller.guard(decision, observation, gym)
+    assert accepted['tasks'][0]['walk_from'] == 0 and any('no earlier walk' in c for c in accepted['cautions'])
+    decision['tasks'] = [dict(id='render_part1', unknowns=['piece_mp3_built'], bucket='low', title='render', walk='render', walk_from=0),
+                         dict(id='render_part2', unknowns=['piece_mp3_built'], bucket='low', title='render, second walk', walk='render', walk_from=50,
+                              deps=['render_part1'], continue_from='render_part1')]
+    accepted, _ = controller.guard(decision, observation, gym)
+    by = {t['id']: t.get('walk_from') for t in accepted['tasks']}
+    assert by.get('render_part1') == 0

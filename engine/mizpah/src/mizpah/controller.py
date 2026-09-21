@@ -1240,6 +1240,17 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             if walk not in known_methods and not _procedure_exists(walk, observation.get('playbook_store') or ''):
                 cautions.append('task '+tid+': walk '+repr(walk)+' is not a procedure in the playbook; the worker searches instead')
                 walk, walk_from = '', 0
+        if walk and walk_from:
+            # The next walk of a long method follows a first one: on the route already, in this decision, or left
+            # open on a workspace. Routed alone it starts a worker in the middle of a method (attempt 4 routed
+            # render_piece_mp3_part2 @50 and no part 1).
+            earlier = any(('walk:'+walk+'@') in ' '.join(str(a) for a in (t.get('acceptance') or [])) for t in observation['tasks']) \
+                or any(t.get('walk') == walk and int(t.get('walk_from') or 0) < walk_from for t in tasks) \
+                or any(str(x.get('procedure')) == walk for w in observation.get('workspaces') or [] for x in w.get('walks_open') or [])
+            if not earlier:
+                cautions.append('task '+tid+': walk_from '+str(walk_from)+' with no earlier walk of '+repr(walk)+' on the route or a '
+                                'workspace; it starts from 0 — the next walk is routed when the first leaves it')
+                walk_from = 0
         tasks.append(dict(id=tid, title=title, unknowns=ids, unknown=ids[0], bucket=item['bucket'], deps=deps,
                           enabler=next(iter(carried), ''), continue_from=continue_from, walk=walk, walk_from=walk_from))
     accepted_ids = existing_tasks | {t['id'] for t in tasks}
