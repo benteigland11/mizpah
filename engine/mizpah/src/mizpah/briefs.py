@@ -138,14 +138,9 @@ def related(config: dict[str, Any], brief: dict[str, Any], *, limit: int = 5) ->
 def render(briefs: list[dict[str, Any]], *, max_unknowns: int = 8) -> list[str]:
     if not briefs:
         return []
-    lines = ['# Related briefs (what other projects measured for the same kinds of deliverables; the controller\'s '
-             'library — take from it the unknowns this brief\'s deliverables also need, not the ones its needs do not)']
+    # Title and mission only: enough to know a project is worth asking about. What it measured is read on
+    # request, not carried on every sitrep.
+    lines = ['# Related briefs (other projects near this one, by title and mission)']
     for doc in briefs:
-        outcome = str(doc.get('stop') or '?')
-        lines.append('  '+str(doc.get('title'))+' — '+outcome+', '+str(doc.get('tasks'))+' tasks; '
-                     +str(len([u for u in doc.get('unknowns') or [] if u.get('resolved')]))+'/'+str(len(doc.get('unknowns') or []))+' unknowns resolved')
-        # Resolved unknowns first (what was actually measured), ids and cites only: the claim text is the
-        # controller's to write for its own brief, and the section was the largest thing it read.
-        unknowns = sorted(doc.get('unknowns') or [], key=lambda u: not u.get('resolved'))[:max_unknowns]
-        lines.append('    '+'; '.join(str(u['id'])+' ['+str(u.get('type'))[:3]+', '+str(u.get('cites') or '?')+']' for u in unknowns))
+        lines.append('  '+str(doc.get('title'))+' — '+str(doc.get('mission') or '')[:160]+' ('+str(doc.get('stop') or '?')+')')
     return lines
