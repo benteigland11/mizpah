@@ -5,6 +5,7 @@ import base64
 from dataclasses import dataclass, field
 import io
 import os
+import shutil
 import json
 from pathlib import Path, PurePosixPath
 import re
@@ -609,14 +610,27 @@ class SandboxedShell:
             time.sleep(0.1)
         else:
             raise RuntimeError('network namespace did not come up')
-        sock = scratch/'egress.sock'
+        # The socket lives in a short directory of its own, not the scratch root: AF_UNIX paths are bound at
+        # 108 bytes, and a session's scratch (`<project>/.mizpah/sessions/<stamp>/tasks/<task>/scratch`) ran
+        # past that. The proxy then died on bind with its stderr dropped, the wait below ran its whole ten
+        # seconds on every command, and the sandbox had no egress at all (2026-09-21: 85 calls at 10 s each,
+        # "registry unreachable").
+        sock_dir = Path(tempfile.mkdtemp(prefix='egress-', dir=os.environ.get('XDG_RUNTIME_DIR') or None))
+        sock = sock_dir/'egress.sock'
         proxy = subprocess.Popen([sys.executable, '-B', str(Path(__file__).resolve().parent/'egress_proxy.py'),
                                   str(sock), str(self.egress_log), *policy.allowed_domains],
-                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                                  preexec_fn=die_with_parent)
         deadline = time.monotonic()+10
         while not sock.exists() and time.monotonic() < deadline:
+            if proxy.poll() is not None:
+                holder.terminate()
+                raise RuntimeError('egress proxy exited before listening: '+(proxy.stderr.read().decode(errors='replace') if proxy.stderr else ''))
             time.sleep(0.05)
+        if not sock.exists():
+            holder.terminate()
+            proxy.terminate()
+            raise RuntimeError('egress proxy did not listen on '+str(sock))
         bridge = subprocess.Popen(self._nsenter(holder.pid)+[policy.socat,
                                   'TCP-LISTEN:'+str(policy.proxy_port)+',fork,bind=127.0.0.1,reuseaddr',
                                   'UNIX-CONNECT:'+str(sock)],
@@ -629,6 +643,9 @@ class SandboxedShell:
             if probe.returncode == 0:
                 break
             time.sleep(0.1)
+        else:
+            self.close_network()
+            raise RuntimeError('loopback bridge did not come up on port '+str(policy.proxy_port))
         self._netns = dict(holder=holder, proxy=proxy, bridge=bridge, processes=[holder, proxy, bridge], socket=sock)
         return self._netns
 
@@ -650,6 +667,9 @@ class SandboxedShell:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 process.kill()
+        sock = self._netns.get('socket')
+        if sock is not None:
+            shutil.rmtree(sock.parent, ignore_errors=True)
         self._netns = None
 
     def close(self) -> None:
@@ -708,7 +728,15 @@ class SandboxedShell:
         on top, so a build can use what was built without being able to change it."""
         config, limits = self.config, self.config.limits
         if config.workspace_dir and not detached:
-            argv = ['--bind', str(Path(config.workspace_dir).resolve()), WORKSPACE_MOUNT]
+            root = Path(config.workspace_dir).resolve()
+            argv = ['--bind', str(root), WORKSPACE_MOUNT]
+            # A read-only bind that lies inside the workspace is bound again, read-only, at its place under
+            # /work after the writable bind, so it shadows it: a directory the command may read but not change
+            # in a workspace it otherwise owns (an issued project among the Deputy's drafts).
+            for bind in config.read_only_binds:
+                source = Path(bind).resolve()
+                if source != root and source.is_relative_to(root) and source.is_dir():
+                    argv += ['--ro-bind', str(source), WORKSPACE_MOUNT+'/'+source.relative_to(root).as_posix()]
             for state in config.state_dirs:
                 argv += ['--size', str(limits.workspace_bytes), '--tmpfs', WORKSPACE_MOUNT+'/'+_name(state)]
             return argv
