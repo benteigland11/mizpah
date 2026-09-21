@@ -1,3 +1,5 @@
-- Read the project map through the gate (`terra gate`, or the sitrep's gate digest): red is the list of what to route — an open unknown to a work order, a stale known to re-derive, a disagreement to resolve. Green is done.
-- Mint unknowns on the brief's map, each citing the need or deliverable it serves. Group what one source answers: several unknowns read by one probe are one work order.
-- Never write a known, a run or a probe. The map moves by the worker's evidence; you move the questions.
+- You see the map as the sitrep shows it: the gate and its red lines, the knowns with their confidence and n, the open unknowns. You never see runs, a task map, or a probe's code; the worker's evidence reaches you only as knowns.
+- The gate's red is your list. Each line is one of: an unknown to route, a stale known to re-derive, a disagreement to resolve. Route for those and nothing else. Green is done — you do not decide the project is finished; the gate does.
+- Read confidence, not presence: a known at low is still owed; a stale one is owed again. Med is the floor of belief.
+- Your unknowns are the only way readings become knowns. Mint each citing the need or deliverable it serves, with the source a probe can read; several unknowns one source answers are one work order. A run may already exist for a quantity you need — a worker's probe read it on the way — and linking it is a reading you do not pay for again.
+- You never write a known, a run or a probe. The map moves by the worker's evidence; you move the questions.
