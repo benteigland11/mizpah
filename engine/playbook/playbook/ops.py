@@ -705,6 +705,20 @@ def tick_walk(target: str, done: list[int] | None = None, not_needed: list[int] 
             raise ValueError(f"step(s) {missing} are not in {plan.name}: every step the walk has is placed in the plan — under an action "
                              "(\"steps 12-15: ...\") or under the steps that do not apply — before it is ticked")
     path = _walk_file(target, target_dir)
+    # One tick call per turn: the shell's loops were refused by pattern and the worker drove `playbook tick` from
+    # a Python subprocess loop instead — fifty-nine boxes in one turn. The clock is the one thing a loop cannot
+    # fake: a step's work is a turn away from the last, a loop's next call is milliseconds.
+    stamp = path.with_name(path.name + ".ticked")
+    import time as _time
+    now = _time.time()
+    try:
+        last = float(stamp.read_text().strip() or 0)
+    except (OSError, ValueError):
+        last = 0.0
+    if now - last < TICK_COOLDOWN:
+        raise ValueError(f"the last tick on this walk was {int(now - last)} s ago: a step's work is a turn, and one tick call "
+                         f"closes what one turn's work closed — the next opens in {int(TICK_COOLDOWN - (now - last))} s. "
+                         "Do the next step, then tick it in that command")
     lines = path.read_text(encoding="utf-8").splitlines()
     # A step that is another procedure closes only once that procedure's walk is closed: opened, and every
     # box ticked or skipped with a reason. Ticking the parent box on the strength of "the widget did it" left
@@ -740,6 +754,7 @@ def tick_walk(target: str, done: list[int] | None = None, not_needed: list[int] 
     if missing:
         raise ValueError(f"no such step(s) {missing}; the walk has steps {sorted(seen)}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    stamp.write_text(str(now), encoding="utf-8")
     nxt = _render_walk(path)
     left = [n for mark, n, _ in walk_steps(path) if mark == " "]
     result = {"ok": True, "path": str(path), "marked": marked, "unticked": left}
@@ -754,6 +769,7 @@ _NOT_A_REASON = re.compile(r"\b(already|covered|superseded|redundant|measured (s
                            r"performed (separately|earlier)|handled (by|elsewhere)|probe (already|covers|measured)|done (earlier|already|separately)|"
                            r"inspected (earlier|during|separately)|validated (earlier|separately|during))\b", re.I)
 TICK_AT_ONCE = 6   # steps one tick call may close: several that closed together, never a walk at once
+TICK_COOLDOWN = 30 # seconds between tick calls on one walk: a step's work is a turn; a loop is milliseconds apart
 REVEAL = 10**6     # every step's text is open: the worker reads the whole walk and plans from it (see the plan rule in tick)
 FLAT_LIMIT = 50   # steps in one walk: past this the method is several work orders, and the route carries the rest
 # The loop's own procedures: a step that links one runs the framework, and its steps are not part of a domain

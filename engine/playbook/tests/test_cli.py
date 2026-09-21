@@ -17,6 +17,12 @@ def searched_tree(tmp_path: Path, monkeypatch) -> None:
     (tmp_path/".playbook"/".searched").write_text("fixture\n")
 
 
+@pytest.fixture(autouse=True)
+def _no_cooldown(monkeypatch):
+    from playbook import ops
+    monkeypatch.setattr(ops, "TICK_COOLDOWN", 0)
+
+
 def _plan(walk: str, n: int = 60) -> None:
     """The plan a worker writes before its first tick: every step placed under an action."""
     Path(walk[:-3] + ".plan.md").write_text(f"1. steps 1-{n}: do them against this piece\n")
