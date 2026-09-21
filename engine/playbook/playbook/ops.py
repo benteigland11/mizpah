@@ -788,7 +788,7 @@ _NOT_A_REASON = re.compile(r"\b(already|covered|superseded|redundant|measured (s
                            r"performed (separately|earlier)|handled (by|elsewhere)|probe (already|covers|measured)|done (earlier|already|separately)|"
                            r"inspected (earlier|during|separately)|validated (earlier|separately|during))\b", re.I)
 TICK_AT_ONCE = 6   # steps one tick call may close: several that closed together, never a walk at once
-TICK_COOLDOWN = 30 # seconds between tick calls on one walk: a step's work is a turn; a loop is milliseconds apart
+TICK_COOLDOWN = 10 # seconds between tick calls on one walk: a loop is milliseconds apart; a turn is ten seconds at least (the sandbox alone costs that) — 30 refused every other honest tick of a fast model
 REVEAL = 10**6     # every step's text is open: the worker reads the whole walk and plans from it (see the plan rule in tick)
 FLAT_LIMIT = 50   # steps in one walk: past this the method is several work orders, and the route carries the rest
 # The loop's own procedures: a step that links one runs the framework, and its steps are not part of a domain
