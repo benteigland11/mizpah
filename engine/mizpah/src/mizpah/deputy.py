@@ -66,6 +66,17 @@ DEPUTY_TOOLS: tuple[dict[str, Any], ...] = (
                                                         mission=string('one or two sentences: what is built or found out, and how it is proved'),
                                                         environment=string('a saved environment name, or "none" for a bare gym')),
                          required=['slug', 'title', 'mission', 'environment'])),
+    dict(name='environment_new', description='Set up an environment gym: a bare gym whose brief\'s deliverable is a new '
+         'saved environment, adopted under that name when its loop goes green. Use when no saved environment provides '
+         'what the work needs. Then write its brief: one need per tool that must run (`Know whether <tool> runs …`), '
+         'the deliverable `base.json` (name, the note the next worker reads, env with $BASE paths), the budget. Only '
+         'after that environment exists can the real gym be set up in it.',
+         command='python -m mizpah.draft new {slug} --title {title} --mission {mission} --environment none --builds {name}',
+         parameters=dict(type='object', properties=dict(name=string('the environment\'s name, e.g. browser (lowercase, digits, - and _)'),
+                                                        slug=string('the gym\'s name, e.g. env-browser'),
+                                                        title=string('the brief title'),
+                                                        mission=string('what the environment is for and what it must provide')),
+                         required=['name', 'slug', 'title', 'mission'])),
     dict(name='draft_show', description='Pull a draft up on the desk beside the conversation so the Administrator reads '
          'the sheet itself. Do it after every change to a draft.',
          command='python -m mizpah.draft show {slug}',

@@ -976,7 +976,7 @@ def open_checklists(snapshot: bytes) -> list[str]:
         if open_steps:
             problems.append('checklist '+name+' has '+str(len(open_steps))+' unticked step(s): '+
                             '; '.join(o[:60] for o in open_steps[:4])+(' …' if len(open_steps) > 4 else '')+
-                            ' — edit the file: tick each `[x]` (done) or `[-]` (not needed); if the walk did not apply, '
+                            ' — `playbook tick '+name+' --done N,M --skip K` marks them in one call; if the walk did not apply, '
                             '`playbook skip '+name+' --because "..."` marks everything left `[-]`')
     return problems
 

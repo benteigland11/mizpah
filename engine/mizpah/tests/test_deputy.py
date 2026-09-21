@@ -260,3 +260,61 @@ def test_reset_clears_the_office_and_keeps_the_record_aside(tmp_path: Path, monk
     aside = Path(out['aside'])
     assert (aside/'turns.jsonl').read_text().count('hello') == 1
     assert deputy.turns(root) == []
+
+
+def test_an_environment_gym_is_bare_reaches_package_hosts_and_names_its_base(gyms: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from mizpah import bases, init as init_module
+    monkeypatch.setattr(bases, 'bases_root', lambda: tmp_path/'bases')
+    (tmp_path/'bases').mkdir()
+    bases.create('piano', note='a piano studio')
+    with pytest.raises(SystemExit) as wrong:
+        draft.new('env-browser', 'Browser environment', 'm', 'piano', builds='browser')
+    assert 'set up bare' in str(wrong.value)
+    out = draft.new('env-browser', 'Browser environment', 'm', 'none', builds='browser')
+    assert out['builds'] == 'browser' and 'pypi.org' in out['allowed_domains']
+    pc = init_module.project_config(gyms/'env-browser')
+    assert pc['builds_base'] == 'browser' and pc['sandbox']['network']['allowed_domains'] == list(draft.BUILD_DOMAINS)
+    bases.create('browser', note='x')
+    with pytest.raises(SystemExit) as taken:
+        draft.new('env-browser2', 'B', 'm', 'none', builds='browser')
+    assert 'exists already' in str(taken.value)
+
+
+def test_a_project_adds_domains_without_replacing_the_host_network_policy(gyms: Path) -> None:
+    from mizpah import init as init_module
+    draft.new('env-x', 'X', 'm', 'none', builds='x')
+    config = dict(mizpah=dict(sandbox=dict(network=dict(allowed_domains=['pypi.org'], proxy_port=3128, unshare='/u', nsenter='/n', socat='/s'))))
+    out = init_module.apply_project_config(config, gyms/'env-x')
+    net = out['mizpah']['sandbox']['network']
+    assert net['proxy_port'] == 3128 and net['unshare'] == '/u' and 'github.com' in net['allowed_domains']
+    assert out['mizpah']['builds_base'] == 'x'
+
+
+def test_adopt_copies_a_green_environment_gym_into_the_bases(gyms: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from mizpah import bases
+    monkeypatch.setattr(bases, 'bases_root', lambda: tmp_path/'bases')
+    (tmp_path/'bases').mkdir()
+    draft.new('env-x', 'X', 'm', 'none', builds='x')
+    gym = gyms/'env-x'
+    (gym/'venv'/'bin').mkdir(parents=True)
+    (gym/'venv'/'bin'/'tool').write_text('#!/work/venv/bin/python3\nprint(1)\n')
+    (gym/'base.json').write_text(json.dumps(dict(name='x', note='a tool', env={'TOOL_HOME': '$BASE/tools'})))
+    with pytest.raises(ValueError, match='relocatable'):
+        bases.adopt(gym)
+    (gym/'venv'/'bin'/'tool').write_text('#!/usr/bin/env python3\nprint(1)\n')
+    (gym/'bin').mkdir()
+    (gym/'bin'/'run').write_text('#!/bin/sh\nexec "$(dirname "$0")/../venv/bin/python" "$@"\n')
+    adopted = bases.adopt(gym)
+    base = Path(adopted['path'])
+    assert base == tmp_path/'bases'/'x' and (base/'venv'/'bin'/'tool').exists() and (base/'bin'/'run').exists()
+    assert not (base/'.mizpah').exists() and not (base/'.git').exists()
+    assert bases.load('x')['note'] == 'a tool' and adopted['built_from'] == str(gym)
+    with pytest.raises(FileExistsError):
+        bases.adopt(gym)
+    assert bases.adopt(gym, replace=True)['name'] == 'x'
+    # apply puts bin/ and venv/bin on PATH and fills $BASE
+    cfg = dict(mizpah=dict(sandbox=dict(read_only_binds=[], environment=dict(PATH='/usr/bin'))))
+    bases.apply(cfg, 'x')
+    env = cfg['mizpah']['sandbox']['environment']
+    assert env['PATH'].split(':')[:2] == [str(base/'venv'/'bin'), str(base/'bin')] and env['TOOL_HOME'] == str(base/'tools')
+    assert str(base) in cfg['mizpah']['sandbox']['read_only_binds']

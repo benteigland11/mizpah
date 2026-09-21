@@ -2406,3 +2406,8 @@ between contains eighth eighths harmony idea note piece quarters repeated repeti
 Compose and build piece.mid
 eight exists hand left melody midi passage piano piece pulse repeated right
  piece mid  exists as an eight bar  4 4 solo piano midi passage with the specified left hand pulse and repeated right hand melody 
+build environment base venv install tools
+set up environment gym base
+Write count.md for the MIDI passage
+beat contains exists format passage requested spoken syllable
+ count md  exists and contains the requested bar  beat  and spoken syllable count format for the passage 
