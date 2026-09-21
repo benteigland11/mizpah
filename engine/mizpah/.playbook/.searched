@@ -2411,3 +2411,13 @@ set up environment gym base
 Write count.md for the MIDI passage
 beat contains exists format passage requested spoken syllable
  count md  exists and contains the requested bar  beat  and spoken syllable count format for the passage 
+Write the meter map and onset count documentation
+documents exists information meter meters requested sections three
+ meters md  exists and documents the requested meter information for all three sections 
+Build rhythm.md from piece.mid
+counts documents exists marked melody onset piece rest rhythm ties under
+ rhythm md  exists and documents the melody rhythm of  piece mid  bar by bar with counts under every onset and rest and ties marked 
+solo piano passage three sections melodic idea about eight notes restated meter written midi shared pulse throughout same speed left hand groups beats
+meters says section what meter beats group which onsets accented writes melody piece onset reading claim
+meter audible section accented beats louder others groups twos where threes same pulses
+improve existing musical compositional procedures fold changing meter

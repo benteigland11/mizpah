@@ -1730,7 +1730,7 @@ def green_message(gate: dict[str, Any], unknown_id: str | list[str], used: list[
                     'it from the steps you took (one search, then create); if it was nothing but the bootstrap, reply "none".')
     lines += ['- '+t for t in todo]
     lines.append('The store changes only through `playbook edit-step` / `add-step` / `remove-step` / `create`; the checklist '
-                 'under `.playbook/open/` is a rendered copy. Then `playbook validate <id>` for each procedure you touched, and '
+                 'under `.playbook/open/` is a rendered copy. Make all your edits, then `playbook validate <id>` once per procedure you touched, and '
                  'reply with their ids (comma separated) and nothing else.')
     return '\n'.join(lines)+'\n'
 
@@ -1914,7 +1914,7 @@ COMMAND_TOOLS: tuple[dict[str, Any], ...] = (
                          required=['id', 'purpose'])),
     dict(name='playbook_create', description='Create a new procedure (after the gate is green, when your method was '
          'specific to this kind of source or artifact and no existing procedure captures it). Then add its steps one '
-         'at a time with playbook_add_step, each one action with the exact commands, and `playbook validate <id>`.',
+         'at a time with playbook_add_step, each one action with the exact commands; `playbook validate <id>` once at the end.',
          command='playbook create {id} --title {title} --description {description} {tags}',
          parameters=dict(type='object', properties=dict(id=string('kebab-case procedure id'), title=string('short title'),
                                                         description=string('when to use it and what it produces, one or two sentences'),

@@ -280,8 +280,14 @@ def say(config: dict[str, Any], text: str, *, turn_cap: int | None = None) -> di
         raise SystemExit(json.dumps(dict(status='error', error='nothing said')))
     cap = turn_cap or (config['mizpah'].get('deputy') or {}).get('turn_cap') or DEFAULT_TURN_CAP
     (root/'STOP').unlink(missing_ok=True)   # a stop is for one turn; a stale one must not end the next
+    # The person's line goes on record once the seat is open: a seat that fails to open leaves the error
+    # on the record instead of a line nobody answered.
+    try:
+        session, fresh = open_or_create(config, root, text)
+    except Exception as error:  # noqa: BLE001 — whatever it was, the person sees it where they spoke
+        line = _turn(root, 'system', 'The seat could not be opened: '+str(error)[:300], error=True)
+        return dict(status='error', error=str(error), turn=line)
     _turn(root, 'user', text)
-    session, fresh = open_or_create(config, root, text)
     since = len(session.journal.read('session'))
     before = session.progress.turns
     started = time.time()
