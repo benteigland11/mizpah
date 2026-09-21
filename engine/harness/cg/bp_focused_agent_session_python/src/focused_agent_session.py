@@ -52,10 +52,18 @@ class ControllerSettings:
     # (a small reference, focus files, recent exchanges) the tools were never used.
     plain_review: bool = False
     plain_recent_exchanges: int = 6
+    # Corrections at completion boundaries are budgeted, like investigation calls: after this many
+    # replacements answering a completion claim, the next completion review holds and the claim stands,
+    # the reviewer's remaining doubt recorded on the review event. A reviewer that found one more clause
+    # in a probe on every claim held a worker forty turns past the point its task was done. None: unbounded.
+    maximum_completion_corrections: int | None = None
 
     def __post_init__(self) -> None:
         if type(self.plain_recent_exchanges) is not int or self.plain_recent_exchanges < 1:
             raise ValueError('plain_recent_exchanges must be a positive integer')
+        if self.maximum_completion_corrections is not None and (type(self.maximum_completion_corrections) is not int
+                                                               or self.maximum_completion_corrections < 0):
+            raise ValueError('maximum_completion_corrections must be a non-negative integer or None')
         if self.investigation_budgets is not None:
             if (not isinstance(self.investigation_budgets, dict) or set(self.investigation_budgets) != {'bootstrap', 'periodic', 'completion'}
                     or any(type(value) is not int or value < 0 for value in self.investigation_budgets.values())):
@@ -1294,9 +1302,16 @@ class FocusedSession:
                 calls.append(dict(tool=call['function']['name'], arguments=text[:600], status=outcome.get('status'),
                                   exit_code=outcome.get('exit_code'), output=str(shown)[:600]))
             recent.append(dict(turn=item['turn'], said=(item['response'].get('content') or '')[:600], calls=calls))
+        history = list(self.state.get('review_log') or [])
         envelope = dict(reference=self.settings.reference, boundary=boundary, completed_turns=self.progress.turns,
                         held_guidance=self.progress.guidance, focus_files=self._focus_files(),
-                        recent_turns=recent, proposed_completion=self.state['proposed_final'] if final else None)
+                        recent_turns=recent, proposed_completion=self.state['proposed_final'] if final else None,
+                        # What this reviewer already said in this session, oldest first: a correction it issued,
+                        # withdrew or held. Without it a reviewer re-issued the same correction in other words
+                        # four times, and raised a new clause on every completion claim.
+                        previous_reviews=history[-12:],
+                        completion_corrections=dict(spent=int(self.state.get('completion_corrections') or 0),
+                                                    budget=settings.maximum_completion_corrections))
         payload = dict(settings.generation, messages=[dict(role='system', content=settings.system_prompt),
                                                        dict(role='user', content=json.dumps(envelope, ensure_ascii=False))],
                        max_tokens=settings.output_tokens)
@@ -1316,6 +1331,7 @@ class FocusedSession:
         if not self.progress.document.strip():
             # A plain reviewer keeps no document; the acceptance rule still wants one to exist.
             self.progress.edit_document(self.progress.document_revision, '', 'Plain review: no project document.')
+        held_before = deepcopy(self.progress.guidance)
         try:
             decision = self.progress.accept(raw)
         except ValueError as error:
@@ -1333,9 +1349,31 @@ class FocusedSession:
                 self._save()
                 return
         else:
+            termination = 'voluntary_decision'
+            if final and decision['operation'] == 'replace':
+                cap = settings.maximum_completion_corrections
+                spent = int(self.state.get('completion_corrections') or 0)
+                if cap is not None and spent >= cap:
+                    # The budget for sending a completion claim back is spent: the doubt is kept on the event
+                    # for whoever reads the journal (the host puts it in front of the controller), and the
+                    # claim stands.
+                    self._event('completion_correction_dropped', dict(turn=self.progress.turns, spent=spent, cap=cap,
+                                                                       correction=decision.get('correction'),
+                                                                       evidence=decision.get('evidence')))
+                    self.state.setdefault('dropped_corrections', []).append(dict(
+                        turn=self.progress.turns, correction=decision.get('correction'), evidence=decision.get('evidence')))
+                    # The boundary is already registered by the accept above; only the guidance is put back.
+                    self.progress.guidance = held_before
+                    decision = dict(correction='None', evidence='', warrant='', operation='hold')
+                    termination = 'completion_corrections_spent'
+                else:
+                    self.state['completion_corrections'] = spent+1
             self._event('controller_review', dict(boundary=boundary, turn=self.progress.turns, decision=decision,
                 document_revision=self.progress.document_revision, model_calls=review['model_calls'], tool_calls=0,
-                termination='voluntary_decision'))
+                termination=termination))
+        self.state.setdefault('review_log', []).append(dict(
+            turn=self.progress.turns, boundary=boundary, operation=decision.get('operation'),
+            correction=decision.get('correction') or '', evidence=(decision.get('evidence') or '')[:300]))
         self.state.update(pending_io=None, review=None)
         if final and decision['operation'] != 'replace':
             self.state.update(phase='complete', final_text=self.state['proposed_final'])
@@ -1563,6 +1601,27 @@ class FocusedSession:
             self._event('continued', dict(window=self.session.window_index, characters=len(message), label=label or ''))
             self._save()
             return self.status()
+
+    def set_review_policy(self, system_prompt: str, *, focus_globs: tuple[str, ...] | None = None,
+                          label: str = '') -> None:
+        """Give the reviewer a different question for the next stretch of the session (the write-up after
+        green reviews the procedure, not the probes), with the files that question is about. The completion
+        budget starts over; the review history stays, marked with where the question changed."""
+        if not isinstance(system_prompt, str) or not system_prompt.strip():
+            raise ValueError('A review policy is nonempty text')
+        with self._locked():
+            if self.settings.controller is None:
+                raise ValueError('No reviewer bound to this session')
+            controller = replace(self.settings.controller, system_prompt=system_prompt)
+            self.settings = replace(self.settings, controller=controller,
+                                    **({} if focus_globs is None else dict(review_focus_globs=tuple(focus_globs))))
+            self.state['settings'] = asdict(self.settings)
+            self.state['completion_corrections'] = 0
+            self.state.setdefault('review_log', []).append(dict(
+                turn=self.progress.turns, boundary='policy', operation='policy_changed', correction=label, evidence=''))
+            self._event('review_policy_changed', dict(turn=self.progress.turns, label=label,
+                                                       focus_globs=list(self.settings.review_focus_globs)))
+            self._save()
 
     def suspend_reviews(self, reason: str) -> None:
         """No review boundaries until `resume_reviews`: the host knows the remaining work is not what the

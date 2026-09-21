@@ -1209,7 +1209,11 @@ def test_plain_review_is_one_toolless_call_per_boundary(tmp_path):
     assert result['status'] == 'complete'
     assert all('tools' not in request for request in transport.requests)
     first = json.loads(transport.requests[0]['messages'][1]['content'])
-    assert set(first) == {'reference', 'boundary', 'completed_turns', 'held_guidance', 'focus_files', 'recent_turns', 'proposed_completion'}
+    assert set(first) == {'reference', 'boundary', 'completed_turns', 'held_guidance', 'focus_files', 'recent_turns', 'proposed_completion',
+                          'previous_reviews', 'completion_corrections'}
+    # The reviewer sees what it said before: the second periodic review carries the first's hold.
+    second = json.loads(transport.requests[1]['messages'][1]['content'])
+    assert second['previous_reviews'] == [dict(turn=1, boundary='periodic', operation='hold', correction='None', evidence='')]
     assert first['reference'].startswith('PRIVATE_REFERENCE_SENTINEL') and len(first['recent_turns']) <= 3
     events = [json.loads(line) for line in (tmp_path/'session'/'events'/'session.jsonl').read_text().splitlines()]
     reviews = [e['payload'] for e in events if e['event_type'] == 'controller_review']
@@ -1671,3 +1675,53 @@ def test_reviews_can_be_suspended_and_resumed(tmp_path):
     again = [json.loads(line) for line in (tmp_path/'session'/'events'/'session.jsonl').read_text().splitlines()]
     assert [e['event_type'] for e in again if e['event_type'] == 'reviews_resumed'] == ['reviews_resumed']
     assert item.state.get('reviews_suspended') is None
+
+
+class SendBackTransport:
+    """A reviewer that sends every completion claim back with a new clause, forever."""
+
+    def __init__(self):
+        self.requests = []
+
+    def __call__(self, path, payload, **kwargs):
+        if path == '/template':
+            return WireResponse(200, json.dumps(dict(prompt='x'*100)), 0)
+        if path == '/tokenize':
+            return WireResponse(200, json.dumps(dict(tokens=[1]*len(payload['content']))), 0)
+        self.requests.append(deepcopy(payload))
+        envelope = json.loads(payload['messages'][1]['content'])
+        n = len(self.requests)
+        if envelope['boundary'] == 'completion':
+            reply = json.dumps(dict(correction='also check clause %d' % n, evidence='clause %d unchecked' % n, warrant='need'))
+        else:
+            reply = '{"correction":"None","evidence":"","warrant":""}'
+        return WireResponse(200, json.dumps(response(reply)), 0)
+
+
+def test_completion_corrections_are_budgeted_and_the_reviewer_can_change_question(tmp_path):
+    """After the budget, a completion claim stands and the dropped doubt is journaled; a new review policy
+    restarts the budget and is what the next review reads."""
+    settings, worker, shell, _, wt, _ = setup(tmp_path, total=3, enabled=True, rollover=False)
+    settings = replace(settings, review_policy=ReviewPolicy(20, 10, 1, 10000, 2000, 200000),
+                       controller=replace(settings.controller, plain_review=True, maximum_completion_corrections=1))
+    transport = SendBackTransport()
+    controller = ModelClient(EndpointConfig('http://example.invalid', 5, 1000000, {}, '/complete', '/template', '/tokenize', False, True), transport=transport)
+    item = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, controller=controller)
+    result = item.run()
+    assert result['status'] == 'complete'
+    events = [json.loads(line) for line in (tmp_path/'session'/'events'/'session.jsonl').read_text().splitlines()]
+    reviews = [e['payload'] for e in events if e['event_type'] == 'controller_review' and e['payload']['boundary'] == 'completion']
+    assert [r['termination'] for r in reviews] == ['voluntary_decision', 'completion_corrections_spent']
+    dropped = [e['payload'] for e in events if e['event_type'] == 'completion_correction_dropped']
+    assert len(dropped) == 1 and dropped[0]['correction'].startswith('also check clause') and dropped[0]['cap'] == 1
+    assert item.state['dropped_corrections'][0]['correction'] == dropped[0]['correction']
+    # A new question for the next stretch: the policy text changes, the focus globs change, the budget restarts.
+    item.set_review_policy('Review the write-up, not the probes.', focus_globs=('procedures/*.json',), label='write-up')
+    assert item.settings.controller.system_prompt == 'Review the write-up, not the probes.'
+    assert item.settings.review_focus_globs == ('procedures/*.json',) and item.state['completion_corrections'] == 0
+    assert item.state['review_log'][-1]['operation'] == 'policy_changed' and item.state['review_log'][-1]['correction'] == 'write-up'
+    reopened = FocusedSession.open(tmp_path/'session', worker=worker, shell=shell, controller=controller)
+    assert reopened.settings.controller.system_prompt == 'Review the write-up, not the probes.'
+    item.continue_with('write it up', label='gate green')
+    item.run()
+    assert transport.requests[-1]['messages'][0]['content'] == 'Review the write-up, not the probes.'

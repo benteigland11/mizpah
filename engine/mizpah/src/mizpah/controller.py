@@ -212,6 +212,23 @@ def mark_notes_read(root: Path | None, notes: list[dict[str, Any]]) -> None:
     (root/OPERATOR_NOTES).write_text('\n'.join(lines)+'\n')
 
 
+def reviewer_doubts(journal: Path) -> list[dict[str, Any]]:
+    """What the check-in reviewer still doubted about a probe when its completion budget ran out, from the tasks
+    of the loop's current cycle (loop.json beside the controller journal): the reading stands; the doubt is the
+    controller's to turn into a reading of its own, or to drop."""
+    try:
+        loop = json.loads((Path(journal).parent/'loop.json').read_text())
+        cycle = (loop.get('cycles') or [])[-1]
+    except (OSError, ValueError, IndexError):
+        return []
+    out = []
+    for t in cycle.get('tasks') or []:
+        for d in t.get('reviewer_doubts') or []:
+            out.append(dict(task=t.get('task'), unknowns=t.get('unknowns') or [], correction=str(d.get('correction') or '')[:300],
+                            evidence=str(d.get('evidence') or '')[:300]))
+    return out[:8]
+
+
 def last_cautions(journal: Path) -> list[str]:
     """What the guard noted on the previous briefing: applied as decided, said once here."""
     try:
@@ -240,6 +257,15 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
                      'what would change the brief, or say why nothing changes)')
         for note in observation['operator_notes']:
             lines.append('  '+time.strftime('%Y-%m-%d %H:%M', time.gmtime(float(note.get('at') or 0)))+': '+str(note.get('text') or '').strip()[:1200])
+        lines.append('')
+    if observation.get('reviewer_doubts'):
+        # The check-in reviewer's leftover doubt about a probe, after the reading stood: not a task for the same
+        # worker (it had its budget of send-backs); a candidate reading of its own, cited to the need it serves,
+        # if the doubt is real — or nothing, if the reading already answers the need.
+        lines.append('# What the check-in reviewer still doubted about a probe when the reading stood (a reading of its own, or nothing)')
+        for d in observation['reviewer_doubts']:
+            lines.append('  task '+str(d['task'])+' ('+', '.join(d['unknowns'])+'): '+d['correction']
+                         +(' — evidence: '+d['evidence'] if d['evidence'] else ''))
         lines.append('')
     lines += ['# Brief (reference, v'+str(brief.get('version'))+', '+str(brief.get('status'))+')',
              'Mission: '+str(brief.get('mission'))]
@@ -1407,6 +1433,7 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
     if notes:
         observation['operator_notes'] = notes
     observation['cautions'] = last_cautions(journal)
+    observation['reviewer_doubts'] = reviewer_doubts(journal)
     refusals: list[str] = []
     accepted = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[], done=None, why='')
     record: dict[str, Any] = dict(mode=mode, observation=observation, attempts=[], usage=usage)

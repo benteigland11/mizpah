@@ -206,3 +206,21 @@ def test_a_claim_that_is_the_whole_spec_is_cautioned(gym: Path) -> None:
         assert any('whole specification' in c for c in accepted.get('cautions') or []), (uid, accepted.get('cautions'))
     accepted, _ = controller.guard(decide('piece_mid_built', '`piece.mid` exists and parses as a MIDI file'), observation, gym)
     assert not any('whole specification' in c for c in accepted.get('cautions') or [])
+
+
+def test_reviewer_doubts_reach_the_controller(gym: Path, tmp_path: Path) -> None:
+    """A doubt the reviewer still held when its completion budget ran out is a line at the top of the next
+    briefing — a candidate reading of its own — never another round for the same worker."""
+    session = tmp_path/'session'
+    session.mkdir()
+    (session/'loop.json').write_text(json.dumps(dict(cycles=[dict(cycle=1, tasks=[dict(
+        task='build_piece_mid', unknowns=['piece_mid_built'], verdict='complete',
+        reviewer_doubts=[dict(turn=61, correction='measure() never verifies the MIDI is 4/4', evidence='no time_signature read')])])])))
+    doubts = controller.reviewer_doubts(session/'controller.jsonl')
+    assert doubts == [dict(task='build_piece_mid', unknowns=['piece_mid_built'], correction='measure() never verifies the MIDI is 4/4',
+                           evidence='no time_signature read')]
+    observation = controller.observe(CONFIG, gym) | dict(reviewer_doubts=doubts)
+    text = controller.render_observation(observation, 'eval')
+    assert 'What the check-in reviewer still doubted' in text and 'never verifies the MIDI is 4/4' in text
+    assert text.index('reviewer still doubted') < text.index('# Brief')
+    assert controller.reviewer_doubts(tmp_path/'nowhere'/'controller.jsonl') == []

@@ -108,6 +108,8 @@ def load_config(path: str | Path) -> dict[str, Any]:
     config['route_policy'] = (path.parent/config['route_policy_file']).read_text()
     config['eval_policy'] = (path.parent/config['eval_policy_file']).read_text()
     config['checkin_policy'] = (path.parent/config['checkin_policy_file']).read_text()  # tool-less; no v10 text
+    # The reviewer's second question, for the write-up after green: does the record say what the worker did?
+    config['writeup_policy'] = (path.parent/config.get('writeup_policy_file', 'src/mizpah/writeup_policy.md')).read_text()
     config['playbook_store'] = str(Path(config['playbook_store']).expanduser())
     config['widget_library'] = str(Path(config['widget_library']).expanduser())
     return dict(harness, mizpah=config, harness_config_path=str(harness_path), mizpah_config_path=str(Path(path).resolve()))
@@ -1785,6 +1787,7 @@ def checkin_settings(config: dict[str, Any]) -> ControllerSettings:
         c['maximum_model_calls'], c['maximum_tool_calls'], c['maximum_tool_output_characters'],
         c.get('output_headroom_tokens', 1), c.get('input_target_tokens'), c.get('recent_review_exchanges', 2),
         c.get('investigation_budgets'), c.get('maximum_document_edits_per_review'),
+        maximum_completion_corrections=config['mizpah'].get('checkin_completion_corrections', 2),
         plain_review=True, plain_recent_exchanges=config['mizpah'].get('checkin_recent_exchanges', 6))
 
 
@@ -2222,7 +2225,15 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
     if gate['ok'] and budget-status['completed_worker_turns'] > 0:
         # Only after green: the method goes into the library, and only through the harvest.
         followed = procedures_used(root)
-        session.suspend_reviews('gate green: the write-up is not measurement')
+        # The reviewer's question changes with the phase: the probes are done; now it reads the procedures the
+        # worker touched against what the worker did. Its history rides along, the completion budget restarts.
+        touched = list(dict.fromkeys(followed+procedures_created(root)))
+        if session.controller_client is not None:
+            session.set_review_policy(config['mizpah']['writeup_policy'],
+                                      focus_globs=tuple(PLAYBOOK_PREFIX+'/playbook/procedures/'+pid+'.json' for pid in touched)
+                                      or (PLAYBOOK_PREFIX+'/playbook/procedures/*.json',),
+                                      label='gate green: review the write-up, not the probes')
+            session.resume_reviews()
         session.continue_with(green_message(gate, task_unknown_ids(task), followed, tool_fight(root),
                                             checklist_skips(evidence(session)),
                                             uncovered_by_procedures(config, followed, unknowns),
@@ -2282,6 +2293,9 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
                   turns=status['completed_worker_turns'], turn_budget=budget, turn_estimate=estimate, overruns=overruns,
                   session=status['status'],
                   handoffs=status['handoffs'], checkins=status['controller_reviews'], held_guidance=status['held_guidance'],
+                  # What the reviewer still doubted when its completion budget ran out: the reading stands, and the
+                  # doubt goes to the controller as a candidate reading of its own rather than back to this worker.
+                  reviewer_doubts=list(session.state.get('dropped_corrections') or []),
                   checkin_document=session.project_document(), rounds=rounds, playbook=playbook, widgets=widgets,
                   usage=ops.journal_usage(root/'events'/'session.jsonl'))
     (root/'result.json').write_text(json.dumps(result, indent=1))

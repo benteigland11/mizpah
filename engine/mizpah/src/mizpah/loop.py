@@ -449,7 +449,8 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                     continue
                 errors = 0
                 record['tasks'].append({k: result[k] for k in ('task', 'unknown', 'unknowns', 'verdict', 'blocked_reason', 'turns',
-                                                               'resumed', 'checkins', 'held_guidance', 'problems', 'playbook', 'widgets')})
+                                                               'resumed', 'checkins', 'held_guidance', 'problems', 'playbook', 'widgets')
+                                        if k in result} | dict(reviewer_doubts=result.get('reviewer_doubts') or []))
                 leaked = reap(task['id'])
                 if leaked:
                     record['tasks'][-1]['leaked'] = [dict(comm=l['comm'], rss_mb=l['rss_mb'], age_s=l['age_s']) for l in leaked]
