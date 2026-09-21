@@ -55,9 +55,13 @@ MAX_SEARCH_LIMIT = 50
 WEAK_SEARCH_LIMIT = 3
 
 
-def search_procedures(query: str, limit: int | None = None, include_retired: bool = False) -> dict[str, Any]:
+def search_procedures(query: str, limit: int | None = None, include_retired: bool = False,
+                      target_dir: str | Path = ".") -> dict[str, Any]:
     """Search the global store. Empty query lists procedures (summaries only).
 
+    Local first: walks already open under the working tree and not finished come back ahead of the
+    hits, as `open_here`, each with its next step — a worker whose window rolled over searches again
+    from nothing, and what it had already started is the first thing it should see.
     Retired procedures (use it or lose it: see playbook.library) are left out unless asked
     for; every procedure that appears in the result is touched as searched."""
     catalog = _load_catalog()
@@ -66,6 +70,12 @@ def search_procedures(query: str, limit: int | None = None, include_retired: boo
         catalog = {k: v for k, v in catalog.items() if k not in retired}
     result = _search(catalog, query, limit)
     library.touch([h["id"] for h in result.get("hits", [])], "search")
+    here = open_walks(None, target_dir)
+    if here:
+        result = {"ok": result["ok"], "open_here": here,
+                  "note": "these walks are already open in this workspace and not finished: continue them "
+                          "(or `playbook skip <path> --because ...`) before opening anything from the hits",
+                  **{k: v for k, v in result.items() if k != "ok"}}
     return result
 
 
@@ -515,17 +525,20 @@ def walk_steps(path: Path) -> list[tuple[str, int, str]]:
     return found
 
 
-def open_walks(procedure_id: str, target_dir: str | Path = ".") -> list[dict[str, Any]]:
-    """Walks of this procedure under the working tree that still have unticked steps, oldest first."""
+def open_walks(procedure_id: str | None, target_dir: str | Path = ".") -> list[dict[str, Any]]:
+    """Walks under the working tree that still have unticked steps, oldest first — of one procedure,
+    or of every procedure when `procedure_id` is None."""
     out_dir = Path(target_dir) / OPEN_DIR
     if not out_dir.is_dir():
         return []
     result = []
-    for path in sorted(out_dir.glob(f"{procedure_id}--*.md"), key=lambda p: p.stat().st_mtime):
+    pattern = f"{procedure_id}--*.md" if procedure_id else "*--*.md"
+    for path in sorted(out_dir.glob(pattern), key=lambda p: p.stat().st_mtime):
         steps = walk_steps(path)
         left = [(n, t) for mark, n, t in steps if mark == " "]
         if left:
-            result.append(dict(path=str(path), steps=len(steps), unticked=len(left), next=f"{left[0][0]}. {left[0][1]}"))
+            result.append(dict(id=path.name.split("--", 1)[0], path=str(path), steps=len(steps), unticked=len(left),
+                               next=f"{left[0][0]}. {left[0][1]}"))
     return result
 
 

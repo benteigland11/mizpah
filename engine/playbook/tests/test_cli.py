@@ -324,3 +324,23 @@ def test_open_hands_back_an_unfinished_walk_and_skip_marks_the_rest(tmp_path: Pa
     assert main(["open", "tune-pedal", "--for", "a third piece", "--dir", str(tmp_path)]) == 0
     assert "already_open" not in json.loads(capsys.readouterr().out)
     assert main(["skip", "no-such", "--because", "x", "--dir", str(tmp_path)]) == 1
+
+
+def test_search_lists_open_walks_here_first(tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """Local first: a worker searching again after a handoff sees what it already started before any hit."""
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    assert main(["create", "tune-pedal", "--title", "Tune the pedal", "--description", "pedal per harmony", "--tags", "midi"]) == 0
+    assert main(["add-step", "tune-pedal", "--title", "Find harmonies", "--do", "List the harmony changes."]) == 0
+    capsys.readouterr()
+    assert main(["search", "pedal", "--dir", str(tmp_path)]) == 0
+    assert "open_here" not in json.loads(capsys.readouterr().out)
+    assert main(["open", "tune-pedal", "--for", "the piece", "--dir", str(tmp_path)]) == 0
+    capsys.readouterr()
+    assert main(["search", "something unrelated", "--dir", str(tmp_path)]) == 0
+    reply = json.loads(capsys.readouterr().out)
+    assert list(reply)[:2] == ["ok", "open_here"]
+    assert reply["open_here"][0]["id"] == "tune-pedal" and reply["open_here"][0]["next"] == "1. Find harmonies"
+    assert main(["skip", "tune-pedal", "--because", "no pedal part", "--dir", str(tmp_path)]) == 0
+    capsys.readouterr()
+    assert main(["search", "pedal", "--dir", str(tmp_path)]) == 0
+    assert "open_here" not in json.loads(capsys.readouterr().out)

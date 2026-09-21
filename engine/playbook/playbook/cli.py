@@ -79,6 +79,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=ops.DEFAULT_SEARCH_LIMIT,
         help=f"max hits (default {ops.DEFAULT_SEARCH_LIMIT}, max {ops.MAX_SEARCH_LIMIT})",
     )
+    search.add_argument("--dir", default=".", help="working tree whose open walks come first (default: .)")
     search.add_argument("--all", dest="include_retired", action="store_true",
                         help="include decayed procedures (a person looking, not a worker)")
     search.set_defaults(handler=_cmd_search)
@@ -218,7 +219,8 @@ def _cmd_edit(args: argparse.Namespace) -> dict[str, Any]:
 
 def _cmd_search(args: argparse.Namespace) -> dict[str, Any]:
     _note_search(" ".join(args.query))
-    return ops.search_procedures(" ".join(args.query), limit=args.limit, include_retired=args.include_retired)
+    return ops.search_procedures(" ".join(args.query), limit=args.limit, include_retired=args.include_retired,
+                                 target_dir=args.dir)
 
 
 def _cmd_load(args: argparse.Namespace) -> dict[str, Any]:
