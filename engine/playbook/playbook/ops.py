@@ -574,6 +574,11 @@ def _linked_steps(lines: list[str]) -> dict[int, str]:
     return out
 
 
+def _walk_exists(procedure_id: str, target_dir: str | Path) -> bool:
+    out_dir = Path(target_dir) / OPEN_DIR
+    return out_dir.is_dir() and any(out_dir.glob(f"{procedure_id}--*.md"))
+
+
 def _walk_closed(procedure_id: str, target_dir: str | Path) -> bool:
     """A walk of the procedure exists under the working tree with no unticked box."""
     out_dir = Path(target_dir) / OPEN_DIR
@@ -611,11 +616,18 @@ def tick_walk(target: str, done: list[int] | None = None, not_needed: list[int] 
     # box ticked or skipped with a reason. Ticking the parent box on the strength of "the widget did it" left
     # three linked procedures unwalked and unrecorded in one task (attempt 4, 2026-09-21); the worker has to try.
     linked = _linked_steps(lines)
-    unwalked = [n for n in sorted(set(done) | set(not_needed)) if n in linked and not _walk_closed(linked[n], target_dir)]
+    unwalked = [n for n in sorted(done) if n in linked and not _walk_closed(linked[n], target_dir)]
     if unwalked:
         raise ValueError("step(s) " + ", ".join(str(n) for n in unwalked) + " are other procedures; open and finish each first "
                          "(every box [x], or [-] with its reason), then tick this box: "
                          + "; ".join(f"{n} -> `playbook open {linked[n]} --for ...`" for n in unwalked))
+    # Skipping a linked step needs the walk opened, not closed: the library's links run in circles (a validation
+    # procedure links the voicing procedure that links it), and a closed-walk requirement on both sides deadlocked
+    # a worker with "stale circular linked-step metadata". Opened means looked at; the reason says the rest.
+    unopened = [n for n in not_needed if n in linked and not _walk_exists(linked[n], target_dir)]
+    if unopened:
+        raise ValueError("step " + str(unopened[0]) + " is another procedure; open it before deciding it does not apply: "
+                         f"`playbook open {linked[unopened[0]]} --for ...`")
     seen: set[int] = set(); marked = []
     for i, line in enumerate(lines):
         m = _STEP_LINE.match(line)

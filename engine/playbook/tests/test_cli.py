@@ -388,11 +388,17 @@ def test_a_linked_step_ticks_only_after_its_procedure_is_walked(tmp_path: Path, 
     refusal = capsys.readouterr().out
     assert "step(s) 2 are other procedures" in refusal and "playbook open pedal-per-harmony" in refusal
     assert "- [ ] **2." in Path(parent).read_text()   # nothing ticked, not even step 1
-    assert main(["tick", parent, "--skip", "2", "--dir", str(tmp_path)]) == 1   # skipping it needs the walk too
-    capsys.readouterr()
+    assert main(["tick", parent, "--skip", "2", "--because", "x", "--dir", str(tmp_path)]) == 1   # skipping it needs the walk opened
+    assert "open it before deciding" in capsys.readouterr().out
     assert main(["open", "pedal-per-harmony", "--for", "the piece: Pedal", "--dir", str(tmp_path)]) == 0
     child = json.loads(capsys.readouterr().out)["path"]
-    assert main(["tick", parent, "--done", "2", "--dir", str(tmp_path)]) == 1   # opened but not finished
+    assert main(["tick", parent, "--done", "2", "--dir", str(tmp_path)]) == 1   # opened but not finished: not done
+    capsys.readouterr()
+    # Opened is enough to skip it with a reason (the library's links run in circles; a closed-walk rule on both
+    # sides deadlocks), and the reason goes under the step.
+    assert main(["tick", parent, "--skip", "2", "--because", "its walk is open above; the pedal is placed there", "--dir", str(tmp_path)]) == 0
+    assert "not needed here: its walk is open above" in Path(parent).read_text()
+    Path(parent).write_text(Path(parent).read_text().replace("- [-] **2.", "- [ ] **2.", 1).replace("\n\n  not needed here: its walk is open above; the pedal is placed there", "", 1))
     capsys.readouterr()
     assert main(["tick", child, "--skip", "1", "--because", "the widget applies it", "--dir", str(tmp_path)]) == 0
     capsys.readouterr()
