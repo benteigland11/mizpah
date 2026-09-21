@@ -1063,9 +1063,14 @@ def walks_left(snapshot: bytes) -> list[dict[str, Any]]:
         lines = [ln.strip() for ln in data.decode('utf-8', errors='replace').splitlines()]
         steps = [ln for ln in lines if ln.startswith('- [')]
         pending = [ln[6:].strip('* ') for ln in steps if ln.startswith('- [ ]')]
-        if pending:
+        # A flat walk's footer says what the method still holds past this walk: the next work order.
+        footer = next((ln for ln in lines if ln.startswith('continues:')), '')
+        more = re.search(r'continues: (\d+) more', footer)
+        start = re.search(r'--from (\d+)', footer)
+        if pending or more:
             out.append(dict(procedure=name.rsplit('/', 1)[-1].split('--', 1)[0], file=name, steps=len(steps),
-                            unticked=len(pending), next=pending[0][:100]))
+                            unticked=len(pending), next=pending[0][:100] if pending else '',
+                            continues=int(more.group(1)) if more else 0, next_from=int(start.group(1)) if start else 0))
     return out
 
 
@@ -2094,6 +2099,16 @@ def run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | N
             shell.close_network()
 
 
+def assigned_walk(task: dict[str, Any]) -> tuple[str, int]:
+    """The procedure walk the route named for this task (`walk:<id>@<from>` in its acceptance), or ('', 0)."""
+    for entry in task.get('acceptance') or []:
+        if isinstance(entry, str) and entry.startswith('walk:'):
+            spec = entry[len('walk:'):].strip()
+            pid, _, start = spec.partition('@')
+            return pid.strip(), int(start) if start.strip().isdigit() else 0
+    return '', 0
+
+
 def continue_from(task: dict[str, Any]) -> str:
     """The task whose worker workspace this task continues (`continue_from:<id>` in its acceptance), or ''."""
     for entry in task.get('acceptance') or []:
@@ -2291,11 +2306,19 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         if parts:
             assignment += ('The library already has parts near this work; install and extend one where it nearly fits '
                            'rather than creating a near-duplicate:\n'+'\n'.join('  - '+p for p in parts)+'\n')
-        methods = procedure_parts(config, task, unknowns)
-        if methods:
-            assignment += ('The playbook already has methods near this work; search for them, open the best with '
-                           '`playbook open <id> --for ...` and follow it before working the method out yourself:\n'
-                           +'\n'.join('  - '+m for m in methods)+'\n')
+        walk_id, walk_from = assigned_walk(task)
+        if walk_id:
+            # The route named the method: the worker opens it, flat, and does not search first.
+            assignment += ('Your method is named: open it before anything else — `playbook open '+walk_id+' --for "'+task['id']+'"'
+                           +(' --from '+str(walk_from) if walk_from else '')+'` — and walk it; it is one straight list of at '
+                           'most 50 steps, each naming the procedure it came from. Search the playbook only if that walk '
+                           'does not fit what is in front of you, and say so when you block or complete.\n')
+        else:
+            methods = procedure_parts(config, task, unknowns)
+            if methods:
+                assignment += ('The playbook already has methods near this work; search for them, open the best with '
+                               '`playbook open <id> --for ...` and follow it before working the method out yourself:\n'
+                               +'\n'.join('  - '+m for m in methods)+'\n')
         from . import bases
         assignment += bases.enabler_text(config)   # the gym's environment base, when it has one
         if config['mizpah'].get('builds_base'):

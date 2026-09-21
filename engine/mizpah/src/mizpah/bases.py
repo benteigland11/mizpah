@@ -64,6 +64,36 @@ def create(name: str, *, note: str = '') -> dict[str, Any]:
     return dict(record, path=str(folder))
 
 
+def update(name: str, *, note: str | None = None, env: dict[str, str] | None = None) -> dict[str, Any]:
+    """Finish or revise a base's record: the note the next worker reads, and the env with `$BASE` paths."""
+    base = load(name)
+    if env is not None and (not isinstance(env, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in env.items())):
+        raise ValueError('env must map names to strings')
+    record = dict(name=name, note=str(note if note is not None else base['note']), env=dict(env if env is not None else base['env']))
+    (Path(base['path'])/'base.json').write_text(json.dumps(record, indent=1)+'\n')
+    return load(name)
+
+
+def check(name: str) -> dict[str, Any]:
+    """Is the base usable from any gym: relocatable (no `/work` shebangs), with a note, and what it holds."""
+    base = load(name)
+    root = Path(base['path'])
+    stuck = []
+    for folder in ('bin', 'venv/bin'):
+        for script in (root/folder).glob('*'):
+            try:
+                head = script.read_bytes()[:200]
+            except OSError:
+                continue
+            if head.startswith(b'#!') and b'/work/' in head.split(b'\n', 1)[0]:
+                stuck.append(folder+'/'+script.name)
+    holds = dict(venv=(root/'venv'/'bin').is_dir(), bin=sorted(p.name for p in (root/'bin').glob('*')) if (root/'bin').is_dir() else [],
+                 tools=sorted(p.name for p in (root/'tools').iterdir()) if (root/'tools').is_dir() else [])
+    problems = ([] if base['note'] else ['no note: the next worker is told nothing'])+(
+        ['not relocatable: shebangs name /work in '+', '.join(stuck[:6])] if stuck else [])
+    return dict(name=name, path=base['path'], note=base['note'], env=base['env'], holds=holds, problems=problems, ok=not problems)
+
+
 def load(name: str) -> dict[str, Any]:
     folder = path_of(name)
     try:
@@ -215,6 +245,12 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser('list', help='every base and what it provides')
     s = sub.add_parser('show', help='one base, resolved')
     s.add_argument('name')
+    u = sub.add_parser('update', help='set a base\'s note and/or env (JSON object)')
+    u.add_argument('name')
+    u.add_argument('--note')
+    u.add_argument('--env', help='JSON object of NAME -> value, $BASE for the base\'s path')
+    k = sub.add_parser('check', help='is the base usable from any gym')
+    k.add_argument('name')
     d = sub.add_parser('default', help='the environment a gym gets when none is named; with a name, set it')
     d.add_argument('name', nargs='?')
     a = sub.add_parser('adopt', help='a finished environment gym becomes a base (its base.json names it)')
@@ -224,6 +260,10 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     if args.command == 'create':
         print(json.dumps(create(args.name, note=args.note), indent=1))
+    elif args.command == 'update':
+        print(json.dumps(update(args.name, note=args.note, env=json.loads(args.env) if args.env else None), indent=1))
+    elif args.command == 'check':
+        print(json.dumps(check(args.name), indent=1))
     elif args.command == 'default':
         print(json.dumps(set_default(args.name) if args.name else load(default_name()), indent=1))
     elif args.command == 'adopt':

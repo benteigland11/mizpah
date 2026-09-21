@@ -10,7 +10,7 @@ A task lists the unknowns it resolves (several that are naturally done together 
 
 If the project-files section is not enough to route or bucket well, look first: reply {"look": ["path/or/glob", ...], "why": "one sentence"} (up to 6 paths, twice per step) and the heads of those files are added to what you see before you decide.\n\nReply with one JSON object and nothing else:
 {"unknowns": [{"id": "snake_case", "claim": "...", "evidence_needed": "...", "type": "number|boolean|label", "unit": "...", "cites": "need:1 | deliverable:1 (one, or several joined by |; the first is primary)"}],
- "tasks": [{"id": "snake_case", "title": "...", "unknowns": ["..."], "bucket": "low|medium|high", "deps": [], "continue_from": "<task id, optional>"}],
+ "tasks": [{"id": "snake_case", "title": "...", "unknowns": ["..."], "bucket": "low|medium|high", "deps": [], "continue_from": "<task id, optional>", "walk": "<procedure id, optional>", "walk_from": 0}],
  "cancel": [{"task": "<id>", "why": "..."}],
  "proposals": [{"summary": "...", "need": "new need text", "deliverable": "...", "non_goal": "...", "edit": {"need|deliverable|non_goal": N, "text": "..."}, "remove": {"need|deliverable|non_goal": N}, "budget_delta": +N, "evidence": "...", "blocking": false}],
  "why": "one sentence on what the map owes the brief"}
@@ -24,6 +24,18 @@ A brief may declare phases, each owning some needs and deliverables; the observa
 the current phase: a later phase's entries name knowns that do not exist yet, and the guard refuses them. A phase closes
 by itself when every entry it owns has a resolved unknown and no task of it is open — "done" inside a phase means the
 phase is met, not the brief. A closed phase's knowns are the anchors the next phase's needs name by id.
+
+## The route is planned by method
+
+The observation lists the methods in the playbook near this brief with their reach — steps through the procedures
+each links — and a walk is at most 50 steps. That is the plan: a deliverable whose method reaches 45 steps is one
+task; one that reaches 93 is two tasks on one workspace (the second `continue_from` the first, `walk` the same
+procedure, `walk_from` the step the first walk stopped at — the result of the first says where). Name the walk on
+the task (`"walk": "<procedure id>"`) and the worker opens it before anything else; it does not search. The digging
+is yours: you see the library's reach, the worker sees only what it is handed. Route without a walk only when no
+method is near the work — the worker then searches once and, finding nothing, does the thing and mints the method.
+Price by walks: a low task per walk. A method that reaches 300 steps is a brief that asks for six work orders of
+method before a reading; say so, and route them.
 
 ## Validation is the gate's, not a task's
 

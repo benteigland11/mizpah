@@ -113,19 +113,24 @@ def test_the_desk_follows_successful_show_and_discard_calls_only() -> None:
     ok = dict(status='ok', stdout='{"status": "ok", "showing": {"draft": "a"}}')
     bad = dict(status='ok', stdout='{"status": "error", "error": "no draft named b"}')
     events = [
-        ('command_tool', dict(call_id='1', name='draft_show', command='python -m mizpah.draft show a')),
+        ('command_tool', dict(call_id='1', name='draft_show', command='draft_show {"slug": "a"}', host=True)),
         ('tool_outcome', dict(call_id='1', **ok)),
-        ('command_tool', dict(call_id='2', name='draft_show', command='python -m mizpah.draft show b')),
+        ('command_tool', dict(call_id='2', name='draft_show', command='draft_show {"slug": "b"}', host=True)),
         ('tool_outcome', dict(call_id='2', **bad)),
     ]
     assert deputy.showing_after(_session(events), 0) == dict(draft='a')
     assert deputy.showing_after(_session(events), 4) is False     # nothing new this turn
     events += [
-        ('command_tool', dict(call_id='3', name='draft_discard', command='python -m mizpah.draft discard a')),
+        ('command_tool', dict(call_id='w', name='draft_write', command='draft_write {"slug": "b", "needs": ["x"]}', host=True)),
+        ('tool_outcome', dict(call_id='w', status='ok', stdout='{"status": "ok", "showing": {"draft": "b"}}')),
+    ]
+    assert deputy.showing_after(_session(events), 0) == dict(draft='b')   # a write shows the sheet it wrote
+    events += [
+        ('command_tool', dict(call_id='3', name='draft_discard', command='draft_discard {"slug": "a"}', host=True)),
         ('tool_outcome', dict(call_id='3', status='ok', stdout='{"status": "ok", "discarded": "a"}')),
     ]
-    assert deputy.showing_after(_session(events), 0) is None      # shown, then discarded: clear the desk
-    assert deputy.showing_after(_session(events), 4) is None
+    assert deputy.showing_after(_session(events), 0) == dict(draft='b')   # a discarded a; b stays on the desk
+    assert deputy.showing_after(_session(events), 6) is None               # from the discard alone: clear
 
 
 def test_turn_log_round_trips(tmp_path: Path) -> None:
@@ -135,22 +140,19 @@ def test_turn_log_round_trips(tmp_path: Path) -> None:
     assert [t['role'] for t in log] == ['user', 'deputy'] and log[1]['showing'] == dict(draft='a')
 
 
-def test_the_sandbox_owns_the_gyms_with_issued_ones_read_only(gyms: Path, tmp_path: Path) -> None:
+def test_the_sandbox_is_the_environments_directory_with_package_hosts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from mizpah import bases
     from mizpah.worker import load_config
+    monkeypatch.setattr(bases, 'bases_root', lambda: tmp_path/'bases')
+    (tmp_path/'bases').mkdir()
     config = load_config(ROOT/'config.luna.json')
-    draft.new('ornith-landing', 't', 'm', 'none')
-    (gyms/'issued-20260920T000000Z'/'.mizpah').mkdir(parents=True)
-    (gyms/'issued-20260920T000000Z'/'.mizpah'/'brief.json').write_text(json.dumps(dict(status='active', title='x')))
     shell = deputy.shell_for(config, tmp_path/'root')
-    assert shell.config.workspace_dir == str(gyms)
-    assert str(gyms/'issued-20260920T000000Z') in shell.config.read_only_binds
-    assert str(gyms/'ornith-landing') not in shell.config.read_only_binds
-    assert shell.config.environment['MIZPAH_GYMS'] == '/work'
-    assert shell.config.share_network is False and shell.config.services is None
+    assert shell.config.workspace_dir == str(tmp_path/'bases')
+    assert shell.config.services is None and shell.config.share_network is False
+    assert 'pypi.org' in shell.config.network.allowed_domains and 'files.pythonhosted.org' in shell.config.network.allowed_domains
+    assert not any('gyms' in b for b in shell.config.read_only_binds)
     reasons = [r for _, r in shell.config.refused_patterns]
-    assert any('signature' in r for r in reasons) and any('terra brief set' in r for r in reasons)
-
-
+    assert any('environments' in r for r in reasons)
 @pytest.fixture
 def homes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A projects registry of its own, so authorize never touches the machine's (the gyms root is `gyms`)."""
@@ -326,8 +328,72 @@ def test_adopt_copies_a_green_environment_gym_into_the_bases(gyms: Path, tmp_pat
 def test_the_seat_hears_the_desk_with_every_line(gyms: Path, tmp_path: Path) -> None:
     root = tmp_path/'deputy'
     root.mkdir()
-    assert deputy.situation(root) == '[Desk, from the host: no drafts; the desk is clear]'
+    assert deputy.situation(root).endswith('; no drafts; the desk is clear]') and 'environments: ' in deputy.situation(root)
     draft.new('etude', 'Etude', 'm', 'none')
     (root/'showing.json').write_text('{"draft": "etude"}\n')
     line = deputy.situation(root)
-    assert line.startswith('[Desk, from the host: drafts: etude (Etude, 0 needs, 0 deliverables, env ') and line.endswith('; on the desk: etude]')
+    assert '; drafts: etude (Etude, 0 needs, 0 deliverables, env ' in line and line.endswith('; on the desk: etude]')
+
+
+def test_write_sets_a_whole_brief_in_one_call_and_refuses_an_issued_one(gyms: Path) -> None:
+    draft.new('etude', 'Etude', 'first mission')
+    out = draft.write('etude', needs=['a page', 'a report'], deliverables=['site/index.html: the page (needs 1)'],
+                      budget_points=40, budget_notes='a weekend')
+    assert out['needs'] == 2 and out['deliverables'] == 1 and out['budget_points'] == 40 and out['showing'] == dict(draft='etude')
+    brief = draft.brief_of(gyms/'etude')
+    assert brief['needs'] == ['a page', 'a report'] and brief['mission'] == 'first mission'
+    # A list given replaces that list; the others stay.
+    draft.write('etude', needs=['a page, reworded'])
+    brief = draft.brief_of(gyms/'etude')
+    assert brief['needs'] == ['a page, reworded'] and brief['deliverables'] == ['site/index.html: the page (needs 1)']
+    draft.write('etude', mission='second mission')
+    assert draft.brief_of(gyms/'etude')['mission'] == 'second mission'
+    with pytest.raises(SystemExit) as nothing:
+        draft.write('etude')
+    assert 'nothing to write' in str(nothing.value)
+    path = gyms/'etude'/'.mizpah'/'brief.json'
+    path.write_text(json.dumps(json.loads(path.read_text()) | dict(status='active')))
+    with pytest.raises(SystemExit) as issued:
+        draft.write('etude', needs=['x'])
+    assert 'issued' in str(issued.value)
+
+
+def test_the_verbs_run_in_process_and_refusals_come_back_as_errors(gyms: Path) -> None:
+    h = deputy.handlers()
+    assert set(h) == {t['name'] for t in deputy.DEPUTY_TOOLS} and all(t.get('host') is True for t in deputy.DEPUTY_TOOLS)
+    made = h['draft_new'](dict(slug='etude', title='Etude', mission='m'))
+    assert made['status'] == 'ok' and made['environment']
+    written = h['draft_write'](dict(slug='etude', needs=['a', 'b'], budget_points=8))
+    assert written['status'] == 'ok' and written['needs'] == 2 and written['showing'] == dict(draft='etude')
+    read = h['brief_show'](dict(slug='etude'))
+    assert read['brief']['needs'] == ['a', 'b'] and read['showing'] == dict(draft='etude')
+    refused = h['brief_show'](dict(slug='nope'))
+    assert refused['status'] == 'error' and 'no gym named nope' in refused['error']
+    bad = h['draft_new'](dict(slug='x', title='t'))   # a required argument missing
+    assert bad['status'] == 'error' and 'bad arguments' in bad['error']
+    assert h['draft_discard'](dict(slug='etude')) == dict(status='ok', discarded='etude')
+
+
+def test_the_seat_has_bash_for_environments_and_verbs_for_the_rest() -> None:
+    from mizpah.worker import load_config
+    settings = deputy.settings_for(load_config(ROOT/'config.openai.json'), 'hello')
+    assert settings.worker_tools == ('bash',) and [t['name'] for t in settings.command_tools] == [t['name'] for t in deputy.DEPUTY_TOOLS]
+
+
+def test_environment_verbs_make_finish_and_check_a_base(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from mizpah import bases
+    monkeypatch.setattr(bases, 'bases_root', lambda: tmp_path/'bases')
+    (tmp_path/'bases').mkdir()
+    h = deputy.handlers()
+    made = h['environment_new'](dict(name='lean', note='a Lean 4 toolchain'))
+    assert made['status'] == 'ok' and made['path'] == '/work/lean' and (tmp_path/'bases'/'lean'/'base.json').exists()
+    assert h['environment_new'](dict(name='lean', note='x'))['status'] == 'error'
+    root = tmp_path/'bases'/'lean'
+    (root/'venv'/'bin').mkdir(parents=True)
+    (root/'venv'/'bin'/'lake').write_text('#!/work/lean/venv/bin/python3\n')
+    stuck = h['environment_finish'](dict(name='lean', note='Lean 4: `lake build` in a project; `lean --version` prints the toolchain', env={'ELAN_HOME': '$BASE/elan'}))
+    assert stuck['status'] == 'error' and 'relocatable' in stuck['error'] and stuck['holds']['venv'] is True
+    (root/'venv'/'bin'/'lake').write_text('#!/usr/bin/env python3\n')
+    done = h['environment_finish'](dict(name='lean', note='Lean 4: `lake build`', env={'ELAN_HOME': '$BASE/elan'}))
+    assert done['status'] == 'ok' and done['env'] == {'ELAN_HOME': '$BASE/elan'} and bases.load('lean')['note'] == 'Lean 4: `lake build`'
+    assert bases.check('lean')['ok']

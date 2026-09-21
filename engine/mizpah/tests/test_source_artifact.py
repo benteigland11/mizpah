@@ -251,9 +251,9 @@ def test_a_task_may_continue_a_workspace_the_loop_holds(gym: Path, tmp_path: Pat
     (old/'result.json').write_text(json.dumps(dict(verdict='blocked_by_worker', turns=30,
         walks_open=[dict(procedure='midi-pedal-per-harmony', file='.playbook/open/midi-pedal-per-harmony--x.md', steps=4, unticked=4, next='Apply separated sustain')])))
     spaces = controller.task_workspaces(root)
-    assert spaces[0]['walks_open'] == [dict(procedure='midi-pedal-per-harmony', unticked=4, next='Apply separated sustain')]
+    assert spaces[0]['walks_open'] == [dict(procedure='midi-pedal-per-harmony', unticked=4, next='Apply separated sustain', continues=0, next_from=0)]
     text = controller.render_observation(observation | dict(workspaces=spaces), 'route')
-    assert 'walks left open: midi-pedal-per-harmony (4 unticked' in text and 'one walk per work order' in text
+    assert 'walks left: midi-pedal-per-harmony (4 unticked' in text and 'one walk per work order' in text
     (old/'result.json').write_text(json.dumps(dict(verdict='complete', turns=30)))
     decision = dict(unknowns=[dict(id='piece_mid_built', cites='deliverable:1', type='boolean', claim='`piece.mid` exists and parses',
                                    evidence_needed='parse it'),
@@ -352,3 +352,30 @@ def test_a_cancel_frees_its_unknown_for_a_task_in_the_same_decision(gym: Path) -
     assert applied['cancel'] == ['validate_piece'] and 'rebuild_piece_eight_bars' in applied['tasks']
     status = {t['id']: t['status'] for t in terra(gym, 'route', 'status')['tasks']}
     assert status == {'validate_piece': 'cancelled', 'rebuild_piece_eight_bars': 'ready'}
+
+
+def test_a_task_names_the_walk_its_worker_opens(gym: Path, tmp_path: Path, monkeypatch) -> None:
+    """The controller plans by method: a task carries the procedure to walk (and where a long method's next walk
+    starts); the worker's assignment opens it instead of searching."""
+    from mizpah import worker
+    store = tmp_path/'procedures'
+    store.mkdir()
+    (store/'compose-piano.json').write_text(json.dumps(dict(id='compose-piano', title='Compose', description='d', tags=['midi'],
+                                                             steps=[dict(id='s1', title='Notes', do='write')])))
+    observation = controller.observe(CONFIG, gym) | dict(methods=[dict(id='compose-piano', title='Compose', steps=1, walks=1, procedures=1)],
+                                                         playbook_store=str(store))
+    decision = dict(unknowns=[dict(id='piece_mid_built', cites='deliverable:1', type='boolean', creates='piece.mid',
+                                   claim='piece.mid exists', evidence_needed='parse it'),
+                              dict(id='piece_mid_parses', cites='deliverable:1', type='boolean',
+                                   claim='piece.mid parses with mido', evidence_needed='parse it')],
+                    tasks=[dict(id='build_piece_mid', unknowns=['piece_mid_built'], bucket='low', title='build', walk='compose-piano', walk_from=0),
+                           dict(id='other', unknowns=['piece_mid_parses'], bucket='low', title='x', walk='no-such-procedure')])
+    accepted, refusals = controller.guard(decision, observation, gym)
+    by = {t['id']: t for t in accepted['tasks']}
+    assert by['build_piece_mid']['walk'] == 'compose-piano'
+    assert any('is not a procedure in the playbook' in c for c in accepted['cautions'])
+    controller.apply(CONFIG, gym, accepted)
+    task = next(t for t in terra(gym, 'route', 'status')['tasks'] if t['id'] == 'build_piece_mid')
+    assert 'walk:compose-piano@0' in task['acceptance'] and worker.assigned_walk(task) == ('compose-piano', 0)
+    text = controller.render_observation(observation, 'route')
+    assert 'reach 1 steps through 1 procedure(s) = 1 walk(s)' in text and '"walk": "<procedure id>"' in text

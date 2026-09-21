@@ -724,8 +724,28 @@ def reach(procedure_id: str) -> dict[str, Any]:
     by_source: dict[str, int] = {}
     for e in entries:
         by_source[e["source"]] = by_source.get(e["source"], 0) + 1
+    walks = 0
+    start = 0
+    while start < len(entries):
+        start = _cut(entries, start, FLAT_LIMIT)
+        walks += 1
     return {"ok": True, "id": procedure_id, "steps": len(entries), "procedures": by_source,
-            "walks": -(-len(entries) // FLAT_LIMIT), "limit": FLAT_LIMIT}
+            "walks": max(1, walks), "limit": FLAT_LIMIT}
+
+
+def _cut(entries: list[dict[str, Any]], start: int, limit: int) -> int:
+    """Where a walk from `start` ends: at the limit, or a little past it (a third at most) where the method comes
+    back up to its own steps, so an inlined procedure is not split across walks."""
+    limit = max(1, int(limit))
+    end = min(len(entries), start + limit)
+    if end < len(entries) and entries[end]["depth"] > 0:
+        for k in range(end, min(len(entries), start + limit + limit // 3) + 1):
+            if k == len(entries) or entries[k]["depth"] == 0:
+                end = k
+                break
+    if 0 < len(entries) - end <= limit // 5:   # a tail of a few steps is this walk's, not a walk of its own
+        end = len(entries)
+    return end
 
 
 _GUIDANCE = ("This procedure is the validation of your work: each step is a check or a change someone found necessary, "
@@ -798,13 +818,7 @@ def open_procedure(procedure_id: str, purpose: str, target_dir: str | Path = "."
             raise ValueError(f"--from {start}: the flattened method has {len(entries)} steps (0-based start)")
         # The cut falls where the method comes back up to its own steps (depth 0), so an inlined procedure is
         # not split across walks; the walk runs over the limit by at most a third for that.
-        limit = max(1, int(limit))
-        end = min(len(entries), start + limit)
-        if end < len(entries) and entries[end]["depth"] > 0:
-            for k in range(end, min(len(entries), start + limit + limit // 3) + 1):
-                if k == len(entries) or entries[k]["depth"] == 0:
-                    end = k
-                    break
+        end = _cut(entries, start, limit)
         chosen = entries[start:end]
         remaining = entries[end:]
         library.touch(sorted({e["source"] for e in chosen}), "use")

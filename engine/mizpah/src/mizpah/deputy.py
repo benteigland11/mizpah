@@ -30,8 +30,8 @@ from typing import Any
 
 from . import draft as draft_module, init as init_module
 from .worker import (
-    FocusedSession, ModelClient, ModelTransportError, ReviewPolicy, SandboxedShell, SessionPolicy, SessionSettings,
-    ShellConfig, ShellLimits, client_for, load_config, observe_model, string,
+    FocusedSession, ModelClient, ModelTransportError, NetworkPolicy, ReviewPolicy, SandboxedShell, SessionPolicy,
+    SessionSettings, ShellConfig, ShellLimits, client_for, load_config, observe_model, string,
 )
 from cg.bp_focused_agent_session_python.src.focused_agent_session import ContextCapacityExceeded, GenerationRetryExceeded
 
@@ -52,41 +52,109 @@ def deputy_root() -> Path:
     return root
 
 
-# The Deputy's verbs, typed because they are new and undiscoverable; everything else is bash and `terra --help`.
+# The Deputy's verbs. Every one is a host operation on the gyms directory — a draft made, written, shown,
+# discarded, a brief read — so they run in this process (`host: True`), never through a sandbox: a turn's tool
+# calls cost milliseconds, not a bwrap and a systemd unit each. The seat has no bash and no file tools; building
+# an environment is a worker's job in its own sandbox, and the Deputy only writes that brief.
 DEPUTY_TOOLS: tuple[dict[str, Any], ...] = (
-    dict(name='draft_new', description='Set up a gym: a training ground under /work in a named environment, with an '
-         'empty brief (title and mission set, status draft). Every gym has an environment: the one named — `python -m '
-         'mizpah.draft environments` lists the saved ones, what each provides, and which is the default — or, when '
-         'none is named, the default (the `bare` one, Python and a shell only, unless the Administrator has set '
-         'another). Settle it with the Administrator first when the work needs more than the default. Then add '
-         'needs, deliverables, non-goals and the budget with `terra brief set` from inside /work/<slug> in bash, a '
-         'few entries per call.',
-         command='python -m mizpah.draft new {slug} --title {title} --mission {mission} --environment {environment}',
+    dict(name='draft_new', host=True, description='Set up a gym: a training ground in a named environment, with an empty '
+         'brief (title and mission set, status draft). Every gym has an environment: the one named, or when none is '
+         'named the default (the line from the host under each message says which is the default and what each '
+         'provides). Settle it with the Administrator first when the work needs more than the default.',
          parameters=dict(type='object', properties=dict(slug=string('kebab-case name, e.g. ornith-landing'),
                                                         title=string('the brief title, a few words'),
                                                         mission=string('one or two sentences: what is built or found out, and how it is proved'),
-                                                        environment=string('a saved environment name; empty for the default', default='')),
+                                                        environment=string('a saved environment name; omit for the default')),
                          required=['slug', 'title', 'mission'])),
-    dict(name='environment_new', description='Set up an environment gym: a bare gym whose brief\'s deliverable is a new '
-         'saved environment, adopted under that name when its loop goes green. Use when no saved environment provides '
-         'what the work needs. Then write its brief: one need per tool that must run (`Know whether <tool> runs …`), '
-         'the deliverable `base.json` (name, the note the next worker reads, env with $BASE paths), the budget. Only '
-         'after that environment exists can the real gym be set up in it.',
-         command='python -m mizpah.draft new {slug} --title {title} --mission {mission} --environment bare --builds {name}',
-         parameters=dict(type='object', properties=dict(name=string('the environment\'s name, e.g. browser (lowercase, digits, - and _)'),
-                                                        slug=string('the gym\'s name, e.g. env-browser'),
-                                                        title=string('the brief title'),
-                                                        mission=string('what the environment is for and what it must provide')),
-                         required=['name', 'slug', 'title', 'mission'])),
-    dict(name='draft_show', description='Pull a draft up on the desk beside the conversation so the Administrator reads '
-         'the sheet itself. Do it after every change to a draft.',
-         command='python -m mizpah.draft show {slug}',
-         parameters=dict(type='object', properties=dict(slug=string('the draft to show')), required=['slug'])),
-    dict(name='draft_discard', description='Remove a draft the Administrator no longer wants, with everything in it. '
+    dict(name='draft_write', host=True, description="Write a draft's brief in one call: needs, deliverables, non-goals, budget, "
+         'and a new mission or environment if they change. A list given replaces that list on the sheet whole (send '
+         'the full list, reworded where needed); a list left out stays as it is. It puts the sheet on the desk.',
+         parameters=dict(type='object', properties=dict(
+             slug=string('the draft'),
+             title=string('a new title, if it changes'),
+             mission=string('a new mission, if it changes'),
+             needs=dict(type='array', items=dict(type='string'), description="every need, in order, in the Administrator's words"),
+             deliverables=dict(type='array', items=dict(type='string'), description='every deliverable: one artifact by path, what it holds, the needs it draws on by number'),
+             non_goals=dict(type='array', items=dict(type='string'), description='constraints on method, the forbidden term in backticks'),
+             budget_points=dict(type='integer', description='total effort in route points'),
+             budget_notes=string('one sentence: the horizon and why'),
+             environment=string('a saved environment name, if it changes')),
+             required=['slug'])),
+    dict(name='environment_new', host=True, description='Start a new saved environment: an empty directory under /work '
+         'named for it, with its record. Then set it up in bash at /work/<name> — a venv, packages, downloaded programs, '
+         'wrappers in bin/ (the method is in your instructions) — and finish it with environment_finish. Every gym set '
+         'up in it afterwards gets the directory mounted read-only with its env set and its note told to the worker.',
+         parameters=dict(type='object', properties=dict(name=string("the environment's name, e.g. lean (lowercase, digits, - and _)"),
+                                                        note=string('one line for now: what it will provide; the full note comes at finish')),
+                         required=['name', 'note'])),
+    dict(name='environment_finish', host=True, description='Finish (or revise) an environment: the note the next worker reads '
+         'verbatim — each tool, how to call it, where its data is ($BASE/…), what it cannot do — and the env with '
+         '$BASE paths. It checks the environment is usable from any gym (relocatable, has a note) and says what is wrong.',
+         parameters=dict(type='object', properties=dict(name=string('the environment'),
+                                                        note=string('the full note, one paragraph'),
+                                                        env=dict(type='object', additionalProperties=dict(type='string'),
+                                                                 description='NAME -> value, with $BASE for the environment\'s own path')),
+                         required=['name', 'note'])),
+    dict(name='brief_show', host=True, description='Read a brief as it stands — any gym, draft or issued — and pull it up on '
+         'the desk. Reading is always the Administrator\'s to ask for; changing an issued brief is not yours.',
+         parameters=dict(type='object', properties=dict(slug=string('the gym')), required=['slug'])),
+    dict(name='draft_discard', host=True, description='Remove a draft the Administrator no longer wants, with everything in it. '
          'Ask once first.',
-         command='python -m mizpah.draft discard {slug}',
          parameters=dict(type='object', properties=dict(slug=string('the draft to remove')), required=['slug'])),
 )
+
+
+def _verb(fn: Any) -> Any:
+    """A draft function as a handler: its refusals (SystemExit carrying JSON) become the error the model reads."""
+    def call(args: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return fn(**args)
+        except SystemExit as refused:
+            try:
+                return json.loads(str(refused.code if refused.code is not None else refused))
+            except (ValueError, TypeError):
+                return dict(status='error', error=str(refused))
+        except TypeError as error:
+            return dict(status='error', error='bad arguments: '+str(error))
+    return call
+
+
+def _brief_show(slug: str) -> dict[str, Any]:
+    project = draft_module.draft_dir(slug)
+    brief = draft_module.brief_of(project)
+    if not brief:
+        raise SystemExit(json.dumps(dict(status='error', error='no gym named '+slug+'; drafts: '+', '.join(p.name for p in draft_module.listing()))))
+    keep = ('title', 'status', 'mission', 'environment', 'needs', 'deliverables', 'non_goals', 'budget_points', 'budget_notes',
+            'enablers', 'phases')
+    return dict(status='ok', showing=dict(draft=slug), brief={k: brief.get(k) for k in keep if brief.get(k) not in (None, [], '')})
+
+
+def _environment_new(name: str, note: str) -> dict[str, Any]:
+    from . import bases
+    try:
+        made = bases.create(name, note=note)
+    except FileExistsError:
+        raise SystemExit(json.dumps(dict(status='error', error='an environment named '+name+' exists; environment_finish revises it, or pick another name')))
+    except ValueError as error:
+        raise SystemExit(json.dumps(dict(status='error', error=str(error))))
+    return dict(status='ok', name=name, path='/work/'+name, host_path=made['path'],
+                next='set it up in bash under /work/'+name+' (venv/, tools/, bin/), then environment_finish')
+
+
+def _environment_finish(name: str, note: str, env: dict[str, str] | None = None) -> dict[str, Any]:
+    from . import bases
+    try:
+        bases.update(name, note=note, env=env)
+        report = bases.check(name)
+    except (FileNotFoundError, ValueError) as error:
+        raise SystemExit(json.dumps(dict(status='error', error=str(error))))
+    return dict(status='ok' if report['ok'] else 'error', **({} if report['ok'] else dict(error='; '.join(report['problems']))), **report)
+
+
+def handlers() -> dict[str, Any]:
+    return dict(draft_new=_verb(draft_module.new), draft_write=_verb(draft_module.write), brief_show=_verb(_brief_show),
+                draft_discard=_verb(draft_module.discard), environment_new=_verb(_environment_new),
+                environment_finish=_verb(_environment_finish))
 
 
 def deputy_spec(config: dict[str, Any]) -> dict[str, Any]:
@@ -113,20 +181,34 @@ def read_roots(config: dict[str, Any]) -> list[str]:
 
 
 def shell_for(config: dict[str, Any], root: Path) -> SandboxedShell:
+    """The Deputy's one use of a shell: setting up environments. `/work` is the environments directory — every base
+    is a directory there the Deputy may fill (a venv, downloaded programs, wrappers) — with the package hosts
+    reachable, so a toolchain is downloaded once and every gym set up in that environment gets it mounted. Drafts
+    are never touched from here; they are host verbs. The gyms are not mounted at all."""
     sandbox = config['mizpah']['sandbox']
-    gyms = init_module.gyms_root()
+    from . import bases
+    bases_root = bases.bases_root()
     scratch = root/'scratch'
     scratch.mkdir(parents=True, exist_ok=True)
-    environment = dict(sandbox['environment'], TERRA_DIRNAME='.mizpah', MIZPAH_GYMS='/work', HOME='/work/.home')
-    binds = tuple(dict.fromkeys(list(sandbox['read_only_binds'])+read_roots(config)))
+    environment = dict(sandbox['environment'], MIZPAH_BASES='/work', HOME='/work/.home',
+                       PIP_CACHE_DIR='/work/.cache/pip', PLAYWRIGHT_BROWSERS_PATH='/work/.cache/playwright-download')
+    binds = tuple(dict.fromkeys(sandbox['read_only_binds']))
+    network = None
+    share = bool(sandbox.get('share_network', False))
+    if sandbox.get('network'):
+        # The host's proxy, with the package hosts an environment build fetches from.
+        network = NetworkPolicy(**(sandbox['network'] | dict(allowed_domains=list(dict.fromkeys(
+            list(sandbox['network'].get('allowed_domains') or [])+list(draft_module.BUILD_DOMAINS))))))
+        share = False
     shell = ShellConfig(**(config['shell'] | dict(
         scratch_root=str(scratch), limits=ShellLimits(**config['shell']['limits']), read_only_binds=binds,
-        environment=environment, share_network=False, services=None,
-        refused_paths=tuple(sandbox.get('refused_paths') or ()),
-        refused_patterns=((r'(>>?|\btee\b|(?<=\s)-i(?=\s))\s*[^|;&]*\.mizpah/brief\.json', 'a brief is written with `terra brief set`, never as a file'),
-                          (r'\bterra\s+brief\s+set\b[^|;&]*--status\s+active', 'issuing a brief is the Administrator\'s signature, on the desk'),
-                          (r'\bmizpah\.(loop|worker|init)\b|\bmizpah\.draft\s+authorize\b', 'loops start on the Administrator\'s signature, never from this seat')),
-        workspace_dir=str(gyms), cache_dirs=(), state_dirs=('.tool-output', '.session-history', '.home'))))
+        environment=environment, share_network=share, services=None, network=network,
+        # The engine's own documents and prompt are not its to read: a seat that reads them spends its turns
+        # orienting instead of working (one turn grepped the docs for "environment gym" and read its own prompt).
+        refused_paths=tuple(sandbox.get('refused_paths') or ())+tuple(
+            str(Path(p).parent.parent.parent/d) for p in [config['mizpah_config_path']] for d in ('docs', 'app', 'engine')),
+        refused_patterns=((r'\bmizpah\.(loop|worker|init|draft|deputy)\b|\bterra\b', 'drafts and briefs are verbs, not commands; this shell is for environments'),),
+        workspace_dir=str(bases_root), cache_dirs=('.cache',), state_dirs=('.tool-output', '.session-history', '.home'))))
     return SandboxedShell(shell)
 
 
@@ -153,8 +235,9 @@ def settings_for(config: dict[str, Any], assignment: str) -> SessionSettings:
     return SessionSettings(assignment, policy, None, spec['generation'], SessionPolicy(**config['session_policy']),
         ReviewPolicy(**config['review_policy']), None, False, config['guidance_prefix'],
         maximum_generation_retries=config.get('maximum_generation_retries', 0),
-        worker_tools=('bash', 'read'), command_tools=DEPUTY_TOOLS,
-        **{key: config[key] for key in ('maximum_tool_argument_characters', 'maximum_read_lines') if key in config})
+        worker_tools=('bash',), command_tools=DEPUTY_TOOLS,
+        maximum_tool_argument_characters=max(int(config.get('maximum_tool_argument_characters') or 0), 8000),
+        **{key: config[key] for key in ('maximum_read_lines',) if key in config})
 
 
 def _bindings(config: dict[str, Any], root: Path) -> tuple[ModelClient, SandboxedShell]:
@@ -204,14 +287,14 @@ def open_or_create(config: dict[str, Any], root: Path, text: str) -> tuple[Focus
         before = _model_on_record(root)
         # A killed process (the app closed mid-turn) leaves a call unanswered; the rebind drops it and continues.
         session = FocusedSession.rebind(root, worker=worker, shell=shell, generation=generation,
-                                        worker_system=policy_text(config), discard_pending=True)
+                                        worker_system=policy_text(config), discard_pending=True, handlers=handlers())
         now = generation.get('model') or ''
         if before and now and before != now:
             _turn(root, 'system', 'Now on '+now+' (was '+before+'); the Deputy carries its memory over.')
         _note_model(root, now)
         return session, False
     _note_model(root, generation.get('model') or '')
-    return FocusedSession.create(root, settings_for(config, text), worker=worker, shell=shell), True
+    return FocusedSession.create(root, settings_for(config, text), worker=worker, shell=shell, handlers=handlers()), True
 
 
 def _model_on_record(root: Path) -> str:
@@ -226,8 +309,8 @@ def _note_model(root: Path, model: str) -> None:
         (root/'model').write_text(model+'\n')
 
 
-SHOW_COMMAND = re.compile(r'mizpah\.draft show (\S+)')
-DISCARD_COMMAND = re.compile(r'mizpah\.draft discard (\S+)')
+SHOW_COMMAND = re.compile(r'^(?:draft_show|draft_write|brief_show) \{.*?"slug": "([^"]+)"')   # a write or a read puts the sheet on the desk
+DISCARD_COMMAND = re.compile(r'^draft_discard \{.*?"slug": "([^"]+)"')
 
 
 def showing_after(session: FocusedSession, since: int) -> dict[str, Any] | None | bool:
@@ -264,7 +347,9 @@ def situation(root: Path) -> str:
             shown = (json.loads(showing_path.read_text()) or {}).get('draft')
         except ValueError:
             shown = None
-    lines = ['[Desk, from the host: '+('drafts: '+'; '.join(
+    envs = draft_module.environments()
+    lines = ['[Desk, from the host: environments: '+', '.join(e['name']+(' (default)' if e['default'] else '') for e in envs)
+             +'; '+('drafts: '+'; '.join(
         d['slug']+' ('+(d['title'] or 'untitled')+', '+str(d['needs'])+' needs, '+str(d['deliverables'])+' deliverables'
         +(', env '+d['environment'] if d.get('environment') else '')+')' for d in drafts) if drafts else 'no drafts')
         +('; on the desk: '+shown if shown else '; the desk is clear')+']']

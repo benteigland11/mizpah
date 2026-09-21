@@ -145,6 +145,43 @@ def new(slug: str, title: str, mission: str, environment: str = '', builds: str 
                      'it runs in with --environment <name> (`mizpah.draft environments`), then show it')
 
 
+def write(slug: str, *, title: str = '', mission: str = '', needs: list[str] = (), deliverables: list[str] = (),
+          non_goals: list[str] = (), budget_points: int | None = None, budget_notes: str = '', environment: str = '') -> dict[str, Any]:
+    """The brief of a draft in one call: every list given replaces the list on the sheet (an omitted list is left
+    as it is), the scalars given are set. Refused on an issued brief — that moves by proposal."""
+    project = draft_dir(slug)
+    if not (project/layout.STATE_DIRNAME/'brief.json').exists():
+        raise SystemExit(json.dumps(dict(status='error', error='no draft named '+slug+'; drafts: '+', '.join(p.name for p in listing()))))
+    if brief_of(project).get('status') not in ('', 'draft'):
+        raise SystemExit(json.dumps(dict(status='error', error='the brief of '+slug+' is issued; it moves by proposal, not by writing')))
+    if environment and not environment_exists(environment):
+        raise SystemExit(json.dumps(dict(status='error', error='no saved environment named '+repr(environment),
+                                         environments=[e['name'] for e in environments()])))
+    args = ['brief', 'set']
+    if title:
+        args += ['--title', title]
+    if mission:
+        args += ['--mission', mission]
+    if environment:
+        args += ['--environment', environment]
+    if budget_points is not None:
+        args += ['--budget-points', str(budget_points)]
+    if budget_notes:
+        args += ['--budget-notes', budget_notes]
+    if needs or deliverables or non_goals:
+        # `--replace-lists` replaces every list at once, so the ones not given are re-sent as they are.
+        current = brief_of(project)
+        args.append('--replace-lists')
+        for flag, given, key in (('--need', needs, 'needs'), ('--deliverable', deliverables, 'deliverables'),
+                                 ('--non-goal', non_goals, 'non_goals')):
+            for entry in (given or current.get(key) or []):
+                args += [flag, str(entry)]
+    if len(args) == 2:
+        raise SystemExit(json.dumps(dict(status='error', error='nothing to write: give a title, mission, needs, deliverables, non-goals, budget or environment')))
+    terra(project, *args)
+    return dict(status='ok', **summary(project), showing=dict(draft=slug))
+
+
 def discard(slug: str) -> dict[str, Any]:
     project = draft_dir(slug)
     if not project.is_dir():
@@ -225,6 +262,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument('--mission', required=True)
     p.add_argument('--environment', default='', help='the saved environment this gym is set up in (see `environments`); `none` is the bare one; omitted, the default')
     p.add_argument('--builds', default='', help='an environment gym: bare, may install and reach package hosts, adopted as this base on green')
+    p = sub.add_parser('write', help='Set a draft\'s brief in one call: lists given replace the ones on the sheet')
+    p.add_argument('slug')
+    p.add_argument('--title', default='')
+    p.add_argument('--mission', default='')
+    p.add_argument('--need', action='append', default=[], dest='needs')
+    p.add_argument('--deliverable', action='append', default=[], dest='deliverables')
+    p.add_argument('--non-goal', action='append', default=[], dest='non_goals')
+    p.add_argument('--budget-points', type=int)
+    p.add_argument('--budget-notes', default='')
+    p.add_argument('--environment', default='')
     p = sub.add_parser('discard', help='Remove a draft and everything in it')
     p.add_argument('slug')
     p = sub.add_parser('show', help='Pull a draft up on the desk for the Administrator to look at')
@@ -238,6 +285,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.verb == 'new':
         out = new(args.slug, args.title, args.mission, args.environment, args.builds)
+    elif args.verb == 'write':
+        out = write(args.slug, title=args.title, mission=args.mission, needs=args.needs, deliverables=args.deliverables,
+                    non_goals=args.non_goals, budget_points=args.budget_points, budget_notes=args.budget_notes,
+                    environment=args.environment)
     elif args.verb == 'environments':
         out = environments()
     elif args.verb == 'discard':

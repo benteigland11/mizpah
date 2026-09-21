@@ -128,6 +128,40 @@ def unknown_created(unknown: dict[str, Any]) -> str | None:
     return m.group(1) if m else None
 
 
+def library_methods(config: dict[str, Any], brief: dict[str, Any]) -> list[dict[str, Any]]:
+    """Procedures in the playbook near this brief, each with its reach: the host digs so the controller plans the
+    route by method length and the worker opens what it is handed. One search per need and per deliverable;
+    a hit counts when it shares two real words with the entry (the same bar as the worker's assignment)."""
+    import subprocess as sp
+    from .worker import STOP, shared_stems, BOOTSTRAP_PROCEDURES
+    entries = [str(n) for n in (brief.get('needs') or [])] + [str(d) for d in (brief.get('deliverables') or [])]
+    seen: dict[str, dict[str, Any]] = {}
+    for text in entries:
+        query = re.sub(r'[^a-z0-9 ]', ' ', text.lower())[:200]
+        words = {w for w in re.findall(r'[a-z0-9]{4,}', query) if w not in STOP}
+        if not words:
+            continue
+        try:
+            out = sp.run([config['mizpah']['playbook'], 'search', query, '--limit', '4'], capture_output=True, text=True, timeout=60).stdout
+            for hit in json.loads(out[out.find('{'):]).get('hits') or []:
+                if hit['id'] in BOOTSTRAP_PROCEDURES or hit['id'] in seen:
+                    continue
+                blob = ' '.join(str(hit.get(k) or '') for k in ('id', 'title', 'description', 'snippet')).lower().replace('-', ' ')
+                if shared_stems(words, blob) < 2:
+                    continue
+                seen[hit['id']] = dict(id=hit['id'], title=str(hit.get('title') or '')[:80])
+        except (ValueError, OSError, sp.SubprocessError, KeyError):
+            continue
+    for pid, rec in seen.items():
+        try:
+            out = sp.run([config['mizpah']['playbook'], 'reach', pid], capture_output=True, text=True, timeout=60).stdout
+            r = json.loads(out[out.find('{'):])
+            rec.update(steps=int(r.get('steps') or 0), walks=int(r.get('walks') or 1), procedures=len(r.get('procedures') or {}))
+        except (ValueError, OSError, sp.SubprocessError):
+            rec.update(steps=0, walks=1, procedures=1)
+    return sorted(seen.values(), key=lambda r: r['id'])[:16]
+
+
 def observe(config: dict[str, Any], project: Path) -> dict[str, Any]:
     """Everything the controller reads, bounded: the brief and a digest of the map and route."""
     brief = terra(config, project, 'brief', 'show')
@@ -143,7 +177,9 @@ def observe(config: dict[str, Any], project: Path) -> dict[str, Any]:
     route = terra(config, project, 'route', 'status')
     related_briefs = briefs.related(config, brief) if config['mizpah'].get('brief_library', True) else []
     registry = capabilities.render(config, brief)
+    methods = library_methods(config, brief)
     observation = dict(
+        methods=methods, playbook_store=str(config['mizpah'].get('playbook_store') or ''),
         project_path=str(project),
         repo=repo_digest(project),
         brief={key: brief.get(key) for key in ('title', 'version', 'status', 'mission', 'needs', 'deliverables',
@@ -267,7 +303,8 @@ def task_workspaces(root: Path) -> list[dict[str, Any]]:
         out.append(dict(task=d.name, unknowns=unknowns, verdict=(result or {}).get('verdict') or 'live',
                         turns=(result or {}).get('turns'), probes=probes, walks=sorted(set(walks))[:6],
                         widgets=sorted(set(widgets))[:6],
-                        walks_open=[dict(procedure=w.get('procedure'), unticked=w.get('unticked'), next=w.get('next'))
+                        walks_open=[dict(procedure=w.get('procedure'), unticked=w.get('unticked'), next=w.get('next'),
+                                         continues=w.get('continues') or 0, next_from=w.get('next_from') or 0)
                                     for w in ((result or {}).get('walks_open') or [])][:8]))
     return out
 
@@ -370,6 +407,17 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
     lines += observation.get('prior_art') or []
     lines.append('')
     lines += briefs.render(observation.get('related_briefs') or [])
+    if observation.get('methods'):
+        lines.append('Methods in the playbook near this brief (reach = steps through the procedures a method links; a walk is '
+                     'at most 50 steps, so reach says how many work orders the method is):')
+        for m in observation['methods']:
+            lines.append('  `'+m['id']+'` — '+m['title']+' · reach '+str(m.get('steps'))+' steps through '+str(m.get('procedures'))
+                         +' procedure(s) = '+str(m.get('walks'))+' walk(s)')
+        lines.append('A task names the walk its worker opens: "walk": "<procedure id>" (and "walk_from": N for the next '
+                     'walk of a long method, the 0-based step the previous walk stopped at — the worker\'s result says '
+                     'where). The worker opens what it is handed and searches only when nothing was named or the walk '
+                     'does not fit; a method of two walks is two tasks on one workspace (the second continue_from the '
+                     'first, walk_from set), priced as two low tasks, not one guess.')
     lines.append('# Map (state)')
     lines.append('Gate: '+('green' if (observation.get('gate') or {}).get('ok') else 'red')+
                  ''.join('\n  - '+str(v.get('why') or v.get('kind')) for v in (observation.get('gate') or {}).get('violations') or []))
@@ -457,14 +505,16 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
             lines.append('  '+w['task']+' ['+str(w['verdict'])+(', '+str(w['turns'])+' turns' if w.get('turns') else '')+'] → '
                          +', '.join(w['unknowns'])+(' · probes: '+', '.join(w['probes']) if w['probes'] else '')
                          +(' · walked: '+', '.join(w['walks']) if w['walks'] else '')+(' · widgets: '+', '.join(w['widgets']) if w['widgets'] else '')
-                         +(' · walks left open: '+'; '.join(str(x['procedure'])+' ('+str(x['unticked'])+' unticked, next: '+str(x['next'])[:50]+')'
-                                                            for x in w.get('walks_open') or []) if w.get('walks_open') else ''))
+                         +(' · walks left: '+'; '.join(str(x['procedure'])+' ('+str(x['unticked'])+' unticked'
+                                                        +(', next: '+str(x['next'])[:50] if x.get('next') else '')
+                                                        +(', continues '+str(x['continues'])+' steps — walk_from '+str(x['next_from']) if x.get('continues') else '')+')'
+                                                        for x in w.get('walks_open') or []) if w.get('walks_open') else ''))
         if any(w.get('walks_open') for w in observation['workspaces']):
-            lines.append('A walk left open is method the route still owes, not a failing of that worker: a procedure whose '
-                         'steps link four others is several tasks\' work. Route each open walk as a task of its own on '
-                         'that workspace ("continue_from"), low bucket, carrying the reading the walk serves (the need it '
-                         'is about — pedal per harmony serves the pedal need), so the method is paid over the brief, one '
-                         'walk per work order; a blocked task whose reason names its open walks is asking for exactly this.')
+            lines.append('A walk left is method the route still owes, not a failing of that worker: a method longer than one '
+                         'walk is several tasks\' work. Route what is left as a task of its own on that workspace '
+                         '("continue_from", "walk" the same procedure, "walk_from" the step given), low bucket, carrying '
+                         'the reading it serves, so the method is paid over the brief, one walk per work order; a blocked '
+                         'task whose reason names its walks is asking for exactly this.')
     waiting = [t for t in observation['tasks'] if t['status'] in ('ready', 'in_progress')]
     if waiting and mode == 'eval':
         lines.append('Already routed and waiting to run: '+', '.join(t['id'] for t in waiting)+' — they cover '
@@ -749,6 +799,10 @@ def _merge_sibling_tasks(tasks: list[dict[str, Any]], cautions: list[str]) -> li
     for task in kept:
         task['deps'] = [d for d in task['deps'] if d not in dropped]
     return kept
+
+def _procedure_exists(procedure_id: str, store: str) -> bool:
+    return bool(store) and (Path(store)/(procedure_id+'.json')).is_file()
+
 
 def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path | None = None, *,
           require_deliverables: bool = False) -> tuple[dict[str, Any], list[str]]:
@@ -1179,8 +1233,15 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
                 cautions.append('task '+tid+': continue_from '+repr(continue_from)+' names no workspace this loop holds ('
                                 +(', '.join(sorted(held)) or 'none')+'); routed fresh')
                 continue_from = ''
+        walk = str(item.get('walk') or '').strip()
+        walk_from = int(item.get('walk_from') or 0) if str(item.get('walk_from') or '').isdigit() or isinstance(item.get('walk_from'), int) else 0
+        if walk:
+            known_methods = {m['id'] for m in observation.get('methods') or []}
+            if walk not in known_methods and not _procedure_exists(walk, observation.get('playbook_store') or ''):
+                cautions.append('task '+tid+': walk '+repr(walk)+' is not a procedure in the playbook; the worker searches instead')
+                walk, walk_from = '', 0
         tasks.append(dict(id=tid, title=title, unknowns=ids, unknown=ids[0], bucket=item['bucket'], deps=deps,
-                          enabler=next(iter(carried), ''), continue_from=continue_from))
+                          enabler=next(iter(carried), ''), continue_from=continue_from, walk=walk, walk_from=walk_from))
     accepted_ids = existing_tasks | {t['id'] for t in tasks}
     for t in tasks:
         gone = [d for d in t['deps'] if d not in accepted_ids]
@@ -1422,6 +1483,8 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any]) -> di
             args += ['--accept', 'unknown:'+extra]  # the task resolves these too; Terra's map_id holds only one
         if t.get('continue_from'):
             args += ['--accept', 'continue_from:'+t['continue_from']]   # the worker workspace this task resumes
+        if t.get('walk'):
+            args += ['--accept', 'walk:'+t['walk']+'@'+str(int(t.get('walk_from') or 0))]   # the procedure walk this task opens
         for dep in t['deps']:
             args += ['--dep', dep]
         try:

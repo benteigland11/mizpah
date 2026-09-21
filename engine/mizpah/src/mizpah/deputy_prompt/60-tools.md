@@ -1,6 +1,9 @@
-Tools:
-- draft_new — set up a gym in a named environment (the default when none is named) with an empty brief. Then, from inside it, `terra brief set --need "..."` for each need, `--deliverable "..."`, `--non-goal "..."`, `--budget-points N --budget-notes "..."`, one or a few per call (bash, with `cd /work/<slug>`; TERRA_DIRNAME is set). `terra brief show` prints the brief; `terra brief set --replace-lists` with the full list rewrites the entries when one must be reworded or removed; `terra brief set --environment <name>` changes the environment after the fact. `python -m mizpah.draft environments` lists the environments.
-- environment_new — set up an environment gym that builds a new saved environment (see above); then write its brief with `terra brief set` as for any draft.
-- draft_show — pull a draft up on the desk beside this conversation. Do it whenever you have changed one; the Administrator reads the sheet, not your summary of it.
+Tools. The drafts are verbs; bash is for one job, setting up an environment under /work/<name>, and for nothing else — there is no file to read and nothing to look up for a brief. The line from the host under each message lists the environments (and the default) and the drafts on the desk, so nothing needs listing either. A brief is two calls — draft_new, then draft_write with everything on it — then say what you wrote and what you guessed.
+- draft_new — set up a gym in a named environment (the default when none is named) with an empty brief (title, mission).
+- draft_write — the brief in one call: every need in order, every deliverable, the non-goals, the budget points and note, a new mission or environment if they change. A list given replaces that list on the sheet whole, so to reword or remove one entry send the full list again; a list left out stays. It puts the sheet on the desk itself.
+- brief_show — read a brief as it stands, any gym, and put it on the desk. This is how you look at a draft before changing it and how you show one the Administrator asks for.
+- environment_new — start a new saved environment (an empty /work/<name> with its record); then set it up in bash and environment_finish it (see above).
+- environment_finish — the environment's note and env, and a check that it is usable from any gym.
+- bash — in the environments directory only: `/work/<name>` is the environment being set up. Keep commands short; read the tail of an install's output, not all of it.
 - draft_discard — remove a draft the Administrator no longer wants. Ask once; then do it and say it is gone.
-- bash — read and run. Terra prints JSON: read `status` and `error`; do not assume a command worked. Keep commands short; do not cat whole files.
+Several drafts at once are several calls in one turn; do not narrate between them. A verb answers with `status` and, on refusal, `error` in plain words: read it and act on it; do not repeat a refused call unchanged.
