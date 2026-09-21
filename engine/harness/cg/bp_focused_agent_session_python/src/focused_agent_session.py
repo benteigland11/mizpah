@@ -801,7 +801,33 @@ class FocusedSession:
 
     def _guidance_message(self) -> list[dict[str, Any]]:
         text = self.progress.applied_guidance() if self.settings.reference is not None else ''
-        return [dict(role='user', content=self.settings.guidance_prefix+'\n'+text)] if text else []
+        if not text:
+            return []
+        # Dated, and its standing said: a correction is what the reviewer saw at one turn, held until it
+        # looks again — a worker read an undated one as a fresh finding every turn after it had fixed it.
+        issued = self.progress.last_review_turn
+        note = (' (from the reviewer\'s look at turn '+str(issued)+', now turn '+str(self.progress.turns)
+                +'; it stands until the reviewer reads the files again, which it does when you change a file '
+                'it names or claim completion — if the files no longer show this, say what changed and claim)')
+        return [dict(role='user', content=self.settings.guidance_prefix+note+'\n'+text)]
+
+    def _touched_focus_file(self, turn: dict[str, Any]) -> bool:
+        """Whether one of the turn's applied write/edit calls named a file the review focuses on."""
+        globs = self.settings.review_focus_globs
+        if not globs:
+            return False
+        for call in ((turn.get('response') or {}).get('tool_calls') or []):
+            fn = call.get('function') or {}
+            if fn.get('name') not in ('write', 'edit'):
+                continue
+            try:
+                args = json.loads(fn.get('arguments') or '{}')
+            except ValueError:
+                continue
+            path = str(args.get('path') or '').lstrip('/').removeprefix('work/')
+            if path and any(fnmatch.fnmatch(path, g) for g in globs):
+                return True
+        return False
 
     def worker_payload(self) -> dict[str, Any]:
         """Exact next worker request; private reference and progress are not inserted."""
@@ -897,6 +923,12 @@ class FocusedSession:
                     self.state['proposed_final'] = summary
                     break
         self.progress.observe(self.state['active_turn'])
+        if self.progress.guidance.get('correction') and self._touched_focus_file(self.state['active_turn']):
+            # A held correction names files; the worker just changed one of them. The reviewer withdraws
+            # a correction only when it looks, and between claims it never looked: a probe rewritten at
+            # turn 164 answered a turn-109 correction that stood, word for word, for forty turns while the
+            # worker re-read its own file trying to satisfy it. Ask for the look at this boundary.
+            self.state['review_requested'] = True
         self._event('worker_turn', deepcopy(self.state['active_turn']))
         self.state['active_turn'] = None
         image = self.state.pop('pending_image', None)
@@ -904,8 +936,10 @@ class FocusedSession:
             self.session.append_image('read '+image['path']+' (image):', image['mime'], image['data'])
             self._event('image_shown', dict(path=image['path'], mime=image['mime'], bytes=len(image['data'])*3//4))
         final = self.state['proposed_final'] is not None
+        requested = (self.state.pop('review_requested', False)
+                     and self.progress.turns-self.progress.last_review_turn >= 3)   # not on every edit of a file
         review = self.settings.reference is not None and not self.state.get('reviews_suspended') and (
-            self.progress.due() or (final and self.settings.review_on_completion))
+            self.progress.due() or requested or (final and self.settings.review_on_completion))
         self.state['phase'] = 'review' if review else ('complete' if final else 'worker')
         if final and not review:
             self.state['final_text'] = self.state['proposed_final']
