@@ -1682,63 +1682,49 @@ def refusal_message(refused: list[tuple[str, str]]) -> str:
 def green_message(gate: dict[str, Any], unknown_id: str | list[str], used: list[str] = (), cost: dict[str, Any] | None = None,
                   skips: dict[str, list[str]] | None = None, uncovered: dict[str, list[str]] | None = None,
                   made: list[str] = ()) -> str:
+    """The write-up after green is a clean-up, not a second task. The worker minted while it worked (the policy
+    says so); what is left is to make what it minted true to what it did, in a handful of turns. The earlier text
+    asked for a search before every write, a procedure per skill exercised, a decision per skipped step and a
+    rewrite per failed call — and a green task spent twenty to thirty more turns, mostly searching and reading
+    (2026-09-21). Nothing here asks the worker to look for anything."""
     if isinstance(unknown_id, list):
         unknown_id = ', '.join(unknown_id)
-    paid = ''
-    skill = ''
-    if made:
-        # A task that made something exercised a skill: the rules it applied to the thing, with the instrument that
-        # applies them. That is what the next worker grabs. The pipeline (render, engrave, probe) is a different
-        # procedure, linked — the pedal gym's worker recorded "render, encode, probe" and nothing about pedalling.
-        skill = (' You made '+', '.join('`'+m+'`' for m in made)+'. The procedure to record for that is the skill, not '
-                 'the pipeline: one step per rule you applied to the thing (the rule as a person would state it; the widget '
-                 'function that applies it; the reading that verifies it held, with its threshold). Someone who opens it '
-                 'should be able to do what you did to a different piece. Today\'s numbers are fine in the steps (a '
-                 'crescendo of +8 a bar); the next walk turns them into the choice they were. The pipeline around it — render, encode, '
-                 'engrave, probe, ladder — is its own procedure: link it with `--procedure`, never restate it. Distinct '
-                 'skills are distinct procedures (pedalling is not phrasing): create as many as you exercised, each '
-                 'searched for first, each validated.')
+    lines = ['Gate green: known '+unknown_id+' '+('are' if ',' in unknown_id else 'is')+' on the project map. Widgets under cg/ '
+             'that validate are checked in for you. This is the clean-up of what you minted while working — a few turns, '
+             'no searching, no reading files, no new work: fix what is wrong in the record and stop.']
+    todo = []
+    if used:
+        todo.append('You walked '+', '.join('`'+u+'`' for u in used)+'. Where a step said one thing and you did another, '
+                    '`playbook edit-step` that step to what you did; where you did something no step said, one `playbook '
+                    'add-step` in its place. A step that was right stays as it is.')
     if uncovered:
         rows = ['  - '+proc+': '+', '.join(ids) for proc, ids in uncovered.items()]
-        paid += (' Unknowns this task resolved that the procedure you followed has no step for:\n'+'\n'.join(rows)+
-                 '\n For each, `playbook add-step` the step you actually took (the reading, the widget, the exact command) '
-                 'where it belongs in the walk; a procedure grows by the unknowns that stretched it.')
+        todo.append('Readings this task took that the procedure you walked has no step for — one `add-step` each, the '
+                    'reading and the command:\n'+'\n'.join(rows))
     if skips:
         rows = ['  - '+proc+': '+'; '.join(steps) for proc, steps in skips.items()]
-        paid += (' Steps you marked `[-]` not needed:\n'+'\n'.join(rows)+
-                 '\n For each, decide: not needed on this walk (leave the procedure alone) or not needed in general '
-                 '(`playbook edit-step` to narrow it, or remove it). A step every walk skips is noise for the next worker.')
+        todo.append('Steps you marked `[-]`:\n'+'\n'.join(rows)+'\n  Leave them unless the step is wrong in general; then one '
+                    '`edit-step` to narrow it, or `remove-step`.')
     if cost:
         rows = ['  - while on '+repr(step)+': '+', '.join(f'{n}× {k}' for k, n in sorted(counts.items(), key=lambda kv: -kv[1]))
                 for step, counts in cost.items()]
-        paid = (' Calls that were refused or failed, by the step you were on:\n'+'\n'.join(rows)+
-                '\n Where a step led you into those, the step is what needs rewriting.')
-    linking = ('The procedure lives in the store and changes only through `playbook edit-step` / `add-step` / `remove-step`; the '
-               'checklist under `.playbook/open/` is a rendered copy for ticking — rewriting its step text changes nothing. '
-               'Procedures compose by linking, and a link is the first-class way to reuse one: a step that says "now walk '
-               'procedure X" is written `playbook add-step <id> --title ... --do "<why here>" --procedure <X>`, and open '
-               'renders it as the command to open X. Never copy another procedure\'s steps into yours — link the step to '
-               'it. Search before you write (`playbook search`, a create is refused without one): where a procedure '
-               'already covers part of what you did, your procedure links it for that part and adds only what was new.')
-    if used:
-        library = ('You followed '+', '.join('`'+u+'`' for u in used)+'. Improve that procedure with `playbook edit-step` '
-                   'or `playbook add-step` where its steps fell short of what you actually had to do; where a part of it '
-                   'is really another procedure (one that exists, or one you now create for that part), make that step a '
-                   'link with `--procedure`. Create a new procedure only if your method was genuinely different, not a '
-                   'rewording. '+linking)
-    else:
-        library = ('You followed only the loop\'s own bootstrap (`mizpah-resolve-unknown`), which is not yours to copy or '
-                   'rewrite. If your method was specific to this kind of source or artifact (what you read, which widget, '
-                   'how the reading was taken), `playbook create <id> --title ... --description ... --tags ...` a '
-                   'procedure for that and `playbook add-step` one step at a time, each step one action with the exact '
-                   'commands; if it was nothing but the bootstrap, create nothing and reply "none". '+linking)
-    return ('Gate green: known '+unknown_id+' '+('are' if ',' in unknown_id else 'is')+' on the project map. The widgets '
-            'under cg/ that pass `cartograph validate` are checked in for you now; do not build or extract anything at '
-            'this point — the reading is taken and the parts it needed already exist. This is the review of what you '
-            'minted while working, against what you actually did: the method the next worker finds with `playbook '
-            'search`, naming the widgets it should install. Where you minted nothing yet, mint it now. '+library+skill+paid+
-            ' Every procedure you touched must pass `playbook validate <id>` (fix it if it does not); then reply with the '
-            'procedure ids (comma separated) and nothing else.\n')
+        todo.append('Calls refused or failed by the step you were on:\n'+'\n'.join(rows)+'\n  Where the step led you there, '
+                    'one `edit-step` with the command that worked.')
+    if made:
+        todo.append('You made '+', '.join('`'+m+'`' for m in made)+'. If no procedure you touched records the skill you applied '
+                    'to it (the rules as a person states them, the widget function that applies each, the reading that '
+                    'verifies it), `playbook create` one now from the steps you already took — one `playbook search` first '
+                    'because create requires it, then create and add-step; the pipeline around it (render, probe, ladder) '
+                    'is linked with `--procedure`, never restated. If you minted it while working, there is nothing to do here.')
+    if not used and not made:
+        todo.append('You followed only the bootstrap. If your method was specific to this source or artifact, `playbook create` '
+                    'it from the steps you took (one search, then create); if it was nothing but the bootstrap, reply "none".')
+    lines += ['- '+t for t in todo]
+    lines.append('The store changes only through `playbook edit-step` / `add-step` / `remove-step` / `create`; the checklist '
+                 'under `.playbook/open/` is a rendered copy. Then `playbook validate <id>` for each procedure you touched, and '
+                 'reply with their ids (comma separated) and nothing else.')
+    return '\n'.join(lines)+'\n'
+
 
 
 def client_for(spec: dict[str, Any], observer: Any, config: dict[str, Any] | None = None) -> ModelClient:
