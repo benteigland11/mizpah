@@ -275,3 +275,23 @@ def test_a_root_adopted_but_never_retargeted_resumes_as_a_continuation() -> None
     assert worker.half_adopted(saved | dict(task=dict(id='validate_parts')), 'validate_parts') == ''
     assert worker.half_adopted(dict(task=dict(id='check_count')), 'validate_parts') == ''
 
+
+
+def test_a_continued_task_opens_its_unknown_on_the_adopted_map(gym: Path) -> None:
+    """The continuation keeps the workspace's map: the new unknown lands beside the readings already there and
+    no `t_<new task>` map is left with an open unknown nobody works on."""
+    from mizpah import worker, layout
+    observation = controller.observe(CONFIG, gym)
+    decision = dict(unknowns=[dict(id='piece_mid_built', cites='deliverable:1', type='boolean', claim='`piece.mid` exists', evidence_needed='parse it'),
+                              dict(id='piece_mid_retaken', cites='deliverable:1', type='boolean', claim='`piece.mid` parses again', evidence_needed='parse it')],
+                    tasks=[dict(id='build_piece_mid', unknowns=['piece_mid_built'], bucket='low', title='build'),
+                           dict(id='retake_piece', unknowns=['piece_mid_retaken'], bucket='low', title='again')])
+    accepted, _ = controller.guard(decision, observation, gym)
+    controller.apply(CONFIG, gym, accepted)
+    tasks = {t['id']: t for t in terra(gym, 'route', 'status')['tasks']}
+    first = worker.open_task_map(CONFIG, gym, tasks['build_piece_mid'])
+    assert first == 't_build_piece_mid'
+    again = worker.open_task_map(CONFIG, gym, tasks['retake_piece'], map_id=first)
+    assert again == first
+    sessions = gym/layout.dirname(gym)/'map'/'sessions'
+    assert (sessions/first/'unknowns'/'piece_mid_retaken.json').exists() and not (sessions/'t_retake_piece').exists()

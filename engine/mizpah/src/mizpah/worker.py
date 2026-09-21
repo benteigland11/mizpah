@@ -194,9 +194,12 @@ def read_known(project: Path, known_id: str, map_id: str | None = None) -> dict[
     return json.loads(path.read_text()) if path.exists() else None
 
 
-def open_task_map(config: dict[str, Any], project: Path, task: dict[str, Any]) -> str:
-    """A session map for the task with a copy of its unknown; unknowns do not read through."""
-    map_id = task_map_id(task)
+def open_task_map(config: dict[str, Any], project: Path, task: dict[str, Any], map_id: str | None = None) -> str:
+    """A session map for the task with a copy of its unknown; unknowns do not read through. A task that continues
+    another's workspace keeps that workspace's map (`map_id`): the readings it re-takes land beside the ones it
+    took, and the sandbox binding (TERRA_MAP) does not change under a session that is being resumed — a new map
+    per task left an orphan map with an open unknown that kept the gate red for a task working on the old one."""
+    map_id = map_id or task_map_id(task)
     if not (project/layout.dirname(project)/'map'/'sessions'/map_id).exists():
         terra(config, project, 'map', 'create', map_id, '--purpose', 'route task '+task['id'], '--parent', layout.brief_map(project))
     for unknown_id in task_unknown_ids(task):
@@ -2140,9 +2143,9 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         saved = json.loads((root/'task.json').read_text())
         continued = continued or half_adopted(saved, task_id)
         if continued:
-            # The adopted session, the new task: picked (started on the route), its own map, its own unknowns.
+            # The adopted session, the new task: picked (started on the route), on the adopted map, its own unknowns.
             task = pick_task(config, project, task_id)
-            map_id = open_task_map(config, project, task)
+            map_id = open_task_map(config, project, task, map_id=saved.get('map'))
             unknowns = [read_unknown(project, uid, map_id) for uid in task_unknown_ids(task)]
             probes_before = protected_probes(project, task)
         else:
