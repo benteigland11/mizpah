@@ -62,7 +62,7 @@ left behind — its probes, the procedure it walked, the widgets it touched. A n
 task as its next objective. Use it whenever the new task is about the same thing: a reading that came back false
 and must be taken again after a fix (the worker has the probe), a reading of a file the builder just built (the
 builder has the file and the widget), a repair of what a validator found. A fresh worker rewrites the probe from
-nothing — every repair task did, at thirty to sixty turns each. Route fresh only when no workspace touched the
+nothing — every repair task did, at thirty to sixty turns each. But a workspace carries its worker's beliefs as well as its files: a worker that blocked on a misreading, or held a probe against the reviewer's doubts, reads the new title through that argument — told "remove the stale 12/8 assumption" it blocked again on "the controller requires 12/8", twice, on the same workspace. A task that reverses what a worker decided starts fresh; the fresh worker has the files on disk anyway (the probe, the widget, the artifact are in the project), only the window is new. Route fresh also when no workspace touched the
 thing.
 
 ## A need about the library
