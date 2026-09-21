@@ -342,8 +342,8 @@ def render_assignment(task: dict[str, Any], unknowns: list[dict[str, Any]], map_
                      'function takes the thing it acts on — the notes, the chords, the strokes, the document — as an argument '
                      'and returns it changed. What is specific to this project (this piece\'s notes, this file\'s name, this '
                      'run\'s tempo) is glue: a short script in the project that calls the widget with that material. A widget '
-                     'that carries the material fails `cartograph validate` (a literal melody or chord list in src/, a function '
-                     'that writes a file and takes nothing but a path). If a widget you install carries hardcoded values that '
+                     'that carries the material (a literal melody or chord list in src/, a function that writes a file and '
+                     'takes nothing but a path) is not general and does not go in. If a widget you install carries hardcoded values that '
                      'should be parameters, that is the improvement: change it to take them, keep its tests passing, call it '
                      'from your glue — the harvest checks it in. Then produce the artifact by calling it. Widgets are not a '
                      'clean-up after the work: they are how the work meets the bar — `cartograph validate` passing on the '
@@ -498,22 +498,7 @@ def pack_workspace(project: Path, playbook_store: Path | None = None, *, only: t
                 if path.stem in retired:
                     continue
                 archive.add(path, arcname=PLAYBOOK_PREFIX+'/playbook/procedures/'+path.name, recursive=False)
-        # Mizpah's widget rules ride into the workspace at Cartograph's global rules path (XDG_DATA_HOME is the
-        # playbook prefix in the sandbox), so the worker's own `cartograph validate` says what the harvest's will.
-        if CG_RULES.is_file():
-            archive.add(CG_RULES, arcname=PLAYBOOK_PREFIX+'/cartograph/rules/rules.py', recursive=False)
     return buffer.getvalue()
-
-
-CG_RULES = Path(__file__).parent/'cg_rules'/'rules.py'   # material in the instrument is a block; see the file
-
-
-def cartograph_env() -> dict[str, str]:
-    """The host's `cartograph validate` with Mizpah's rules alongside the user's own (CARTOGRAPH_ORG_RULES)."""
-    if not CG_RULES.is_file():
-        return dict(os.environ)
-    org = os.environ.get('CARTOGRAPH_ORG_RULES', '')
-    return dict(os.environ, CARTOGRAPH_ORG_RULES=str(CG_RULES.parent)+(os.pathsep+org if org else ''))
 
 
 LIBRARY_LEDGER = '.library.json'
@@ -895,8 +880,7 @@ def _harvest_widgets(snapshot: bytes, root: Path, config: dict[str, Any], projec
                 path = target/name[len(prefix):]
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(data)
-            check = sp.run([config['mizpah']['cartograph'], 'validate', str(target)], capture_output=True, text=True, cwd=temp,
-                           env=cartograph_env())
+            check = sp.run([config['mizpah']['cartograph'], 'validate', str(target)], capture_output=True, text=True, cwd=temp)
             if check.returncode != 0 or '"status": "success"' not in check.stdout:
                 result['rejected'].append(widget_id+': '+(check.stdout or check.stderr).strip()[:300])
                 continue
@@ -1025,8 +1009,7 @@ def widget_problems(config: dict[str, Any], project: Path, root: Path) -> list[s
         target = project/'cg'/directory
         if not (target/'widget.json').exists():
             continue
-        check = sp.run([config['mizpah']['cartograph'], 'validate', str(target)], capture_output=True, text=True, cwd=project,
-                       env=cartograph_env())
+        check = sp.run([config['mizpah']['cartograph'], 'validate', str(target)], capture_output=True, text=True, cwd=project)
         if check.returncode != 0 or '"status": "success"' not in check.stdout:
             text = (check.stdout or check.stderr).strip()
             try:
