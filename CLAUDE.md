@@ -4,7 +4,9 @@ Mizpah is a self-improving engineering loop for domains where the answer cannot 
 verified but the method and the evidence can. Three forked tools do the work; a harness
 with a controller/worker split drives them; a Flutter app is where the user holds the
 reference. This file is the orientation for a fresh session. Read it, then
-`docs/DESIGN.md`, then `docs/lineage/LINEAGE.md` if you need the evidence behind a rule.
+`prompts/glossary.md` — the words every seat and every design conversation uses, one meaning
+each; use them in that sense here too — then `docs/DESIGN.md`, then `docs/lineage/LINEAGE.md`
+if you need the evidence behind a rule.
 
 ## The loop (agreed design, 2026-09-17)
 
@@ -47,6 +49,13 @@ Brief ──► Unknown ──► Route ──► Procedure ──► Probe+run 
 
 Controller owns: Brief, Unknown, Route, Project Eval. Worker owns: Procedure, Widget,
 Probe, Known, Map writes. The controller does not use Playbook.
+
+- **Deputy** (2026-09-20) is the third seat: the Administrator's brief formulator, one
+  session kept between conversations (`engine/mizpah/src/mizpah/deputy.py`, Home in the
+  app). You talk to it; a draft brief appears in Drafts for your signature. Drafts are its
+  whole writable world (its `/work` is the gyms root with issued gyms bound read-only); it
+  never issues, starts a loop, signs, or touches a live project. Scoped to that one duty on
+  purpose. Job description: `docs/DEPUTY.md`.
 
 ## Rules carried from the harness campaigns (do not relearn these)
 
@@ -91,6 +100,9 @@ These came out of ten single-seed campaigns on a 26B MoE model in a 60K window
 
 ## Where things live
 
+- `prompts/` — the seats' instructions as small Markdown files composed into prompts: the
+  glossary (`glossary.md`), blocks that say how one thing works (`gate.md`, `unknowns.md`,
+  `terra_philosophy.md`), and each seat's policy. One file, one thing; see its README.
 - `engine/terra`, `engine/cartograph`, `engine/playbook` — forks (source, `cg/` widgets,
   tests). Upstream commits in `UPSTREAM.txt`. MCP servers and plugin manifests were
   dropped; the harness couples the tools directly in Python.
