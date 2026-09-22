@@ -26,7 +26,7 @@ from . import priorart
 from .worker import terra
 
 ID_PATTERN = re.compile(r'^[a-z][a-z0-9_]*$')
-TYPES = ('number', 'boolean', 'label')
+TYPES = ('number', 'boolean', 'label', 'formula', 'relation')
 BUCKETS = ('low', 'medium', 'high')
 OPEN_UNKNOWN = ('open', 'probing', 'blocked')
 OPEN_TASK = ('ready', 'in_progress', 'blocked', 'pending')
@@ -967,12 +967,16 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             refusals.append('unknown '+uid+': the third attempt at '+stem(uid)+' ('+', '.join(t['id'] for t in twins)+' already exist); '
                             'a reading that failed twice is not re-minted — propose the change to the need or deliverable '
                             'it cites, with the two readings as evidence, or leave it'); continue
-        bad_refs = [r for r in refs if r.partition(':')[0] not in counts or not r.partition(':')[2].isdigit()
-                    or not 1 <= int(r.partition(':')[2]) <= counts[r.partition(':')[0]]]
+        def _bad(r: str) -> bool:
+            kind, _, rest = r.partition(':')
+            if kind == 'unknown':   # transitional: served by the unknown that cannot be resolved until this one is
+                return rest not in existing_unknowns and rest not in {str(x.get('id')) for x in decision.get('unknowns') or [] if isinstance(x, dict)}
+            return kind not in counts or not rest.isdigit() or not 1 <= int(rest) <= counts[kind]
+        bad_refs = [r for r in refs if _bad(r)]
         if not refs or bad_refs:
             refusals.append('unknown '+uid+': cites '+repr(item.get('cites'))+' but the brief has '+str(counts['need'])+
-                            ' needs and '+str(counts['deliverable'])+' deliverables; cite need:N or deliverable:N'
-                            ' (several allowed, separated by |)'); continue
+                            ' needs and '+str(counts['deliverable'])+' deliverables; cite need:N, deliverable:N, or unknown:<id> '
+                            'for the unknown this one must be resolved before (several allowed, separated by |)'); continue
         later = phases.refused_cites(brief, refs)
         if later:
             refusals.append('unknown '+uid+': '+'; '.join(later)); continue
@@ -994,6 +998,14 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         item = dict(item, cites=cites, also=refs[1:], enabler=enabler)
         if item.get('type') not in TYPES:
             refusals.append('unknown '+uid+': type must be one of '+', '.join(TYPES)); continue
+        if item.get('type') == 'formula':
+            expression, variables = str(item.get('expression') or '').strip(), item.get('vars')
+            if not expression or not isinstance(variables, dict) or not variables:
+                refusals.append('unknown '+uid+': a formula needs "expression" and "vars" ({name: "known:<id>" or a run quantity}) — '
+                                'the need\'s known composed from readings on the map'); continue
+            item = dict(item, expression=expression, vars={str(k): str(v) for k, v in variables.items()})
+        if item.get('type') == 'relation' and not str(item.get('x_quantity') or '').strip():
+            refusals.append('unknown '+uid+': a relation names its x ("x_quantity", and "x_unit" if it has one)'); continue
         claim, evidence_needed = str(item.get('claim') or '').strip(), str(item.get('evidence_needed') or '').strip()
         source = str(item.get('source') or '').strip()
         creates = str(item.get('creates') or '').strip()
@@ -1054,7 +1066,9 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         # is kept as a hint and never refused.
         unknowns.append(dict(id=uid, claim=claim, evidence_needed=evidence_needed,
                              type=item['type'], quantity=uid, unit=str(item.get('unit') or ''), cites=cites, source=source,
-                             creates=creates, also=item.get('also') or [], enabler=item.get('enabler') or ''))
+                             creates=creates, also=item.get('also') or [], enabler=item.get('enabler') or '',
+                             expression=item.get('expression') or '', vars=item.get('vars') or {},
+                             x_quantity=item.get('x_quantity') or '', x_unit=item.get('x_unit') or ''))
     # An artifact is verified by agreement with the map, so its unknown must say which knowns (or
     # unknowns minted alongside) its content agrees with. Without that anchor the probe can only check
     # that the file exists: a report with a table of invented stations passed on 2026-09-18.
@@ -1550,6 +1564,12 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any], root:
                 +('; enabler '+u['enabler'] if u.get('enabler') else '')]
         if u['unit']:
             args += ['--unit', u['unit']]
+        if u['type'] == 'formula':
+            args += ['--expression', u['expression']]
+            for name, bound in (u.get('vars') or {}).items():
+                args += ['--var', name+'='+bound]
+        if u['type'] == 'relation':
+            args += ['--x-quantity', str(u.get('x_quantity'))]+(['--x-unit', str(u['x_unit'])] if u.get('x_unit') else [])
         terra(config, project, *args)
         done['unknowns'].append(u['id'])
     for r in accepted.get('cancel') or []:

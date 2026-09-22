@@ -393,3 +393,26 @@ def test_past_work_orders_are_listed_by_what_they_left_on_disk(gym: Path, tmp_pa
     assert 'Past work orders and what they left on disk' in text and 'continue_from' not in text
     accepted, refusals = controller.guard(dict(unknowns=[], tasks=[dict(id='t', unknowns=['piece_mid_built'], bucket='low', title='x', continue_from='build_piece_mid')]), observation, gym)
     assert 'continue_from' not in json.dumps(accepted)
+
+
+def test_a_formula_composes_readings_and_a_transitional_unknown_cites_the_one_it_serves(gym: Path) -> None:
+    """The compose move: a need's known is a formula over knowns on the map. A transitional unknown cites the
+    unknown it must be resolved before, not a brief entry."""
+    observation = controller.observe(CONFIG, gym)
+    decision = dict(unknowns=[
+        dict(id='grid_lock', cites='need:1', type='number', source='piece.mid', claim='beat grid lock of piece.mid', evidence_needed='cluster onsets'),
+        dict(id='corpus_parses', cites='unknown:grid_lock', type='boolean', source='corpus/', claim='the reference corpus parses', evidence_needed='parse it'),
+        dict(id='composition_level', cites='need:1', type='formula', expression='grid_lock < 0.7', vars={'grid_lock': 'known:grid_lock'},
+             claim='the composition is at repertoire level', evidence_needed='composed from the readings'),
+        dict(id='bad_formula', cites='need:1', type='formula', claim='x', evidence_needed='y'),
+    ], tasks=[dict(id='measure_grid', unknowns=['grid_lock', 'corpus_parses'], bucket='low', title='read piece.mid'),
+              dict(id='compose_level', unknowns=['composition_level'], bucket='low', title='compose the need', deps=['measure_grid'])])
+    accepted, refusals = controller.guard(decision, observation, gym)
+    ids = [u['id'] for u in accepted['unknowns']]
+    assert ids == ['grid_lock', 'corpus_parses', 'composition_level'], refusals
+    assert any('bad_formula' in r and 'expression' in r for r in refusals)
+    controller.apply(CONFIG, gym, accepted)
+    # Terra refuses to *show* a formula whose variables are not yet knowns (the policy says mint it when they
+    # exist); the record is on the map with its expression and its variable bound to the known.
+    rec = json.loads((gym/'.terra'/'map'/'unknowns'/'composition_level.json').read_text())
+    assert rec.get('type') == 'formula' and rec.get('expression') == 'grid_lock < 0.7' and rec['vars']['grid_lock'] == dict(known_id='grid_lock')
