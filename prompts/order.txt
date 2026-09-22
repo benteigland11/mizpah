@@ -1,6 +1,7 @@
 glossary
 map
 unknowns
+instruments
 probes
 playbook
 cartograph
