@@ -31,7 +31,7 @@ def store_dir(config: dict[str, Any]) -> Path:
     return base
 
 
-USABLE_STOPS = ('nothing_owed',)   # a run the controller may learn from ended on its own merits: complete
+USABLE_STOPS = ('completed', 'nothing_owed')   # a run the controller may learn from ended on its own merits ('nothing_owed' is the old name)
 
 
 def record(config: dict[str, Any], project: Path, stop: str, cycles: list[dict[str, Any]], session: Path | None = None) -> Path | None:

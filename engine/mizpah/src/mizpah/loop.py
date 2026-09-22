@@ -538,7 +538,7 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                 elif not (terra(config, project, 'gate').get('violations')) and not phase_open(config, project):
                     # Green is the gate's to say, not the controller's: nothing owed means Terra's gate on the
                     # project map carries no debt.
-                    stop = 'nothing_owed'
+                    stop = 'completed'
                 elif stalled_evals < 1:
                     # One empty eval is one bad draw (each step is a fresh window): a second cycle gets a route
                     # step and another eval before a person is asked to decide.
@@ -564,11 +564,11 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
     except Exception as error:  # noqa: BLE001
         with log.open('a') as handle:
             handle.write(json.dumps(dict(at=time.time(), where='briefs.record', error=str(error)[:300]))+'\n')
-    if stop not in ('nothing_owed', 'max_cycles', 'max_tasks'):
+    if stop not in ('completed', 'nothing_owed', 'max_cycles', 'max_tasks'):
         ops.notify(config, root, project.name+' stopped: '+stop,
                    str(tasks_run)+' tasks in '+str(round((time.time()-started)/3600, 2))+' h; report at '+str(root/'report.md'))
     adopted = None
-    if stop == 'nothing_owed' and config['mizpah'].get('builds_base'):
+    if stop in ('completed', 'nothing_owed') and config['mizpah'].get('builds_base'):
         # An environment gym went green: its tree is the base now, and any gym may be set up in it.
         from . import bases
         try:

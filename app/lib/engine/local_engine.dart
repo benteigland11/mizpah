@@ -27,6 +27,7 @@ import 'run_inbox.dart';
 import 'run_tool.dart';
 import 'storage_scan.dart' as scan;
 import '../models/storage.dart';
+import 'desk_notices.dart';
 import 'file_settings_store.dart';
 import '../models/route.dart';
 import 'state_dir.dart';
@@ -40,11 +41,23 @@ class LocalEngine implements Engine {
   /// [runsRoot] is scanned for sessions alongside the engine's registry;
   /// the result is re-checked every [poll] and [changes] fires on a
   /// difference.
-  LocalEngine({Directory? runsRoot, Duration poll = const Duration(seconds: 5)})
-    : _discovery = runsRoot == null ? null : RunDiscovery(runsRoot) {
+  LocalEngine({Directory? runsRoot, Duration poll = const Duration(seconds: 5), File? marksFile, Directory? boardDir})
+    : _discovery = runsRoot == null ? null : RunDiscovery(runsRoot),
+      // ignore: prefer_initializing_formals
+      _marksFile = marksFile,
+      // ignore: prefer_initializing_formals
+      _boardDir = boardDir {
     rescan();
     setPoll(poll);
   }
+
+  /// Where the read/dismissed marks live; a test passes its own so it
+  /// never writes over the person's (the roundtrip test did, every run).
+  final File? _marksFile;
+
+  /// The Board's notice files; a test passes its own, else `notices/board`
+  /// under the engine home.
+  final Directory? _boardDir;
 
   RunDiscovery? _discovery;
   Timer? _timer;
@@ -273,6 +286,81 @@ class LocalEngine implements Engine {
     // The controller's library skips a record whose session is archived; nothing else to do.
     _chosen.remove(id);
     rescan();
+  }
+
+  /// Every session root of a project, from the scan (not just the shown one).
+  List<RunSession> _allSessions(String id) => _sessions[id] ?? const [];
+
+  Future<void> _setArchived(String session, bool archived) async {
+    final rf = File('$session/run.json');
+    Map<String, dynamic> r = const {};
+    try {
+      if (rf.existsSync()) r = jsonDecode(rf.readAsStringSync()) as Map<String, dynamic>;
+    } catch (_) {}
+    r = Map.of(r);
+    if (archived) {
+      r['archived'] = true;
+      r['archived_why'] = 'archived from the app ${DateTime.now().toIso8601String()}';
+    } else {
+      r.remove('archived');
+      r.remove('archived_why');
+    }
+    rf.writeAsStringSync(const JsonEncoder.withIndent(' ').convert(r));
+  }
+
+  @override
+  Future<void> archiveProject(String id) async {
+    final r = _runs[id];
+    if (r == null) throw StateError('no project listed as $id');
+    if (r.running) throw StateError('$id is live; hold it first');
+    for (final s in _allSessions(id)) {
+      if (!s.archived) await _setArchived(s.path, true);
+    }
+    _chosen.remove(id);
+    rescan();
+    _changes.add(null);
+  }
+
+  @override
+  Future<void> unarchiveProject(String id) async {
+    for (final s in _allSessions(id)) {
+      if (s.archived) await _setArchived(s.path, false);
+    }
+    _chosen.remove(id);
+    rescan();
+    _changes.add(null);
+  }
+
+  @override
+  Future<void> deleteProject(String id) async {
+    final r = _runs[id];
+    if (r == null) throw StateError('no project listed as $id');
+    if (r.running) throw StateError('$id is live; hold it first');
+    for (final s in _allSessions(id)) {
+      await deleteSession(id, s.path);
+    }
+    final gyms = RunDiscovery.gymsRoot().path;
+    if (r.project.startsWith('$gyms/')) {
+      final folder = Directory(r.project);
+      if (folder.existsSync()) folder.deleteSync(recursive: true);
+      for (final side in ['${r.project}.out', '${r.project}.err']) {
+        final f = File(side);
+        if (f.existsSync()) f.deleteSync();
+      }
+    } else {
+      final state = Directory(stateDir(r.project));
+      if (state.existsSync()) state.deleteSync(recursive: true);
+    }
+    final pr = RunDiscovery.projectsRegistry();
+    if (pr.existsSync()) {
+      final kept = pr.readAsLinesSync().where((l) => !l.contains('"${r.project}"')).toList();
+      pr.writeAsStringSync(kept.isEmpty ? '' : '${kept.join('\n')}\n');
+    }
+    _runs.remove(id);
+    _briefs.remove(id);
+    _sessions.remove(id);
+    rescan();
+    _changes.add(null);
   }
 
   @override
@@ -620,7 +708,15 @@ class LocalEngine implements Engine {
   /// app reads, so a browser and the desk agree.
   FileSettingsStore settingsStore = FileSettingsStore();
 
-  File get _ackFile => File('${mizpahPaths().state}${pathSep}acknowledged.json');
+  File get _ackFile => _marksFile ?? File('${mizpahPaths().state}${pathSep}acknowledged.json');
+
+  /// The desk's own paper: the Board's beside the marks, the Deputy's in
+  /// its state dir (beside the marks too when a test passes its own).
+  DeskNotices get _deskNotices => DeskNotices(
+    boardDir: _boardDir ?? (engine.root.isEmpty ? null : Directory('${engine.root}${pathSep}notices${pathSep}board')),
+    boardFile: File('${_ackFile.parent.path}${pathSep}board.json'),
+    deputyFile: File(_marksFile != null ? '${_ackFile.parent.path}${pathSep}deputy-notices.jsonl' : '${_deputyDir.path}${pathSep}notices.jsonl'),
+  );
 
   @override
   Future<StorageReport> measureStorage() {
@@ -645,9 +741,23 @@ class LocalEngine implements Engine {
   }
 
   @override
-  Future<void> writeAcknowledged(Map<String, dynamic> acks) async {
+  Future<Map<String, dynamic>> markAcknowledged({
+    List<String> read = const [],
+    List<String> unread = const [],
+    List<String> dismissed = const [],
+  }) async {
+    final j = await readAcknowledged();
+    final r = {...((j['read'] as List?)?.cast<String>() ?? const [])}
+      ..addAll(read)
+      ..removeAll(unread);
+    final d = {...((j['dismissed'] as List?)?.cast<String>() ?? const [])}..addAll(dismissed);
+    final out = {'read': r.toList()..sort(), 'dismissed': d.toList()..sort()};
     _ackFile.parent.createSync(recursive: true);
-    _ackFile.writeAsStringSync(jsonEncode(acks));
+    // Written whole then moved into place: a reader never sees half a file.
+    final tmp = File('${_ackFile.path}.tmp');
+    tmp.writeAsStringSync(jsonEncode(out));
+    tmp.renameSync(_ackFile.path);
+    return out;
   }
 
   @override
@@ -829,6 +939,9 @@ class LocalEngine implements Engine {
         }
       }
     }
+    // The desk's own paper — the Board's, the Deputy's — is not a project's;
+    // it sits in the tray with the rest and is dismissed the same way.
+    out.addAll(_deskNotices.read());
     out.sort((a, b) {
       // Signatures first, then by time, newest first.
       if (a.document.awaitingSignature != b.document.awaitingSignature) {
@@ -985,12 +1098,23 @@ class LocalEngine implements Engine {
       (_loops[id] ??= FakeLoop()).setMode(mode);
       return;
     }
-    final stop = File('${run.session}/STOP');
     if (mode != LoopMode.run) {
-      stop.writeAsStringSync('hold from the app ${DateTime.now().toIso8601String()}\n');
+      // Hold the loop that is running, whichever session the desk shows:
+      // a STOP in an old session's folder held nothing. None live is a no-op.
+      final live = (_sessions[id] ?? const <RunSession>[]).where((s) => s.running).toList();
+      for (final s in live) {
+        File('${s.path}/STOP').writeAsStringSync('hold from the app ${DateTime.now().toIso8601String()}\n');
+      }
       _changes.add(null);
       return;
     }
+    // Resume the shown session — and only when nothing of this project is
+    // live, so a second loop never starts beside the first. Said, not
+    // swallowed: it used to return quietly and the button looked broken.
+    if (run.running || (_sessions[id] ?? const <RunSession>[]).any((s) => s.running)) {
+      throw StateError('a loop is already live on this project; hold it first');
+    }
+    final stop = File('${run.session}/STOP');
     if (stop.existsSync()) stop.deleteSync();
     await _resumeIfStopped(run);
   }
@@ -1027,6 +1151,24 @@ class LocalEngine implements Engine {
       if (stop.existsSync()) stop.deleteSync();
       await _resumeIfStopped(run);
     }
+    _changes.add(null);
+  }
+
+  @override
+  Future<void> memoToWorker(String id, String task, String text) async {
+    final run = _runs[id];
+    if (run == null || run.session.isEmpty) throw StateError('no session to write to');
+    if (text.trim().isEmpty) return;
+    final taskDir = Directory('${run.session}/tasks/$task');
+    if (!taskDir.existsSync()) throw StateError('no worker has sat down on $task');
+    // The worker's harness reads nudge.md at its next boundary and renames
+    // it delivered; a memo before it was read is appended, not lost.
+    final nudge = File('${taskDir.path}/nudge.md');
+    nudge.writeAsStringSync('${nudge.existsSync() ? '${nudge.readAsStringSync().trimRight()}\n\n' : ''}${text.trim()}\n');
+    File('${run.session}/operator.jsonl').writeAsStringSync(
+      '${jsonEncode({'at': DateTime.now().millisecondsSinceEpoch / 1000, 'text': text.trim(), 'to': 'worker:$task'})}\n',
+      mode: FileMode.append,
+    );
     _changes.add(null);
   }
 
@@ -1073,13 +1215,17 @@ class LocalEngine implements Engine {
     final journal = File(session.startsWith('controller')
         ? '${r.session}/controller.jsonl'
         : '${r.session}/tasks/$session/events/session.jsonl');
+    // A controller step in progress moves this file, not the journal.
+    final live = File('${r.session}/controller.live.json');
     late StreamController<List<Turn>> c;
     Timer? t;
     String last = '';
     String stamp = '';
     Future<void> tick() async {
       final st = journal.existsSync() ? journal.statSync() : null;
-      final now = st == null ? '-' : '${st.modified.millisecondsSinceEpoch}:${st.size}';
+      final lv = session.startsWith('controller') && live.existsSync() ? live.statSync() : null;
+      final now = '${st == null ? '-' : '${st.modified.millisecondsSinceEpoch}:${st.size}'}'
+          '|${lv == null ? '-' : '${lv.modified.millisecondsSinceEpoch}:${lv.size}'}';
       if (now == stamp) return;
       stamp = now;
       final turns = await _readTurnsInIsolate(args);
@@ -1111,10 +1257,15 @@ class LocalEngine implements Engine {
       // A stat, not a read: the tail poll asks every two seconds.
       final f = File('${r.session}/tasks/$session/events/session.jsonl');
       final length = f.existsSync() ? f.lengthSync() : 0;
-      if (length == ifLength) return TraceWindow(turns: const [], start: from ?? 0, end: length, fileLength: length, unchanged: true);
+      if (length == ifLength) {
+        return TraceWindow(turns: const [], start: from ?? 0, end: length, fileLength: length, unchanged: true, wire: _wire(r.session, session));
+      }
     }
-    return _readWindowInIsolate((r.project, r.session, session, end, from));
+    final w = await _readWindowInIsolate((r.project, r.session, session, end, from));
+    return TraceWindow(turns: w.turns, start: w.start, end: w.end, fileLength: w.fileLength, wire: _wire(r.session, session));
   }
+
+  static Wire? _wire(String session, String task) => Wire.read(File('$session/tasks/$task/events/stream.json'));
 
   @override
   Future<List<FloorSession>> readSessions(String id) async {
@@ -1133,7 +1284,7 @@ class LocalEngine implements Engine {
   ];
 
   /// A run's state is its loop's: live while the process is up, completed
-  /// on nothing_owed, stopped for any other end. Attention is the number of
+  /// on a completed run, stopped for any other end. Attention is the number of
   /// change requests awaiting signature — nothing else.
   BriefSummary _summary(String id, Map<String, dynamic> brief) {
     final r = _runs[id];
@@ -1163,7 +1314,7 @@ class LocalEngine implements Engine {
           ? 'archived'
           : r.running
           ? 'live'
-          : stop == 'nothing_owed'
+          : (stop == 'completed' || stop == 'nothing_owed')
           ? 'completed'
           : 'stopped'; // any other reason, or a loop killed before it wrote one
     }
