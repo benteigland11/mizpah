@@ -1,4 +1,5 @@
 ## Cartograph
 
-- A widget is an instrument: general code with an API, tests, examples and a README under `cg/<domain>-<name>-<language>/`. It takes the thing it acts on as an argument and returns it changed or read; it never carries a project's material. Glue — the short script that calls it with this project's files — stays in the project and does not transfer.
+- A widget is an instrument: code with an API, tests, examples and a README under `cg/<domain>-<name>-<language>/`. It takes the thing it acts on as an argument and returns it changed or read.
+- General does not mean "nothing from this project" — most of the code you write is general. It means the cut is at the API: the widget holds the logic as a surface anyone could call (`apply_pedal_per_harmony(notes, harmonies, overlap=…)`), and this project's particulars — its file names, its key, its nine velocities, the one call that wires it up — are the glue, a short script in the project that calls the surface with that material. If a value would differ on another project, it is a parameter; if a line only makes sense here, it is glue. Glue does not transfer; the surface does.
 - A widget is how the work meets the bar, not a clean-up after it: `cartograph validate` passing is the reading that its rules hold. A script at the project root is invisible to the library and dies with the work order.
