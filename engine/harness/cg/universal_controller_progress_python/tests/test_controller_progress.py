@@ -181,3 +181,16 @@ def test_execution_terms_default_empty_and_validated():
     assert ReviewPolicy(20, 10, 1, 2000, 500, 20000).execution_terms == ()
     with pytest.raises(ValueError):
         ReviewPolicy(20, 10, 1, 2000, 500, 20000, execution_terms=('', 'bash'))
+
+
+def test_an_empty_correction_withdraws_without_a_warrant_and_holds_when_nothing_is_held():
+    controller = state()
+    controller.observe(dict(turn=1))
+    # Nothing held: "" is a hold (the reviewer looked and found nothing), not a refusal.
+    assert controller.accept(decision(''))['operation'] == 'hold'
+    controller.observe(dict(turn=2))
+    controller.accept(json.dumps(dict(correction='Fix it.', evidence='Observed.', warrant='Required.')))
+    controller.observe(dict(turn=3))
+    # Held: "" withdraws it, with evidence allowed and no warrant (nothing is violated any more).
+    assert controller.accept(json.dumps(dict(correction='', evidence='the file now reads piece.mp3', warrant='')))['operation'] == 'clear'
+    assert controller.guidance['correction'] == ''

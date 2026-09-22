@@ -190,10 +190,15 @@ class ControllerProgress:
             if value['evidence'] or value['warrant']:
                 raise ValueError('Holding guidance requires empty evidence and warrant')
             operation = 'hold'
+        elif correction == '':
+            # An empty correction withdraws what is held: the files no longer show it. Evidence may say what
+            # changed; no warrant, since nothing is violated. With nothing held it is the same as a hold — the
+            # reviewer looked and found nothing (it answered "" on a clean first look and was refused twice).
+            operation = 'clear' if self.guidance.get('correction') else 'hold'
         else:
-            if (correction and not correction.strip()) or not value['evidence'].strip() or not value['warrant'].strip():
+            if not correction.strip() or not value['evidence'].strip() or not value['warrant'].strip():
                 raise ValueError('Changing guidance requires substantive evidence and warrant')
-            operation = 'replace' if correction else 'clear'
+            operation = 'replace'
             term = execution_term_found(correction, self.policy.execution_terms)
             if operation == 'replace' and term is not None:
                 # Guidance corrects the destination, never the technique. The harness
