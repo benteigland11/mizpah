@@ -1635,6 +1635,22 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
                 cancel=cancel, reopen_unknowns=sorted(reopened), reopen=reopen, cautions=cautions, done=done, why=str(decision.get('why') or '')), refusals
 
 
+def terra_refusal(error: Exception) -> str:
+    """What terra said, without the command echoed in front of it. The error reads `terra <every argument> failed:
+    <message>`; cut at 300 characters, a route add with four --accept flags kept only its own echo, and the
+    controller routed the same task three times without learning the plan exceeded budget_points (follow the
+    score, 2026-09-22)."""
+    text = str(error)
+    _, sep, said = text.partition(' failed: ')
+    if not sep:
+        return text
+    try:
+        payload = json.loads(said)
+    except ValueError:
+        return said
+    return str(payload.get('message') or said) if isinstance(payload, dict) else said
+
+
 def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any], root: Path | None = None) -> dict[str, list[str]]:
     """Write the accepted decision through Terra; proposals are queued, never accepted here."""
     done = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[], retire=[], cancel=[])
@@ -1700,7 +1716,7 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any], root:
             terra(config, project, *args)
         except RuntimeError as error:
             # Terra refused (usually the plan exceeding budget_points): the refusal is state, not a crash.
-            done.setdefault('refused', []).append(t['id']+': '+str(error)[:300])
+            done.setdefault('refused', []).append(t['id']+': '+terra_refusal(error)[:300])
             continue
         done['tasks'].append(t['id'])
         if t.get('enabler'):

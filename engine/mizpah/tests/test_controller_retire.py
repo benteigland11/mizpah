@@ -1,6 +1,8 @@
 """The controller retires an unknown the map no longer needs answered; not one that is owed."""
 from __future__ import annotations
 
+import json
+
 from mizpah import controller
 
 
@@ -36,3 +38,17 @@ def test_retire_takes_an_unowed_unknown_and_refuses_the_owed() -> None:
     assert any('already stands' in r for r in refusals)
     assert any('say why' in r for r in refusals)
     assert any('no such unknown' in r for r in refusals)
+
+
+def test_a_route_refusal_carries_what_terra_said_not_the_echoed_command() -> None:
+    """A long route add used to be cut inside its own echo; the controller must see why it was refused."""
+    args = ('route add build_score_video_measurement_instrument --title Build and validate reusable score-video '
+            'measurement instrument --map score_video_measurement_instrument_exists --bucket high --skill terra-probe '
+            '--accept unknown:marker_timing_measurement_validated --accept unknown:page_visibility_measurement_validated')
+    said = ('route add build_score_video_measurement_instrument: unsectored plan points 71 exceed free pool 60 '
+            '(budget 60 − sector reserves 0). Put work in a sector, lower buckets, or raise budget.')
+    error = RuntimeError('terra '+args+' failed: '+json.dumps(dict(message=said, code='route_add')))
+    assert controller.terra_refusal(error) == said
+    assert 'exceed free pool 60' in controller.terra_refusal(error)[:300]
+    assert controller.terra_refusal(RuntimeError('terra map create x failed: no such map')) == 'no such map'
+    assert controller.terra_refusal(RuntimeError('something else')) == 'something else'
