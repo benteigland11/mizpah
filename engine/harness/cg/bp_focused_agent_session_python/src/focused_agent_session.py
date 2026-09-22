@@ -753,19 +753,28 @@ class FocusedSession:
                 result._save()
         return result
 
-    def _read_file(self, path: str, **options: Any) -> bytes:
-        """Read a workspace file, or one under a host-backed scratch directory.
+    def _space(self, path: str) -> tuple[Any, bool]:
+        """The workspace a file tool acts on for `path`, and whether it is scratch.
 
-        Scratch is bound from real disk and is deliberately absent from the workspace archive, so the tar the
-        other read paths search does not hold it. `read` still has to reach it: the worker renders a page or a
-        plot into `scratch/` and then looks at it (the follow-the-score rerun rendered `scratch/pdf/page-1.png`
-        and could not read it back, 2026-09-22)."""
+        Scratch is bound from real disk at /work/<dir> and is deliberately absent from the workspace (archive or
+        project directory), so read, write and edit of a scratch path act on the host scratch tree the sandbox
+        sees, never on the project copy the bind hides. The follow-the-score rerun could not read back the page it
+        rendered into `scratch/`; the Grok benchmark wrote `scratch/measure_now.py` into the hidden project copy,
+        and the hash of what it wrote then crashed the work order (2026-09-22)."""
         config = self.shell.config
-        parts = PurePosixPath(path.lstrip('/')).parts
+        try:
+            parts = PurePosixPath(_name(path)).parts   # `/work/scratch/x` and `scratch/x` are the same file
+        except ValueError:
+            return self.workspace(), False   # not a workspace path at all: the ordinary tool refuses it
         if parts and config.scratch_dirs and parts[0] in tuple(_name(d) for d in config.scratch_dirs):
-            if '..' in parts:
-                raise ValueError('a scratch path may not traverse upwards')
-            host = Path(config.scratch_root)/'workspace'/Path(*parts)
+            return DirectoryWorkspace(Path(config.scratch_root)/'workspace', limits=config.limits), True
+        return self.workspace(), False
+
+    def _read_file(self, path: str, **options: Any) -> bytes:
+        """Read a workspace file, or one under a host-backed scratch directory."""
+        space, scratch = self._space(path)
+        if scratch:
+            host = space.root/_name(path)
             if not host.is_file() or host.is_symlink():
                 raise FileNotFoundError(path)
             data = host.read_bytes()
@@ -774,7 +783,7 @@ class FocusedSession:
                 raise ValueError(path+' is larger than the '+str(limit)+'-byte read bound; read a part of it '
                                  'or measure it with a tool')
             return data
-        return read_workspace_file(self.workspace(), path, **options)
+        return read_workspace_file(space, path, **options)
 
     def workspace(self) -> Any:
         """Return the verified opaque worker workspace, never host controller files.
@@ -1140,8 +1149,9 @@ class FocusedSession:
                         limit = None
                     else:
                         limit = min(int(args.get('limit', self.settings.maximum_read_lines)), self.settings.maximum_read_lines)
-                        report = read_workspace_lines(self.workspace(), args['path'], offset=int(args.get('offset', 1)),
-                            limit=limit, **options)
+                        space, scratch = self._space(args['path'])
+                        report = read_workspace_lines(space, _name(args['path']) if scratch else args['path'],
+                            offset=int(args.get('offset', 1)), limit=limit, **options)
                         cap = self.settings.maximum_read_characters
                         if len(report.get('content') or '') > cap:
                             # Lines bound a text file; a one-line file (a JSON archive, a minified asset) is not
@@ -1165,13 +1175,18 @@ class FocusedSession:
                     limit = self.settings.maximum_write_characters
                     if limit is not None and len(args['content']) > limit:
                         raise ValueError('write content is too long for one call; write the skeleton first and fill it in with edit')
-                    existing = set(workspace_files(self.workspace(), **options))
+                    space, scratch = self._space(args['path'])
+                    existing = set(workspace_files(space, **options)) if not scratch else (
+                        {args['path']} if (space.root/_name(args['path'])).is_file() else set())
                     data = args['content'].encode('utf-8')
                     if (not self.settings.write_existing_files and args['path'] in existing
                             and self._read_file(args['path'], **options).strip()):
                         raise ValueError('write only creates files; '+args['path']+' already has content. Change it with '
                                          'edit one piece at a time, or delete the block with bash first and rebuild it by refinement')
-                    snapshot = write_workspace_file(self.workspace(), args['path'], data, **options)
+                    snapshot = write_workspace_file(space, _name(args['path']) if scratch else args['path'], data, **options)
+                    if scratch:
+                        snapshot = None   # the scratch tree is not the workspace: nothing to put
+                        self.state.setdefault('read_hashes', {})[args['path']] = hashlib.sha256(data).hexdigest()
                     report = dict(path=args['path'], created=args['path'] not in existing, bytes_written=len(data))
                 else:
                     keys = {'path', 'old_text', 'new_text'}
@@ -1200,8 +1215,13 @@ class FocusedSession:
                                 'new_text is the large part: add one function, branch, test or section per edit')
                         raise ValueError('edit text is too long for one call; '+side+
                                          '. If replacing a block, delete it with bash first and rebuild it in pieces')
-                    snapshot, report = edit_workspace_file(self.workspace(), args['path'], args['old_text'], args['new_text'],
-                        expected_occurrences=args.get('expected_occurrences', 1), **options)
+                    space, scratch = self._space(args['path'])
+                    snapshot, report = edit_workspace_file(space, _name(args['path']) if scratch else args['path'],
+                        args['old_text'], args['new_text'], expected_occurrences=args.get('expected_occurrences', 1), **options)
+                    if scratch:
+                        snapshot = None   # the scratch tree is not the workspace: nothing to put
+                        self.state.setdefault('read_hashes', {})[args['path']] = hashlib.sha256(
+                            self._read_file(args['path'], **options)).hexdigest()
             except WorkspaceEditError as error:
                 hints = dict(
                     old_text_empty='To add text, anchor on an existing line: old_text is that line copied verbatim '

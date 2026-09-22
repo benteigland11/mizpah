@@ -1961,3 +1961,34 @@ def test_at_the_threshold_the_worker_reflects_then_hands_off(tmp_path):
     assert any('REFLECT: record the method' in json.dumps(r['messages']) for r in wt.requests)
     handoff_requests = [r for r in wt.requests if 'tools' not in r]
     assert handoff_requests and 'REFLECT' not in handoff_requests[0]['messages'][0].get('content', '')
+
+
+class ScratchToolTransport(FileToolTransport):
+    """Scripted worker: file tools on a host-backed scratch path, in both spellings, and one ordinary file."""
+
+    def __init__(self):
+        super().__init__()
+        self.script = [('write', dict(path='scratch/measure_now.py', content='x = 1\n')),
+                       ('read', dict(path='/work/scratch/measure_now.py')),
+                       ('edit', dict(path='scratch/measure_now.py', old_text='x = 1', new_text='x = 2')),
+                       ('read', dict(path='scratch/missing.py')),
+                       ('write', dict(path='notes.py', content='y = 1\n'))]
+
+
+def test_file_tools_act_on_the_host_scratch_tree_the_sandbox_sees(tmp_path):
+    """write/read/edit of a scratch path go to <scratch_root>/workspace/<path>, never into the workspace; a missing
+    scratch file is the model's error (the Grok benchmark's driver died on its own scratch write, 2026-09-22)."""
+    settings, _, shell, controller, _, _ = setup(tmp_path, total=0, enabled=False, rollover=False)
+    settings = replace(settings, worker_tools=('bash', 'read', 'write', 'edit'))
+    shell.config = replace(shell.config, scratch_dirs=('scratch',))
+    worker = ModelClient(EndpointConfig('http://example.invalid', 5, 1000000, {}, '/complete', '/template', '/tokenize', False, True),
+                         transport=ScratchToolTransport())
+    item = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, controller=controller)
+    assert item.run()['status'] == 'complete'
+    assert (tmp_path/'workspace'/'scratch'/'measure_now.py').read_text() == 'x = 2\n'
+    events = [json.loads(line) for line in (tmp_path/'session'/'events'/'session.jsonl').read_text().splitlines()]
+    outcomes = [e['payload'] for e in events if e['event_type'] == 'tool_outcome']
+    assert [o['status'] for o in outcomes] == ['ok', 'ok', 'ok', 'error', 'ok']
+    assert 'x = 1' in outcomes[1]['content'] and 'scratch/missing.py' in outcomes[3]['error']
+    files = workspace_files(item.workspace(), byte_limit=1000000, file_limit=1000)
+    assert 'notes.py' in files and not any(f.startswith('scratch/') for f in files)
