@@ -53,7 +53,7 @@ class WorkerTransport:
             self.requests.append(deepcopy(payload))
             if 'tools' not in payload:
                 self.handoffs += 1
-                value = response('worker-owned handoff '+str(self.turns))
+                value = response('# worker-owned handoff '+str(self.turns)+'\n- established\n- unfinished')
             else:
                 self.turns += 1
                 calls = [tool('call-'+str(self.turns), 'write-'+str(self.turns))] if self.turns <= self.total else None
@@ -1059,7 +1059,7 @@ class StuckTransport(FileToolTransport):
     def __call__(self, path, payload, **kwargs):
         if path not in ('/template', '/tokenize') and 'tools' not in payload:
             self.requests.append(deepcopy(payload))
-            return WireResponse(200, json.dumps(response('worker-owned handoff: stop reading nope.py')), 0)
+            return WireResponse(200, json.dumps(response('# worker-owned handoff\n- stop reading nope.py\n- continue')), 0)
         return super().__call__(path, payload, **kwargs)
 
 
@@ -1134,7 +1134,7 @@ class LoopingTransport(FileToolTransport):
     def __call__(self, path, payload, **kwargs):
         if path not in ('/template', '/tokenize') and 'tools' not in payload:
             self.requests.append(deepcopy(payload))
-            return WireResponse(200, json.dumps(response('worker-owned handoff: stop re-reading')), 0)
+            return WireResponse(200, json.dumps(response('# worker-owned handoff\n- stop re-reading\n- continue')), 0)
         return super().__call__(path, payload, **kwargs)
 
 
