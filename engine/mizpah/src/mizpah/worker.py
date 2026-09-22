@@ -2019,6 +2019,15 @@ def run_through_outages(session: FocusedSession, config: dict[str, Any], root: P
             discarded = session.discard_pending()
             if discarded:
                 (root/'discarded.jsonl').open('a').write(json.dumps(discarded)+'\n')
+            if burst is not None:
+                # The rest of the burst, not a fresh one: a torn call at turn 138 restarted a 119-turn burst from
+                # there, and the effort boundary owed at 240 moved to 257, then 302 after the next outage — the
+                # worker on engrave (2026-09-22) never heard "estimate spent" a second time, and the morning's
+                # "no effort check until turn 235" was the same slip.
+                try:
+                    maximum_worker_turns = max(1, burst-(session.status()['completed_worker_turns']-burst_start))
+                except Exception:  # noqa: BLE001
+                    pass
             if too_big:
                 # The warning rides on the failure, to the one worker that needs it, when it can act (a sketch gym
                 # streamed a four-thumbnail SVG as a write argument five times over, 2026-09-20). Not a standing

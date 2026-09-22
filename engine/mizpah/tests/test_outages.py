@@ -46,3 +46,35 @@ def test_controller_outage_is_recorded_at_the_run_root(tmp_path: Path, monkeypat
     assert out == {'ok': True}
     row = json.loads((tmp_path/'outages.jsonl').read_text())
     assert row['role'] == 'controller' and row['endpoint'] == 'http://c:1' and 'gateway gone' in row['error']
+
+
+def test_worker_outage_resumes_the_rest_of_the_burst(tmp_path: Path) -> None:
+    """A torn call mid-burst does not start the burst over: the effort boundary stays where it was."""
+    from cg.backend_persistent_model_session_python.src.persistent_model_session import ModelTransportError
+    from mizpah import worker
+
+    class Session:
+        def __init__(self):
+            self.turns = 0
+            self.asked = []
+            self.torn = False
+
+        def status(self):
+            return dict(completed_worker_turns=self.turns, status='paused', phase='worker', pending_io=None)
+
+        def run(self, *, maximum_worker_turns, stop_when=None):
+            self.asked.append(maximum_worker_turns)
+            if not self.torn:
+                self.torn = True
+                self.turns += 40
+                raise ModelTransportError('tls torn')
+            self.turns += maximum_worker_turns
+            return self.status()
+
+        def discard_pending(self):
+            return None
+
+    root = tmp_path/'tasks'/'t1'; root.mkdir(parents=True)
+    session = Session()
+    status = worker.run_through_outages(session, {'worker': {}}, root, maximum_worker_turns=100, health=_Health([True]))
+    assert session.asked == [100, 60] and status['completed_worker_turns'] == 100
