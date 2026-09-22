@@ -364,14 +364,23 @@ class DirectoryWorkspace:
         path.write_bytes(data)
         return self
 
+    # State that is scratch, not evidence: saved tool output and the window archives. A harvest, a checklist and a
+    # detached check read none of it, and a worker that renders 1,175 video frames under .tool-output/ (follow-
+    # the-score, 2026-09-22) put 242 MB there — past the evidence cap, so every harvest failed and the task with it.
+    SCRATCH_STATE = ('.tool-output', '.session-history')
+
     def snapshot(self, *, byte_limit: int, file_limit: int) -> bytes:
-        """The evidence part of the tree as a tar — the directory (caches left out) plus the state part —
+        """The evidence part of the tree as a tar — the directory (caches left out) plus the state part that is
+        evidence (the playbook walks and the services' records; not saved outputs or window archives) —
         what a harvest or a fresh sandbox is given."""
         sink = io.BytesIO()
         with tarfile.open(fileobj=sink, mode='w:', dereference=False) as archive:
             if self.state:
                 with tarfile.open(fileobj=io.BytesIO(self.state), mode='r:') as source:
                     for member in source:
+                        parts = [p for p in PurePosixPath(member.name).parts if p not in ('.', '/')]
+                        if parts and parts[0] in self.SCRATCH_STATE:
+                            continue
                         archive.addfile(member, source.extractfile(member) if member.isfile() else None)
             for path in sorted(self.root.rglob('*')):
                 relative = PurePosixPath(str(path.relative_to(self.root)))
