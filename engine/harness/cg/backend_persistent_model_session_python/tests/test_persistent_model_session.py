@@ -353,7 +353,7 @@ def test_completed_arguments_are_excerpted_only_after_their_result_arrives():
     s.append_tool_result('a', 'write', json.dumps(dict(status='ok')), arguments_archive='.tool-output/a.args.json')
     first = s.payload()['messages']
     content = json.loads(first[2]['tool_calls'][0]['function']['arguments'])['content']
-    assert content.startswith('x'*20) and 'sent 500 characters (1 lines)' in content and 'applied in full' in content
+    assert content.startswith('x'*20) and 'all 500 characters (1 lines)' in content and 'applied in full' in content
     assert 'saved at .tool-output/a.args.json' in content and len(content) < 300
     assert PersistentSession.from_state(s.export_state()).argument_archives == {'a': '.tool-output/a.args.json'}
     with pytest.raises(ValueError):
@@ -378,8 +378,8 @@ def test_argument_projection_disabled_by_default_and_handles_shapes():
                 dict(role='tool', tool_call_id='one', content='r'), dict(role='tool', tool_call_id='two', content='r')]
     out = project_completed_arguments(messages, 10)
     args = out[0]['tool_calls'][0]['function']['arguments']
-    assert args['nested']['n'] == 3 and args['nested']['text'].startswith('y'*10) and 'sent 50 characters' in args['nested']['text']
-    assert args['items'][1] == 'short' and 'sent 50 characters' in args['items'][0]
+    assert args['nested']['n'] == 3 and args['nested']['text'].startswith('y'*10) and 'all 50 characters' in args['nested']['text']
+    assert args['items'][1] == 'short' and 'all 50 characters' in args['items'][0]
     assert out[0]['tool_calls'][1]['function']['arguments'].startswith('not json ') and 'sent 59 characters' in out[0]['tool_calls'][1]['function']['arguments']
     multi = project_completed_arguments([dict(role='assistant', content=None, tool_calls=[dict(id='m', type='function',
         function=dict(name='t', arguments=json.dumps(dict(content='first line\nsecond line\nthird'))))]),

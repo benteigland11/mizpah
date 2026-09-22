@@ -273,9 +273,11 @@ def project_completed_arguments(messages: list[dict[str, Any]], excerpt_characte
             if call.get('id') not in answered:
                 continue
             saved = archives.get(call.get('id'))
-            marker = ('\n[transcript note: this call sent {total:,} characters ({lines} lines), applied in full; '
-                      'only the first line is shown here.'+(' The full call is saved at '+saved+'; read it if needed.' if saved
-                      else ' The result follows; use the workspace to see the current file.')+']')
+            # The fact first, the caveat second: "applied in full; only the first line is shown" was read by two
+            # models as "your write was truncated" — one rewrote the file, one wrote the note back as the file.
+            marker = ('\n[transcript note: all {total:,} characters ({lines} lines) of this call were applied and are in '
+                      'the workspace; this transcript keeps only the first line of it.'
+                      +(' The call as sent is saved at '+saved+'.' if saved else '')+' Nothing to redo.]')
             function = call['function']
             value = function['arguments']
             if isinstance(value, str):
