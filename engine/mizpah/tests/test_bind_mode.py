@@ -177,15 +177,13 @@ def test_pack_workspace_drops_symlinks_that_leave_the_tree(tmp_path: Path) -> No
     assert not any(n.startswith('env2') for n in names)   # a venv by any name is environment, not evidence
 
 
-def test_focus_globs_put_the_tasks_own_measures_first():
-    """The reviewer reads this task's measures before anything else, then its artifacts, and nothing else — never
-    every probe in the project, and not the widgets or the walks (theirs are the library's and Playbook's)."""
+def test_focus_globs_put_the_probes_first_then_the_artifacts():
+    """The reviewer reads the probes on the map (every one: a worker names its own) before the artifacts a work
+    order creates, and nothing else — not the walks, not the widgets by default."""
     from mizpah.worker import focus_globs
     unknowns = [dict(id='notes_md_built', notes='cites out:1; creates notes.md'), dict(id='piece_mid_built')]
     globs = focus_globs(unknowns)
-    assert globs[0].endswith('/map/probes/notes_md_built_probe/measure.py')
-    assert any(g.endswith('/map/probes/piece_mid_built_probe/measure.py') for g in globs)
-    assert not any('probes/*/' in g for g in globs)
+    assert globs[0].endswith('/map/probes/*/measure.py')
     assert 'notes.md' in globs and not any(g.startswith('cg/') or '/open/' in g for g in globs)
 
 

@@ -223,47 +223,29 @@ def open_task_map(config: dict[str, Any], project: Path, task: dict[str, Any], m
         if unknown.get('notes'):
             args += ['--notes', unknown['notes']]  # carries `cites need:N; source ...` for the check-in reference
         terra(config, project, *args)
-    scaffold_probes(config, project, task)
     return map_id
 
 
-def scaffold_probes(config: dict[str, Any], project: Path, task: dict[str, Any]) -> list[str]:
-    """One probe per unknown, created by the host before the worker starts, each declaring its single
-    quantity. The worker writes measure.py for each; a probe that measures several things cannot exist."""
-    made = []
-    for unknown_id in task_unknown_ids(task):
-        probe_id = unknown_id+'_probe'
-        if (project/layout.dirname(project)/'map'/'probes'/probe_id/'probe.json').exists():
-            continue
-        unknown = read_unknown(project, unknown_id)
-        args = ['probe', 'create', probe_id, '--purpose', unknown['claim'][:200], '--kind', 'run', '--measure', unknown_id]
-        # An unknown that names knowns ("a comparison of wind_alert_count and gale_reading_count")
-        # gets them as declared inputs, so the probe compares against the map through ctx["inputs"]
-        # and Terra refuses a measure() that re-derives or hardcodes them instead.
-        for known_id in known_ids_named(project, unknown):
-            if known_id != unknown_id:
-                args += ['--input', known_id+'=known:'+known_id]
-        terra(config, project, *args)
-        made.append(probe_id)
-    return made
-
 
 def protected_probes(project: Path, task: dict[str, Any]) -> tuple[str, ...]:
-    """Probes that predate this task and are not its own: instruments other knowns cite, not this worker's to change.
-    The task's scaffolded probes exist before the session starts, but they are exactly what the worker fills in."""
-    own = {uid+'_probe' for uid in task_unknown_ids(task)}
-    return tuple(sorted(p.name for p in (project/layout.dirname(project)/'map'/'probes').iterdir() if p.is_dir() and p.name not in own))
+    """Probes that predate this work order: instruments other knowns cite, not this worker's to change. Its own
+    are the ones it creates (a probe is a general measurement the worker names; none is scaffolded for it)."""
+    probes = project/layout.dirname(project)/'map'/'probes'
+    return tuple(sorted(p.name for p in probes.iterdir() if p.is_dir())) if probes.is_dir() else ()
 
 
 def probe_inputs(project: Path, task: dict[str, Any]) -> dict[str, list[str]]:
-    """Unknown id → the knowns its scaffolded probe declares as inputs (only those that declare any)."""
+    """Unknown id → the map knowns its claim names: a probe for it declares them as inputs (`--input k=known:k`)
+    and compares through ctx["inputs"] rather than re-deriving them."""
     result = {}
     for uid in task_unknown_ids(task):
-        meta = project/layout.dirname(project)/'map'/'probes'/(uid+'_probe')/'probe.json'
-        if meta.exists():
-            declared = json.loads(meta.read_text()).get('inputs') or {}
-            if declared:
-                result[uid] = sorted(declared)
+        try:
+            unknown = read_unknown(project, uid)
+        except FileNotFoundError:
+            continue
+        named = [k for k in known_ids_named(project, unknown) if k != uid]
+        if named:
+            result[uid] = named
     return result
 
 
@@ -1814,20 +1796,17 @@ def declare_artifact_deps(config: dict[str, Any], project: Path, unknowns: list[
 
 
 def focus_globs(unknowns: list[dict[str, Any]]) -> tuple[str, ...]:
-    """What the check-in reads, most decisive first: this task's own measures, then the artifacts its
-    unknowns say it creates, then widget sources. Order is priority — the harness fills the focus budget
-    in glob order — so a task's `measure.py` is never crowded out by a project's other probes or an
-    installed widget (the changing-meter gym's reviewer saw twenty probes and a widget cut at line 76)."""
-    ids = [uid for unknown in unknowns for uid in ([unknown.get('id')] if unknown.get('id') else [])]
-    globs = [d+'/map/probes/'+uid+'_probe/measure.py' for uid in ids for d in (layout.STATE_DIRNAME, layout.LEGACY_DIRNAME)]
+    """What the reviewer reads, most decisive first: the probes (a worker names its own — none is scaffolded —
+    so every probe on the map is in focus, and the harness follows each into the widgets it names), then the
+    artifacts the unknowns say the work order creates. The focus budget follows the reviewer's window."""
+    globs = [d+'/map/probes/*/measure.py' for d in (layout.STATE_DIRNAME, layout.LEGACY_DIRNAME)]
     for unknown in unknowns:
         creates = unknown_notes(unknown).get('creates')
         if creates:
             globs.append(creates)
             globs.append(creates.rstrip('/')+'/*')
-    # Not the walks and not the widgets: walk honesty is Playbook's (route complete refuses unticked steps) and
-    # the controller's; a widget's honesty is the library's (validate, its tests, the next bench that installs
-    # it). The reviewer answers one question from two kinds of file — did the worker game the probes.
+    # Not the walks and not the widgets by default: walk honesty is Playbook's and the controller's; a widget's
+    # honesty is the library's. The reviewer answers one question from two kinds of file.
     return tuple(dict.fromkeys(globs))
 
 
