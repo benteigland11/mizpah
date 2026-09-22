@@ -2324,7 +2324,9 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
     widgets: dict[str, list[str]] = dict(checked_in=[], rejected=[], unchanged=[])
     status = session.status()
     blocked_reason = None
-    overruns = 0
+    # A resumed session has already passed the boundaries below its turn count: starting at zero re-fired
+    # "estimate spent" twice, one turn apart, on an engrave resumed at 325 turns (2026-09-22).
+    overruns = turns(status)//estimate
     stalled = 0
     while stalled < settings['gate_rounds']:
         remaining = cap-turns(status)
