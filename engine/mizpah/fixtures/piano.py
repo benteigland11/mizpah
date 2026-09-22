@@ -1,6 +1,6 @@
 """Piano: one benchmark brief and a ladder of practice gyms, all on the `piano` base.
 
-Usage: python -m fixtures.piano make benchmark [attempt]|melody_bass|voice_leading|pedal_dynamics|rubato_phrase|nocturne_lh|voicing_touch|same_piece_two_ways
+Usage: python -m fixtures.piano make benchmark [attempt]|melody_bass|voice_leading|pedal_dynamics|rubato_phrase|nocturne_lh|voicing_touch|same_piece_two_ways|whole_piece|emotion_arc|rhythm_and_feeling
        python -m fixtures.piano score <project_dir>            readings off the MIDI the gym produced
 
 Practice gyms are I/O contracts: a mission, piece.mid out, three needs in a pianist's words, no thresholds
@@ -202,9 +202,64 @@ def same_piece_two_ways() -> Path:
         budget=120, non_goals=NON_GOALS)
 
 
+def whole_piece() -> Path:
+    return gym(
+        'A whole piece, not a phrase',
+        'Compose a complete short piano piece — a piece with a beginning, a middle that is somewhere else, and an '
+        'ending that has arrived — and show it holds together as one thing.',
+        needs=[
+            'It is whole: an opening that states something, a middle that goes elsewhere, a return that is changed '
+            'by what happened, and an ending that sounds arrived-at rather than stopped.',
+            'It travels: the harmony leaves home and comes back, and where it goes is far enough that a listener '
+            'would hear the journey.',
+            'Wholeness is shown, not claimed: readings over the finished piece say where the sections are, how the '
+            'return differs from the opening, and where home was left and regained — and the same readings would '
+            'fail a piece that only repeats itself.',
+        ],
+        deliverables=['piece.mid'],
+        budget=120, non_goals=NON_GOALS)
+
+
+def emotion_arc() -> Path:
+    return gym(
+        'The story of a song',
+        'Compose a short piano piece that carries one feeling through a shape — states it, disturbs it, and lets it '
+        'resolve late — and work out how that shape can be read off the file at all.',
+        needs=[
+            'It has one story: a feeling stated at the start, something that unsettles it, and a resolution that '
+            'comes late rather than early.',
+            'It has one high point, not four: a single place a listener would call the peak, with everything else '
+            'subordinate to it, and stillness somewhere before it or after it.',
+            'The shape is read, not asserted: an instrument reports the piece\'s arc over time — where intensity '
+            'rises, where it empties, where it peaks — and separates this piece from a flat one and from one that '
+            'peaks four times.',
+        ],
+        deliverables=['piece.mid'],
+        budget=120, non_goals=NON_GOALS)
+
+
+def rhythm_and_feeling() -> Path:
+    return gym(
+        'Rhythm carries the story',
+        'Compose a short piano piece where the rhythm is what moves the feeling — the pulse tightens as it rises '
+        'and loosens as it lets go — and show the rhythm and the arc are the same story.',
+        needs=[
+            'The rhythm is a character, not a grid: the figure that opens the piece changes as the piece does — '
+            'denser where it presses, wider where it breathes.',
+            'The pulse and the feeling move together: where the piece rises the notes come closer, where it '
+            'settles they come further apart, and the two curves are read off the same file.',
+            'The agreement is shown, not claimed: a reading puts the rhythmic density and the intensity arc side '
+            'by side and says how closely they follow each other — and would say so honestly for a piece where '
+            'they do not.',
+        ],
+        deliverables=['piece.mid'],
+        budget=120, non_goals=NON_GOALS)
+
+
 MAKERS = dict(benchmark=benchmark, melody_bass=melody_bass, voice_leading=voice_leading,
               pedal_dynamics=pedal_dynamics, rubato_phrase=rubato_phrase, nocturne_lh=nocturne_lh,
-              voicing_touch=voicing_touch, same_piece_two_ways=same_piece_two_ways)
+              voicing_touch=voicing_touch, same_piece_two_ways=same_piece_two_ways,
+              whole_piece=whole_piece, emotion_arc=emotion_arc, rhythm_and_feeling=rhythm_and_feeling)
 
 PINNED = Path.home()/'mizpah-runs'/'piano'/'benchmark.brief.json'
 
