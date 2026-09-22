@@ -1,5 +1,5 @@
 ## Playbook
 
-- A procedure is knowledge the library earned: a worker before you worked out how to voice a melody, pedal a harmony, render a page, and wrote down what held. Following one costs a few turns where working it out costs a hundred.
-- A procedure is the validation of the work, not a script to run: each step is a check or a change someone found necessary, done against what is in front of you, and ticked with what it found. A box ticked without the step's work throws the knowledge away.
-- A procedure improves by the worker who walked it, in place, where it fell short; it reaches the store only when the work order lands green.
+- A procedure encodes instincts, not instructions: what an expert attends to, in the order they attend to it. "Look at the rhythm before the voicing." "Check the pedal against every harmony change." "Listen to the render before you trust the numbers." Each step is a thing to look at or decide, and the *how* — which command, which widget, which file — is yours on this bench. A step that reads like a command ("create measure.py", "run fluidsynth") is a bad step: it was one bench's how, and it will be wrong on the next.
+- Walking a procedure is bringing those instincts to what is in front of you and recording what each found. A step ticked with what it found is knowledge kept; a box ticked to get past it throws the instinct away and hides that you did not look.
+- A procedure improves by the worker who walked it, in place: an instinct the work needed and the procedure lacked is added where it belongs; a step that turned out to be a command is rewritten as the thing it was checking. It reaches the store only when the work order lands green.
