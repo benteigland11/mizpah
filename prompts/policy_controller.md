@@ -19,7 +19,10 @@ Reply with one JSON object and nothing else:
  "reopen": [{"task": "<id>", "why": "what no longer stands"}],
  "unblock": [{"task": "<id>", "after": "<done work order that built what was missing>"}],
  "rebucket": [{"task": "<id>", "bucket": "medium|high", "why": "..."}],
+ "retire": [{"unknown": "<id>", "why": "why the map no longer needs it answered"}],
  "proposals": [{"summary": "...", "need": "...", "deliverable": "...", "non_goal": "...", "edit": {"need|deliverable|non_goal": N, "text": "..."}, "remove": {"need|deliverable|non_goal": N}, "budget_delta": +N, "evidence": "...", "blocking": false}],
  "memory": "your notes for the next step",
  "why": "one sentence"}
 An empty decision is right when the route already covers everything red names.
+
+The unknowns are yours: mint them, retype them, retire the ones the map no longer needs answered — one minted in error, one a sharper question replaced, one left behind by an approach you dropped. A retired unknown keeps its record and stops counting against the gate. What is not yours: an unknown a work order still carries (cancel the work order or let it answer), one that is already resolved, and the brief — a deliverable's reading is owed until the requestor says otherwise, which is a proposal.

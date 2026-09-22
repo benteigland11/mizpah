@@ -976,6 +976,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
     routed = {u for t in observation['tasks'] if t['status'] in OPEN_TASK and t['id'] not in leaving
               for u in (t.get('unknowns') or [t['unknown']])}
     unknowns, tasks, proposals, rebucket, unblock, retype = [], [], [], [], [], []
+    # `retire` is built below, beside retype
     for item in decision.get('unknowns') or []:
         if not isinstance(item, dict):
             refusals.append('unknown entry is not an object'); continue
@@ -1579,6 +1580,32 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         if new_type == current.get('type') and not claim:
             refusals.append('retype '+uid+': same type and no new claim changes nothing'); continue
         retype.append(dict(unknown=uid, type=new_type, claim=claim, why=str(item.get('why') or '')))
+    retire: list[dict[str, str]] = []
+    for item in decision.get('retire') or []:
+        # An unknown the map no longer needs answered: minted in error, superseded by a sharper one, or left by
+        # an approach that was abandoned. Yours to retire — the unknowns are the controller's — but never the
+        # brief's, and never one whose reading is owed: a need or deliverable still cites it, or a work order
+        # still carries it, and the way out is the work or a proposal, not the retirement.
+        if not isinstance(item, dict):
+            refusals.append('retire entry is not an object'); continue
+        uid, why = str(item.get('unknown') or ''), str(item.get('why') or '').strip()
+        current = existing_unknowns.get(uid)
+        if current is None:
+            refusals.append('retire '+repr(uid)+': no such unknown'); continue
+        if current.get('status') == 'resolved':
+            refusals.append('retire '+uid+': it is resolved; a reading already stands. Supersede it by routing its id again'); continue
+        if not why:
+            refusals.append('retire '+uid+': say why it is not owed'); continue
+        carriers = [t['id'] for t in observation['tasks'] if t['status'] in OPEN_TASK
+                    and uid in (t.get('unknowns') or [t.get('unknown')])]
+        if carriers:
+            refusals.append('retire '+uid+': work order '+', '.join(carriers)+' still carries it — cancel the work order first, or let it answer'); continue
+        cites = str(current.get('notes') or '')
+        owed = [ref for ref in re.findall(r'(?:need|deliverable):\d+', cites)
+                if ref.startswith('deliverable:')]
+        if owed:
+            refusals.append('retire '+uid+': it is the reading of '+', '.join(owed)+' — a deliverable is owed until the brief says otherwise, which is a proposal'); continue
+        retire.append(dict(unknown=uid, why=why))
     done = decision.get('done')
     done = bool(done) if isinstance(done, bool) else None
     if require_deliverables:
@@ -1604,13 +1631,13 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             done = False
             refusals.append('done refused: '+'; '.join(uncovered)+' — mint one unknown per named thing (with `creates`), '
                             'each claim naming it and the known it must agree with')
-    return dict(unknowns=unknowns, tasks=tasks, proposals=proposals, rebucket=rebucket, unblock=unblock, retype=retype, noted=noted,
+    return dict(unknowns=unknowns, tasks=tasks, proposals=proposals, rebucket=rebucket, unblock=unblock, retype=retype, retire=retire, noted=noted,
                 cancel=cancel, reopen_unknowns=sorted(reopened), reopen=reopen, cautions=cautions, done=done, why=str(decision.get('why') or '')), refusals
 
 
 def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any], root: Path | None = None) -> dict[str, list[str]]:
     """Write the accepted decision through Terra; proposals are queued, never accepted here."""
-    done = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[], cancel=[])
+    done = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[], retire=[], cancel=[])
     for uid in accepted.get('reopen_unknowns') or []:
         # A resolved reading to be taken again: open on the map, so its task is routable and its known is replaced.
         try:
@@ -1709,6 +1736,13 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any], root:
         terra(config, project, 'route', 'unblock', r['task'])
         record_release(project, r['task'], r['after'])
         done.setdefault('unblock', []).append(r['task']+' after '+r['after'])
+    for r in accepted.get('retire') or []:
+        # Terra's own word for a question that will not be answered: the gate skips it, the record stays.
+        try:
+            terra(config, project, 'unknown', 'status', r['unknown'], 'wont_care', '--notes', 'retired by the controller: '+r['why'])
+            done.setdefault('retire', []).append(r['unknown'])
+        except RuntimeError as error:
+            done.setdefault('refused', []).append('retire '+r['unknown']+': '+str(error)[:200])
     for r in accepted.get('retype') or []:
         path = layout.map_root(project)/'unknowns'/(r['unknown']+'.json')
         try:
@@ -1855,7 +1889,7 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
     memory_file = Path(journal).parent/'memory.md'
     observation['memory'] = memory_file.read_text().strip() if memory_file.exists() else ''
     refusals: list[str] = []
-    accepted = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[], done=None, why='')
+    accepted = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[], retire=[], done=None, why='')
     record: dict[str, Any] = dict(mode=mode, observation=observation, attempts=[], usage=usage)
     looks = 0
     attempt = 0
@@ -1900,7 +1934,7 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
             applied = apply(config, project, accepted, root=journal.parent)
             if accepted.get('memory'):
                 memory_file.write_text(accepted['memory']+'\n')
-            record.setdefault('applied', dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[]))
+            record.setdefault('applied', dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[], retire=[]))
             for key in applied:   # `refused` appears only when Terra refused a create; it is not in the template
                 record['applied'].setdefault(key, [])
                 record['applied'][key] += applied[key]
@@ -1909,11 +1943,11 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
             if looked:
                 observation['looked'] = looked
             observation['applied_so_far'] = {k: [str(x) for x in v] for k, v in record['applied'].items() if k in ('unknowns', 'tasks')}
-            accepted = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[], done=accepted.get('done'), why=accepted['why'])
+            accepted = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[], retire=[], done=accepted.get('done'), why=accepted['why'])
     applied = apply(config, project, accepted, root=journal.parent)
     if accepted.get('memory'):
         memory_file.write_text(accepted['memory']+'\n')
-    record.setdefault('applied', dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[]))
+    record.setdefault('applied', dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[], retire=[]))
     for key in applied:
         record['applied'].setdefault(key, [])
         record['applied'][key] += applied[key]
