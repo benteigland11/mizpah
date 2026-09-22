@@ -125,7 +125,7 @@
     "write",
     "edit"
   ],
-  "maximum_tool_argument_characters": 2000,
-  "maximum_write_characters": 1500,
-  "maximum_edit_characters": 1500
+  "maximum_tool_argument_characters": 24000,
+  "maximum_write_characters": 20000,
+  "maximum_edit_characters": 12000
 }

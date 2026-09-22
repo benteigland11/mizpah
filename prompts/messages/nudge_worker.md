@@ -1,2 +1,2 @@
-From the person running this loop:
+From the requestor running this loop:
 $text

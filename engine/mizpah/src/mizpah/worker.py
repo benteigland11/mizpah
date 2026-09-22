@@ -107,19 +107,14 @@ def load_config(path: str | Path) -> dict[str, Any]:
     harness['guidance_prefix'] = (prompts_dir/'messages'/'correction_worker.md').read_text()   # a template; the harness fills it
     # Scaffolding is method the host imposes; each piece is a toggle so a model that can orchestrate
     # can be run without it and compared. Verification guards are not toggles.
-    scaffolding = dict(bootstrap=True, small_edits=True, checkins=True, command_tools=True) | (config.get('scaffolding') or {})
+    scaffolding = dict(bootstrap=True, checkins=True, command_tools=True) | (config.get('scaffolding') or {})
+    scaffolding.pop('small_edits', None)   # retired: whole files for every model
     config['scaffolding'] = scaffolding
-    # Scaffolds are pieces the composer adds when their toggle is on, not sentences edited in the policy text.
-    if scaffolding['small_edits']:
-        piece = prompts_dir/'small_edits_worker.md'
-        if piece.exists():
-            config['worker_policy'] += '\n'+piece.read_text().strip()+'\n'
-    else:
-        # Whole files at once: the write/edit caps rise to a whole widget module. Small edits were a 60K-window
-        # rule (a truncated payload lost the model its place); a model with the room writes a coherent forty
-        # lines in one call where the rule took fourteen (pedal gym, 2026-09-20).
-        for key, limit in WHOLE_FILE_BOUNDS:
-            harness[key] = max(int(harness.get(key) or 0), limit)
+    # Whole files at once, for every model: the write/edit caps are at least a whole widget module. Small edits
+    # were a 60K-window rule (a truncated payload lost the model its place) and are retired (2026-09-21); a model
+    # writes a coherent forty lines in one call where the rule took fourteen (pedal gym, 2026-09-20).
+    for key, limit in WHOLE_FILE_BOUNDS:
+        harness[key] = max(int(harness.get(key) or 0), limit)
     config['controller_policy'] = _prompts.compose('controller', prompts_dir)   # one controller, one loop: no route/eval modes
     config['checkin_policy'] = _prompts.compose('reviewer', prompts_dir)
     config['playbook_store'] = str(Path(config['playbook_store']).expanduser())
@@ -2030,7 +2025,7 @@ def build_settings(config: dict[str, Any], assignment: str, reference: str,
         checkin_settings(config) if checkins else None,
         config['review_on_completion'], config['guidance_prefix'],
         maximum_generation_retries=config.get('maximum_generation_retries', 0),
-        write_existing_files=not config['mizpah']['scaffolding']['small_edits'], edit_requires_read=config['mizpah']['scaffolding']['small_edits'],
+        write_existing_files=True, edit_requires_read=False,
         command_tools=COMMAND_TOOLS if config['mizpah']['scaffolding'].get('command_tools', True) else (),
         final_tools=('done',),
         repeated_failure_rollover=config['mizpah'].get('repeated_failure_rollover'),
@@ -2291,8 +2286,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         # The payload bounds too: a session saved under the small-edit caps keeps rejecting whole files after the
         # config lifted them.
         bounds = {k: config.get(k) for k in ('maximum_tool_argument_characters', 'maximum_write_characters', 'maximum_edit_characters')}
-        bounds |= dict(write_existing_files=not config['mizpah']['scaffolding']['small_edits'],
-                       edit_requires_read=config['mizpah']['scaffolding']['small_edits'])
+        bounds |= dict(write_existing_files=True, edit_requires_read=False)
         if any(getattr(session.settings, k) != v for k, v in bounds.items()):
             session.settings = replace(session.settings, **bounds)
             session.state['settings'] = asdict(session.settings)

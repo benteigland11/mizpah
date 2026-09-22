@@ -134,14 +134,14 @@
     "write",
     "edit"
   ],
-  "maximum_tool_argument_characters": 2000,
-  "maximum_write_characters": 1500,
-  "maximum_edit_characters": 1500,
+  "maximum_tool_argument_characters": 24000,
+  "maximum_write_characters": 20000,
+  "maximum_edit_characters": 12000,
   "deputy": {
     "endpoint": {
       "base_url": "https://cli-chat-proxy.grok.com/v1",
       "completion_path": "/responses",
-      "timeout_seconds": 900,
+      "timeout_seconds": 180,
       "template_path": "/apply-template",
       "tokenize_path": "/tokenize",
       "headers": {
@@ -154,7 +154,7 @@
     },
     "generation": {
       "model": "grok-4.6",
-      "reasoning_effort": "high"
+      "reasoning_effort": "medium"
     },
     "provider": "subscription",
     "subscription": "xai_grok"
