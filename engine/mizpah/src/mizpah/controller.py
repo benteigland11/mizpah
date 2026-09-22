@@ -2019,6 +2019,9 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
         record['up_next'] = [t['id'] for t in ready_order(project, terra(config, project, 'route', 'next')['tasks'])]
     except Exception:  # noqa: BLE001 — a briefing detail never fails the step
         record['up_next'] = []
+    # When the decision was made: the app dated each decision by the close of the Nth work order, and one past the
+    # count had no date and sorted above every live worker (Agents tab, 2026-09-22).
+    record['at'] = time.time()
     journal.parent.mkdir(parents=True, exist_ok=True)
     with journal.open('a') as handle:
         handle.write(json.dumps(record)+'\n')
