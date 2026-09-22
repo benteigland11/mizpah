@@ -9,8 +9,7 @@
    "/home/Vinscen/mizpah",
    "/home/Vinscen/.local/share/uv/python",
    "/home/Vinscen/.local/share/cartograph/Widget_Library",
-   "/sys",
-   "/etc/fonts"
+   "/sys"
   ],
   "environment": {
    "PATH": "/home/Vinscen/mizpah/.venv/bin:/usr/bin",
