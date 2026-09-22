@@ -52,6 +52,11 @@ PROSE = ('The loop answers a question the only way allowed: a probe reads the so
          'reading is recorded on the map with the runs behind it. A number without a run does not exist.')
 
 
+DESIGN_NON_GOALS = ['No `framework`, `bundler` or `build step`: the page is HTML and CSS written by hand.',
+                    'No `external request`: no fonts, scripts or images from outside site/.',
+                    'No notes, plan or write-up files — the page is the deliverable.']
+
+
 def _page(project: Path, body: str, css: str, title: str = 'Sample') -> None:
     site = project/'site'
     site.mkdir(parents=True)
@@ -79,22 +84,16 @@ def layout(project: Path) -> None:
     css = '.wrap { margin: 0 auto; padding: 0 var(--sp-2); }\nsection { padding: var(--sp-4) 0; }\n'
     _page(project, body, css, 'Layout')
     needs = [
-        'Know the widest paragraph width in pixels as rendered at 1280 px',                                  # 1
-        'Know the widest paragraph width in characters as rendered at 1280 px (width over half the font size)',  # 2
-        'Know whether every <p> on the page sits inside one shared container element with a max-width',    # 3
-        'Know the left gutter in pixels (distance from the viewport edge to the prose) as rendered at 375 px',   # 4
-        'Know the left gutter in pixels as rendered at 1280 px',                                              # 5
-        'Know whether the prose is horizontally centred at 1280 px (left and right gutters within 2 px of each other)',  # 6
+        "The prose sits in one column a reader can follow: every section's text bounded to a comfortable measure by the same container, not by chance.",
+        'The column survives a phone: a side gutter holds at any width, and nothing runs to the edge of the glass.',
+        'It is centred and stays centred — a designer opening it at two widths would not reach for the CSS.',
     ]
     deliverables = [
-        'site/style.css changed so that one container class bounds every section\'s prose to a measure around 70 '
-        'characters and keeps a side gutter at every viewport width; site/index.html changed only where a section '
-        'lacks the container',
-        'report/layout.md: one row per need (1 to 6) with the reading before and after the change and the target from content/targets.json',
+        "site/style.css and site/index.html: one container class that bounds every section's prose, applied where a section lacks it",
     ]
     brief(project, 'Layout: one column that holds', 'Make the page a single bounded column: every section\'s prose '
           'inside one container with a measure, gutters that survive a phone width, and prove it by measuring the '
-          'rendered page before and after.', needs, deliverables, budget=150, notes=RENDER_NOTE)
+          'rendered page before and after.', needs, deliverables, budget=150, notes=RENDER_NOTE, non_goals=DESIGN_NON_GOALS)
     _key(project, 'layout', {'2': '<=80', '3': True, '4': '>=16', '5': '>=16', '6': True})
 
 
@@ -109,20 +108,15 @@ def type_(project: Path) -> None:
            'h1, h2, h3 { font-size: 20px; font-weight: 700; }\nsection { padding: var(--sp-4) 0; }\n')
     _page(project, body, css, 'Type')
     needs = [
-        'Know the number of <p> elements outside the hero whose rendered text-align is not left (or start)',   # 1
-        'Know whether the hero heading is centred as rendered',                                                 # 2
-        'Know the h1 font size in pixels as rendered',                                                          # 3
-        'Know the ratio of the h1 font size to the body paragraph font size as rendered',                      # 4
-        'Know the ratio of the h2 font size to the h3 font size as rendered',                                  # 5
-        'Know the mean paragraph line length in characters as rendered at 1280 px',                            # 6
+        'The type has one scale a reader can feel: sizes that step, headings that lead, nothing set by accident.',
+        'The alignment says what it means: what is centred is centred on purpose, and running prose is not.',
+        "The line length is readable at both widths, and the page's faces are the ones the brand names.",
     ]
     deliverables = [
-        'site/style.css changed so that prose is left-aligned outside the hero, the hero stays centred, and headings '
-        'form a scale (h1 clearly larger than h2, h2 than h3, body the base) with the measure kept',
-        'report/type.md: one row per need (1 to 6) with the reading before and after the change and the target from content/targets.json',
+        'site/style.css and site/index.html: the scale and alignment applied across the page',
     ]
     brief(project, 'Type: alignment and scale', 'Give the page a typographic scale and the right alignment per block, '
-          'and prove it by measuring the rendered page before and after.', needs, deliverables, budget=150, notes=RENDER_NOTE)
+          'and prove it by measuring the rendered page before and after.', needs, deliverables, budget=150, notes=RENDER_NOTE, non_goals=DESIGN_NON_GOALS)
     _key(project, 'type', {'1': 0, '2': True, '3': '>=36', '4': '>=2', '5': '>=1.2', '6': '45..90'})
 
 
@@ -137,19 +131,15 @@ def rhythm(project: Path) -> None:
            'section { padding: 37px 0 11px; }\nh1 { margin: 0 0 9px; }\nh2 { margin: 23px 0 5px; }\np { margin: 0 0 13px; }\n')
     _page(project, body, css, 'Rhythm')
     needs = [
-        'Know the number of distinct vertical gaps in pixels between consecutive text blocks (headings and paragraphs) as rendered at 1280 px',  # 1
-        'Know the share of those vertical gaps that are whole multiples of the base unit 8 px',                # 2
-        'Know the largest vertical gap in pixels between consecutive text blocks',                             # 3
-        'Know the number of distinct margin and padding values site/style.css declares',                       # 4
-        'Know whether every margin and padding value in site/style.css is a var(--sp-*) token or zero',        # 5
+        'The vertical space comes from one spacing scale, not from a scatter of values a reader would feel as noise.',
+        'The rhythm reads as deliberate: space between sections larger than space inside them, headings closer to what they head than to what came before.',
+        'It holds at both widths — the page breathes the same way on a phone as on a desk.',
     ]
     deliverables = [
-        'site/style.css changed so that every vertical gap comes from the spacing scale (var(--sp-*) tokens on an '
-        '8 px base) and section gaps are visibly larger than paragraph gaps',
-        'report/rhythm.md: one row per need (1 to 5) with the reading before and after the change and the target from content/targets.json',
+        "site/style.css: the spacing scale applied as the page's vertical rhythm",
     ]
     brief(project, 'Rhythm: the scale applied', 'Make the vertical rhythm come from the spacing scale, and prove it by '
-          'measuring the gaps on the rendered page before and after.', needs, deliverables, budget=150, notes=RENDER_NOTE)
+          'measuring the gaps on the rendered page before and after.', needs, deliverables, budget=150, notes=RENDER_NOTE, non_goals=DESIGN_NON_GOALS)
     _key(project, 'rhythm', {'1': '<=6', '2': '>=0.9', '3': '>=48', '4': '<=8', '5': True})
 
 
@@ -166,20 +156,15 @@ def components(project: Path) -> None:
            '.steps .n { font-weight: 700; margin-right: 4px; }\n')
     _page(project, body, css, 'Components')
     needs = [
-        'Know the rendered height in pixels of the primary call to action',                                   # 1
-        'Know the rendered horizontal padding in pixels of the primary call to action',                        # 2
-        'Know whether the call to action changes its background or outline on :hover or :focus-visible per the stylesheet',  # 3
-        'Know the contrast ratio of the call to action text against its background',                           # 4
-        'Know the number of visible list markers (browser markers plus number spans) per <li> in the steps list as rendered',  # 5
-        'Know whether every <li> in the steps list renders exactly one number',                                # 6
+        'The call to action is a button a thumb can hit and an eye can find, not a link pretending to be one.',
+        'The steps read as a list: one item per step, marked once, numbered by the list itself.',
+        "Both hold their shape at a phone width and against the page's own colours.",
     ]
     deliverables = [
-        'site/style.css changed so the call to action is a real button (a box at least 44 px tall with horizontal '
-        'padding, hover and focus-visible states, contrast kept) and the steps list shows one number per item',
-        'report/components.md: one row per need (1 to 6) with the reading before and after the change and the target from content/targets.json',
+        'site/style.css and site/index.html: the call to action as a button and the steps as a list',
     ]
     brief(project, 'Components: a button and a list', 'Make the call to action a button and the steps list a list, '
-          'and prove both by measuring the rendered page before and after.', needs, deliverables, budget=150, notes=RENDER_NOTE)
+          'and prove both by measuring the rendered page before and after.', needs, deliverables, budget=150, notes=RENDER_NOTE, non_goals=DESIGN_NON_GOALS)
     _key(project, 'components', {'1': '>=44', '2': '>=16', '3': True, '4': '>=4.5', '5': 1, '6': True})
 
 
@@ -197,21 +182,16 @@ def tonality(project: Path) -> None:
            '.tag { background: var(--accent); color: #f0a080; padding: 2px 6px; }\n')
     _page(project, body, css, 'Tonality')
     needs = [
-        'Know the minimum contrast ratio over every rendered text element against its effective background',   # 1
-        'Know the number of text/background pairs below 4.5:1 as rendered',                                    # 2
-        'Know the number of distinct hues (rounded to 15 degrees) used for text and backgrounds other than greys',  # 3
-        'Know the contrast ratio of the call to action text against its background',                           # 4
-        'Know the number of distinct background colors the rendered page uses',                                # 5
-        'Know whether inline links use the same hue as the call to action',                                    # 6
+        'The page has a tonal system: a surface, layers that sit on it, and one accent that means one thing.',
+        'Text is legible on every surface it lands on — a reader with ordinary eyes never has to lean in.',
+        'The accent is spent where attention is wanted and nowhere else.',
     ]
     deliverables = [
-        'site/style.css changed so that every text/background pair meets 4.5:1, there is exactly one accent hue used '
-        'for links, the call to action and small emphasis, and surfaces form at most three layers',
-        'report/tonality.md: one row per need (1 to 6) with the reading before and after the change and the target from content/targets.json',
+        'site/style.css: the surfaces, layers and single accent applied across the page',
     ]
     brief(project, 'Tonality: layers and one accent', 'Give the page a tonal system — surface layers, one accent, '
           'contrast everywhere — and prove it by measuring every pair on the rendered page before and after.',
-          needs, deliverables, budget=150, notes=RENDER_NOTE)
+          needs, deliverables, budget=150, notes=RENDER_NOTE, non_goals=DESIGN_NON_GOALS)
     _key(project, 'tonality', {'1': '>=4.5', '2': 0, '3': '<=1', '4': '>=4.5', '5': '<=3', '6': True})
 
 
