@@ -607,9 +607,36 @@ def main() -> None:
         root.mkdir(parents=True, exist_ok=True)
         with (root/controller.OPERATOR_NOTES).open('a') as handle:
             handle.write(json.dumps(dict(at=time.time(), text=args.note))+'\n')
+    root.mkdir(parents=True, exist_ok=True)
+    lock = session_lock(root)
+    if lock is None:
+        # Waking a loop is safe to repeat: a decision, a note or a resume that finds one running leaves what it
+        # carried for that loop's next controller step and steps aside.
+        print(json.dumps(dict(status='already_running', root=str(root)), indent=2))
+        return
     result = run(worker.load_config(args.config), args.project, root, max_cycles=args.max_cycles,
                  max_tasks=args.max_tasks, deadline_hours=args.deadline_hours)
     print(json.dumps(result, indent=2))
+
+
+LOCK_FILE = 'loop.lock'
+
+
+def session_lock(root: Path) -> int | None:
+    """One loop per session: an exclusive lock on the session folder, held for the life of the process and dropped
+    by the OS when it ends, however it ends. None when another loop holds it. Two accepts seconds apart each resumed
+    a loop — the app's view had not yet seen the first one's heartbeat — and nothing stopped a second controller
+    deciding beside the first (2026-09-22)."""
+    import fcntl
+    fd = os.open(root/LOCK_FILE, os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        return None
+    os.ftruncate(fd, 0)
+    os.write(fd, str(os.getpid()).encode())
+    return fd
 
 
 if __name__ == '__main__':
