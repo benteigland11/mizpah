@@ -15,7 +15,10 @@
       "PATH": "/home/Vinscen/mizpah/.venv/bin",
       "WIDGET_LIBRARY_PATH": "/home/Vinscen/.local/share/cartograph/Widget_Library"
     },
-    "share_network": true
+    "share_network": true,
+    "scratch_dirs": [
+      "scratch"
+    ]
   },
   "turn_budget": {
     "low": 60,

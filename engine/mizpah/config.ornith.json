@@ -36,7 +36,10 @@
       "unshare": "/home/linuxbrew/.linuxbrew/bin/unshare",
       "nsenter": "/home/linuxbrew/.linuxbrew/bin/nsenter",
       "socat": "/usr/bin/socat"
-    }
+    },
+    "scratch_dirs": [
+      "scratch"
+    ]
   },
   "turn_budget": {
     "low": 60,

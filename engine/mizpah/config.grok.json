@@ -1,68 +1,71 @@
 {
- "prompts_dir": "../../prompts",
- "harness_config": "../harness/tools/config.grok.json",
- "terra": "/home/Vinscen/mizpah/.venv/bin/terra",
- "playbook": "/home/Vinscen/mizpah/.venv/bin/playbook",
- "playbook_store": "~/.local/share/playbook/procedures",
- "sandbox": {
-  "read_only_binds": [
-   "/home/Vinscen/mizpah",
-   "/home/Vinscen/.local/share/uv/python",
-   "/home/Vinscen/.local/share/cartograph/Widget_Library",
-   "/sys"
-  ],
-  "environment": {
-   "PATH": "/home/Vinscen/mizpah/.venv/bin:/usr/bin",
-   "WIDGET_LIBRARY_PATH": "/home/Vinscen/.local/share/cartograph/Widget_Library",
-   "HOME": "/work"
+  "prompts_dir": "../../prompts",
+  "harness_config": "../harness/tools/config.grok.json",
+  "terra": "/home/Vinscen/mizpah/.venv/bin/terra",
+  "playbook": "/home/Vinscen/mizpah/.venv/bin/playbook",
+  "playbook_store": "~/.local/share/playbook/procedures",
+  "sandbox": {
+    "read_only_binds": [
+      "/home/Vinscen/mizpah",
+      "/home/Vinscen/.local/share/uv/python",
+      "/home/Vinscen/.local/share/cartograph/Widget_Library",
+      "/sys"
+    ],
+    "environment": {
+      "PATH": "/home/Vinscen/mizpah/.venv/bin:/usr/bin",
+      "WIDGET_LIBRARY_PATH": "/home/Vinscen/.local/share/cartograph/Widget_Library",
+      "HOME": "/work"
+    },
+    "share_network": true,
+    "services": {
+      "memory_bytes": 2147483648,
+      "processes": 256,
+      "lifetime_seconds": 21600,
+      "maximum_services": 4,
+      "wait_seconds": 1800
+    },
+    "refused_paths": [
+      "/home/Vinscen/mizpah/engine",
+      "/home/Vinscen/mizpah/.venv/lib"
+    ],
+    "network": {
+      "allowed_domains": [
+        "pypi.org",
+        "files.pythonhosted.org"
+      ],
+      "proxy_port": 3128,
+      "unshare": "/home/linuxbrew/.linuxbrew/bin/unshare",
+      "nsenter": "/home/linuxbrew/.linuxbrew/bin/nsenter",
+      "socat": "/usr/bin/socat"
+    },
+    "scratch_dirs": [
+      "scratch"
+    ]
   },
-  "share_network": true,
-  "services": {
-   "memory_bytes": 2147483648,
-   "processes": 256,
-   "lifetime_seconds": 21600,
-   "maximum_services": 4,
-   "wait_seconds": 1800
+  "turn_budget": {
+    "low": 60,
+    "medium": 120,
+    "high": 240
   },
-  "refused_paths": [
-   "/home/Vinscen/mizpah/engine",
-   "/home/Vinscen/mizpah/.venv/lib"
-  ],
-  "network": {
-   "allowed_domains": [
-    "pypi.org",
-    "files.pythonhosted.org"
-   ],
-   "proxy_port": 3128,
-   "unshare": "/home/linuxbrew/.linuxbrew/bin/unshare",
-   "nsenter": "/home/linuxbrew/.linuxbrew/bin/nsenter",
-   "socat": "/usr/bin/socat"
-  }
- },
- "turn_budget": {
-  "low": 60,
-  "medium": 120,
-  "high": 240
- },
- "gate_rounds": 3,
- "agent": "mizpah-worker",
- "repeated_failure_rollover": 3,
- "repeated_success_rollover": 5,
- "cartograph": "/home/Vinscen/mizpah/.venv/bin/cartograph",
- "widget_library": "~/.local/share/cartograph/Widget_Library",
- "turn_cap": 4000,
- "controller_output_tokens": 8192,
- "checkin_output_tokens": 2048,
- "scaffolding": {
-  "checkins": true,
-  "small_edits": false
- },
- "ops": {
-  "model_unit": null,
-  "restart_after_seconds": 60,
-  "restart_cooldown_seconds": 600,
-  "disk_high_percent": 92,
-  "notify_command": "notify-send \"$MIZPAH_TITLE\" \"$MIZPAH_BODY\""
- },
- "mizpah": {}
+  "gate_rounds": 3,
+  "agent": "mizpah-worker",
+  "repeated_failure_rollover": 3,
+  "repeated_success_rollover": 5,
+  "cartograph": "/home/Vinscen/mizpah/.venv/bin/cartograph",
+  "widget_library": "~/.local/share/cartograph/Widget_Library",
+  "turn_cap": 4000,
+  "controller_output_tokens": 8192,
+  "checkin_output_tokens": 2048,
+  "scaffolding": {
+    "checkins": true,
+    "small_edits": false
+  },
+  "ops": {
+    "model_unit": null,
+    "restart_after_seconds": 60,
+    "restart_cooldown_seconds": 600,
+    "disk_high_percent": 92,
+    "notify_command": "notify-send \"$MIZPAH_TITLE\" \"$MIZPAH_BODY\""
+  },
+  "mizpah": {}
 }

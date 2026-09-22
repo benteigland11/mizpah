@@ -59,6 +59,13 @@ def cache_dirs(config: dict[str, Any]) -> tuple[str, ...]:
     return tuple(config['mizpah']['sandbox'].get('cache_dirs') or ())
 
 
+def scratch_dirs(config: dict[str, Any]) -> tuple[str, ...]:
+    """The worker's scratch inside /work: host-backed, uncapped, never packed. `workspace_bytes` used to
+    size the sandbox's whole writable disk as well as the evidence a tar may carry; a media build needs a
+    great deal of the first and none of the second."""
+    return tuple(config['mizpah']['sandbox'].get('scratch_dirs') or ())
+
+
 def evidence(session: Any) -> bytes:
     """The workspace as tar bytes whichever mode the shell runs in: what harvest and the checklists read."""
     snapshot = getattr(session, 'workspace_snapshot', None)
@@ -1141,10 +1148,12 @@ def remeasure(config: dict[str, Any], project: Path, root: Path, known_ids: list
         scratch_root=str(scratch), limits=ShellLimits(**config['shell']['limits']),
         read_only_binds=tuple(sandbox['read_only_binds']), environment=dict(sandbox['environment'], **layout.terra_env(project)),
         share_network=bool(sandbox.get('share_network', False)) and network is None, network=network,
-        refused_paths=tuple(sandbox.get('refused_paths') or ()), refused_patterns=REFUSED_PATTERNS) | bound)))
+        refused_paths=tuple(sandbox.get('refused_paths') or ()), refused_patterns=REFUSED_PATTERNS,
+        scratch_dirs=scratch_dirs(config)) | bound)))
     try:
         # Bind mode: the evidence tree without the caches; the caches are bound read-only by the detached run.
-        workspace = pack_workspace(project, exclude=cache_dirs(config)) if bind_mode(config) else pack_workspace(project)
+        workspace = pack_workspace(project, exclude=cache_dirs(config)+scratch_dirs(config)) if bind_mode(config) \
+            else pack_workspace(project, exclude=scratch_dirs(config))
         for known_id in known_ids:
             known = read_known(project, known_id)
             if known is None:
@@ -1211,10 +1220,12 @@ def refresh_stale(config: dict[str, Any], project: Path, root: Path) -> dict[str
         scratch_root=str(scratch), limits=ShellLimits(**config['shell']['limits']),
         read_only_binds=tuple(sandbox['read_only_binds']), environment=dict(sandbox['environment'], **layout.terra_env(project)),
         share_network=bool(sandbox.get('share_network', False)) and network is None, network=network,
-        refused_paths=tuple(sandbox.get('refused_paths') or ()), refused_patterns=REFUSED_PATTERNS) | bound)))
+        refused_paths=tuple(sandbox.get('refused_paths') or ()), refused_patterns=REFUSED_PATTERNS,
+        scratch_dirs=scratch_dirs(config)) | bound)))
     state_dir = layout.dirname(project)
     try:
-        workspace = pack_workspace(project, exclude=cache_dirs(config)) if bind_mode(config) else pack_workspace(project)
+        workspace = pack_workspace(project, exclude=cache_dirs(config)+scratch_dirs(config)) if bind_mode(config) \
+            else pack_workspace(project, exclude=scratch_dirs(config))
         for row in stale:
             known_id = str(row.get('id'))
             record = row.get('record') or {}
@@ -1716,7 +1727,8 @@ def bindings(config: dict[str, Any], root: Path, map_id: str, checkins: bool | N
                                                  read_only_binds=tuple(sandbox['read_only_binds']), environment=environment,
                                                  share_network=bool(sandbox.get('share_network', False)), services=services,
                                                  refused_paths=tuple(sandbox.get('refused_paths') or ()),
-                                                 refused_patterns=refused_patterns(config), network=network) | bound))
+                                                 refused_patterns=refused_patterns(config), network=network,
+                                                 scratch_dirs=scratch_dirs(config)) | bound))
     return worker, checkin, SandboxedShell(shell)
 
 
@@ -2297,7 +2309,8 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         holder['shell'] = shell
         reference = render_reference(project, task, unknowns)
         # Bind mode: only the state directories are packed in; the tree is the project directory itself.
-        initial = pack_workspace(project, store, only=state_dirs(project)) if bind_mode(config) else pack_workspace(project, store)
+        initial = pack_workspace(project, store, only=state_dirs(project)) if bind_mode(config) \
+            else pack_workspace(project, store, exclude=scratch_dirs(config))
         # The store as the task received it, for three-way merges at harvest (another task may improve the
         # same procedure meanwhile; without a base the last harvest wrote over the first).
         base_dir = root/PLAYBOOK_BASE
@@ -2402,7 +2415,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         if not (root/REFLECTED_MARK).exists():
             from . import prompts as _prompts
             (root/REFLECTED_MARK).write_text(str(turns(status)))
-            session.continue_with(_prompts.message('reflect_worker'), label='gate green: record the method')
+            session.continue_with(_prompts.message('reflect_green_worker'), label='gate green: record the method')
             status = run_through_outages(session, config, root, maximum_worker_turns=max(1, budget-turns(status)))
             session.prune_workspaces()
         widgets = harvest_widgets(evidence(session), root, config, project)

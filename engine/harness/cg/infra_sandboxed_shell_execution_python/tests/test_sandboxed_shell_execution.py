@@ -96,6 +96,22 @@ def test_launch_contract_adds_read_only_binds_and_environment(tmp_path):
                     environment={'A=B': 'x'})
 
 
+def test_a_read_only_bind_inside_the_workspace_shadows_it_under_work(tmp_path):
+    workspace = tmp_path/'gyms'
+    issued = workspace/'issued-project'
+    issued.mkdir(parents=True)
+    (workspace/'draft').mkdir()
+    config = ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits(),
+                         read_only_binds=(str(issued), '/opt/toolchain'), workspace_dir=str(workspace))
+    argv = SandboxedShell(config).command_argv(str(tmp_path), 'example-unit')
+    rw = argv.index('--bind')
+    assert argv[rw+1:rw+3] == [str(workspace), '/work']
+    shadow = argv.index('/work/issued-project')
+    assert argv[shadow-2:shadow] == ['--ro-bind', str(issued)]
+    assert shadow > rw, 'the read-only bind must come after the writable one to shadow it'
+    assert '/work/draft' not in argv and '/work/opt' not in argv
+
+
 def test_launch_contract_keeps_the_network_only_when_asked(tmp_path):
     base = ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits())
     assert '--unshare-all' in SandboxedShell(base).command_argv(str(tmp_path), 'example-unit')

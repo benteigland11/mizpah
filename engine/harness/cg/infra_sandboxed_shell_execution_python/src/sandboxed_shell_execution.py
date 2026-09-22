@@ -158,6 +158,13 @@ class ShellConfig:
     # tar given to run() and packed back into the result — so whatever guards the host applies to them on
     # write-back (a map's entitlements) hold exactly as in snapshot mode. Everything else is the directory.
     state_dirs: tuple[str, ...] = ()
+    # The worker's scratch: relative directory names under /work that are host-backed and never travel. A
+    # command's bulk intermediates — rendered frames, an unpacked corpus, a build tree — live here, on real
+    # disk with no cap, and are not tarred back out, so they never count against `workspace_bytes` and never
+    # reach a harvest, a re-measurement or a model. `workspace_bytes` sized the sandbox's whole writable disk
+    # AND the evidence a tar may carry; a video task needs a great deal of the first and none of the second,
+    # and one number for both cost follow-the-score a day of OOMs and cap overruns (2026-09-22).
+    scratch_dirs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if any(not Path(value).is_absolute() for value in
@@ -297,12 +304,14 @@ class DirectoryWorkspace:
     tree (caches and ignored directories left out) for a harvest or a re-measurement."""
 
     def __init__(self, root: str | Path, *, cache_dirs: tuple[str, ...] = (), snapshot_ignore: tuple[str, ...] = (),
-                 state_dirs: tuple[str, ...] = (), state: bytes = b'', limits: Any = None) -> None:
+                 state_dirs: tuple[str, ...] = (), state: bytes = b'', limits: Any = None,
+                 scratch_dirs: tuple[str, ...] = ()) -> None:
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.cache_dirs = tuple(_name(c) for c in cache_dirs)
         self.snapshot_ignore = tuple(snapshot_ignore)
         self.state_dirs = tuple(_name(d) for d in state_dirs)
+        self.scratch_dirs = tuple(_name(d) for d in scratch_dirs)
         self.state = state          # the snapshot-managed part (tar bytes), as of the last command
         self.limits = limits
 
@@ -312,6 +321,8 @@ class DirectoryWorkspace:
 
     def _excluded(self, relative: PurePosixPath) -> bool:
         parts = relative.parts
+        if parts and parts[0] in self.scratch_dirs:
+            return True
         # A hidden tree at the root is not evidence: the state directories are carried separately (they are
         # packed, not walked), and everything else hidden there is the worker's own scratch — a build tree, a
         # cache, a repository's internals. Seven hundred megabytes of video frames under one (follow-the-score,
@@ -324,7 +335,8 @@ class DirectoryWorkspace:
 
     def with_state(self, state: bytes) -> DirectoryWorkspace:
         return DirectoryWorkspace(self.root, cache_dirs=self.cache_dirs, snapshot_ignore=self.snapshot_ignore,
-                                  state_dirs=self.state_dirs, state=state, limits=self.limits)
+                                  state_dirs=self.state_dirs, state=state, limits=self.limits,
+                                  scratch_dirs=self.scratch_dirs)
 
     def _state_limits(self) -> tuple[int, int]:
         return ((self.limits.workspace_bytes, self.limits.max_files) if self.limits is not None else (10**9, 10**6))
@@ -773,14 +785,26 @@ class SandboxedShell:
                     argv += ['--ro-bind', str(source), WORKSPACE_MOUNT+'/'+source.relative_to(root).as_posix()]
             for state in config.state_dirs:
                 argv += ['--size', str(limits.workspace_bytes), '--tmpfs', WORKSPACE_MOUNT+'/'+_name(state)]
-            return argv
-        argv = ['--size', str(limits.workspace_bytes), '--tmpfs', WORKSPACE_MOUNT]
+            return argv+self._scratch_argv()
+        argv = ['--size', str(limits.workspace_bytes), '--tmpfs', WORKSPACE_MOUNT]+self._scratch_argv()
         if config.workspace_dir and detached:
             root = Path(config.workspace_dir).resolve()
             for cache in config.cache_dirs:
                 source = root/_name(cache)
                 if source.is_dir():
                     argv += ['--ro-bind', str(source), WORKSPACE_MOUNT+'/'+_name(cache)]
+        return argv
+
+    def _scratch_argv(self) -> list[str]:
+        """Host-backed scratch under /work: real disk, no cap, the same directory across commands (a
+        tmpfs would be RAM and would empty between them, which is why a chunked render had to be
+        re-engineered around a 256 MB disk)."""
+        config = self.config
+        argv: list[str] = []
+        for name in config.scratch_dirs:
+            source = Path(config.scratch_root)/'workspace'/_name(name)
+            source.mkdir(parents=True, exist_ok=True)
+            argv += ['--bind', str(source), WORKSPACE_MOUNT+'/'+_name(name)]
         return argv
 
     def command_argv(self, input_dir: str, unit: str, *, detached: bool | None = None) -> list[str]:
@@ -846,7 +870,8 @@ class SandboxedShell:
             return None
         if getattr(self, '_directory', None) is None:
             self._directory = DirectoryWorkspace(config.workspace_dir, cache_dirs=config.cache_dirs, snapshot_ignore=config.snapshot_ignore,
-                                                 state_dirs=config.state_dirs, limits=config.limits)
+                                                 state_dirs=config.state_dirs, limits=config.limits,
+                                                 scratch_dirs=config.scratch_dirs)
         return self._directory
 
     def snapshot(self) -> bytes:
@@ -905,7 +930,8 @@ class SandboxedShell:
             (input_dir/'workspace.tar').write_bytes(workspace)
             payload = dict(command=command, timeout=timeout, limits=limits.__dict__, shell='/usr/bin/'+config.shell_name,
                            capture_id=uuid4().hex, workspace_path='/input/workspace.tar',
-                           snapshot_ignore=list(config.snapshot_ignore), bind=bound,
+                           snapshot_ignore=list(config.snapshot_ignore)+[_name(d) for d in config.scratch_dirs],
+                           bind=bound,
                            state_dirs=[_name(d) for d in config.state_dirs] if bound else [])
             (input_dir/'request.json').write_text(json.dumps(payload))
             self._detached = detached
