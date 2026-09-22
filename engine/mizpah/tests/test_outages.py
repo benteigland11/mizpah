@@ -34,7 +34,7 @@ def test_controller_outage_is_recorded_at_the_run_root(tmp_path: Path, monkeypat
     from cg.backend_persistent_model_session_python.src.persistent_model_session import ModelTransportError
     calls = []
 
-    def decide(client, config, system, user):
+    def decide(client, config, system, user, **_):
         calls.append(1)
         if len(calls) == 1:
             raise ModelTransportError('gateway gone')

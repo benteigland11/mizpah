@@ -247,13 +247,13 @@ def test_a_task_may_continue_a_workspace_the_loop_holds(gym: Path, tmp_path: Pat
                            walks=['midi-piano-voicing-melody'], widgets=['data_music_x_python'], walks_open=[])]
     observation = controller.observe(CONFIG, gym) | dict(workspaces=spaces)
     text = controller.render_observation(observation, 'route')
-    assert 'Worker workspaces this loop holds' in text and 'walked: midi-piano-voicing-melody' in text
+    assert 'Past work orders and what they left on disk' in text and 'walked: midi-piano-voicing-melody' in text
     (old/'result.json').write_text(json.dumps(dict(verdict='blocked_by_worker', turns=30,
         walks_open=[dict(procedure='midi-pedal-per-harmony', file='.playbook/open/midi-pedal-per-harmony--x.md', steps=4, unticked=4, next='Apply separated sustain')])))
     spaces = controller.task_workspaces(root)
     assert spaces[0]['walks_open'] == [dict(procedure='midi-pedal-per-harmony', unticked=4, next='Apply separated sustain', continues=0, next_from=0)]
     text = controller.render_observation(observation | dict(workspaces=spaces), 'route')
-    assert 'walks left: midi-pedal-per-harmony (4 unticked' in text and 'one walk per work order' in text
+    assert 'walks left: midi-pedal-per-harmony (4 unticked)' in text
     (old/'result.json').write_text(json.dumps(dict(verdict='complete', turns=30)))
     decision = dict(unknowns=[dict(id='piece_mid_built', cites='deliverable:1', type='boolean', claim='`piece.mid` exists and parses',
                                    evidence_needed='parse it'),
@@ -377,8 +377,8 @@ def test_a_task_names_the_walk_its_worker_opens(gym: Path, tmp_path: Path, monke
     controller.apply(CONFIG, gym, accepted)
     task = next(t for t in terra(gym, 'route', 'status')['tasks'] if t['id'] == 'build_piece_mid')
     assert 'walk:compose-piano@0' in task['acceptance'] and worker.assigned_walk(task) == ('compose-piano', 0)
-    text = controller.render_observation(observation, 'route')
-    assert 'reach 1 steps through 1 procedure(s) = 1 walk(s)' in text and '"walk": "<procedure id>"' in text
+    # The sitrep no longer carries the methods section (the controller does not use the playbook; whether it names
+    # a walk is undecided) — the guard still accepts a walk when one is named.
 
 
 def test_a_next_walk_without_a_first_starts_from_zero(gym: Path, tmp_path: Path) -> None:
@@ -396,3 +396,32 @@ def test_a_next_walk_without_a_first_starts_from_zero(gym: Path, tmp_path: Path)
     accepted, _ = controller.guard(decision, observation, gym)
     by = {t['id']: t.get('walk_from') for t in accepted['tasks']}
     assert by.get('render_part1') == 0
+
+
+def test_the_controller_reads_with_its_verbs_then_decides(gym: Path, tmp_path: Path) -> None:
+    """decide() runs the read-only verbs the model asks for, appends their results, and ends on the reply that
+    carries no tool call; every call is kept for the journal. A verb that writes is refused."""
+    (gym/'notes.txt').write_text('line one\nline two\n')
+    replies = [
+        dict(usage=dict(prompt_tokens=1, completion_tokens=1), choices=[dict(finish_reason='tool_calls', message=dict(role='assistant', content='', tool_calls=[
+            dict(id='c1', type='function', function=dict(name='read', arguments=json.dumps(dict(path='notes.txt')))),
+            dict(id='c2', type='function', function=dict(name='terra', arguments=json.dumps(dict(args='route cancel x --reason y')))),
+            dict(id='c3', type='function', function=dict(name='terra', arguments=json.dumps(dict(args='route status')))),
+        ]))]),
+        dict(usage=dict(prompt_tokens=1, completion_tokens=1), choices=[dict(finish_reason='stop', message=dict(role='assistant', content='{"unknowns": [], "tasks": [], "memory": "read the notes; nothing owed", "why": "x"}'))]),
+    ]
+    seen: list[dict] = []
+
+    class Client:
+        def complete(self, payload, purpose):
+            seen.append(payload)
+            return replies.pop(0)
+
+    decision, raw = controller.decide(Client(), dict(CONFIG, controller=dict(generation={})), 'sys', 'user', project=gym, root=tmp_path)
+    assert decision['memory'] == 'read the notes; nothing owed'
+    calls = controller._last_tools[0]
+    assert [c['name'] for c in calls] == ['read', 'terra', 'terra'] and calls[1]['refused'] and not calls[2]['refused']
+    tool_messages = [m for m in seen[1]['messages'] if m.get('role') == 'tool']
+    assert '     1\tline one' in tool_messages[0]['content'] and tool_messages[1]['content'].startswith('refused')
+    assert 'tools' in seen[0]
+

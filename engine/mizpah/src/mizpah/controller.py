@@ -365,6 +365,9 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
             lines.append('  task '+str(d['task'])+' ('+', '.join(d['unknowns'])+'): '+d['correction']
                          +(' — evidence: '+d['evidence'] if d['evidence'] else ''))
         lines.append('')
+    if observation.get('memory'):
+        lines.append('# Your notes from last step (memory.md — what you were doing; the map is what is true)')
+        lines += ['  '+ln for ln in str(observation['memory']).splitlines()]
     lines += ['# Brief (reference, v'+str(brief.get('version'))+', '+str(brief.get('status'))+')',
              'Mission: '+str(brief.get('mission'))]
     lines += phases.render(brief)
@@ -425,18 +428,6 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
     lines += observation.get('prior_art') or []
     lines.append('')
     lines += briefs.render(observation.get('related_briefs') or [])
-    if observation.get('methods'):
-        lines.append('Methods in the playbook near this brief (reach = steps through the procedures a method links; a walk is '
-                     'at most 50 steps, so reach says how many work orders the method is. gravity = how many procedures run '
-                     'this one: a method the library leans on has gravity, a tune one gym wrote for itself has none):')
-        for m in observation['methods']:
-            lines.append('  `'+m['id']+'` — '+m['title']+' · reach '+str(m.get('steps'))+' steps through '+str(m.get('procedures'))
-                         +' procedure(s) = '+str(m.get('walks'))+' walk(s) · gravity '+str(m.get('gravity', 0)))
-        lines.append('A task names the walk its worker opens: "walk": "<procedure id>" (and "walk_from": N for the next '
-                     'walk of a long method, the 0-based step the previous walk stopped at — the worker\'s result says '
-                     'where). The worker opens what it is handed and searches only when nothing was named or the walk '
-                     'does not fit; a method of two walks is two tasks on one workspace (the second continue_from the '
-                     'first, walk_from set), priced as two low tasks, not one guess.')
     lines.append('# Map (state)')
     lines.append('Gate: '+('green' if (observation.get('gate') or {}).get('ok') else 'red')+
                  ''.join('\n  - '+str(v.get('why') or v.get('kind')) for v in (observation.get('gate') or {}).get('violations') or []))
@@ -512,28 +503,13 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
                       (' (blocked: '+reason+')' if reason else '')))
     worker_blocked = [t for t in observation['tasks'] if t not in finished and t.get('blocked_reason')
                       and not str(t['blocked_reason']).startswith(DRIVER_BLOCK)]
-    if worker_blocked:
-        lines.append('A worker that blocked saying the artifact cannot satisfy the claim as it is has found a defect in the '
-                     'artifact, not in the reading: the answer is a repair task that lists the artifact\'s own unknown (its '
-                     'builder\'s id, reopened) with the defect in its title, never the same validation routed again — a '
-                     'validation re-routed onto an unchanged artifact blocks again for the same reason.')
     if observation.get('workspaces'):
-        lines.append('Worker workspaces this loop holds (a task may continue one — "continue_from": "<task>" — so its worker '
-                     'resumes with its probes, its walk and its widgets in hand instead of starting from nothing):')
+        lines.append('Past work orders and what they left on disk (a fresh worker finds it there; nothing of their windows carries):')
         for w in observation['workspaces']:
             lines.append('  '+w['task']+' ['+str(w['verdict'])+(', '+str(w['turns'])+' turns' if w.get('turns') else '')+'] → '
                          +', '.join(w['unknowns'])+(' · probes: '+', '.join(w['probes']) if w['probes'] else '')
                          +(' · walked: '+', '.join(w['walks']) if w['walks'] else '')+(' · widgets: '+', '.join(w['widgets']) if w['widgets'] else '')
-                         +(' · walks left: '+'; '.join(str(x['procedure'])+' ('+str(x['unticked'])+' unticked'
-                                                        +(', next: '+str(x['next'])[:50] if x.get('next') else '')
-                                                        +(', continues '+str(x['continues'])+' steps — walk_from '+str(x['next_from']) if x.get('continues') else '')+')'
-                                                        for x in w.get('walks_open') or []) if w.get('walks_open') else ''))
-        if any(w.get('walks_open') for w in observation['workspaces']):
-            lines.append('A walk left is method the route still owes, not a failing of that worker: a method longer than one '
-                         'walk is several tasks\' work. Route what is left as a task of its own on that workspace '
-                         '("continue_from", "walk" the same procedure, "walk_from" the step given), low bucket, carrying '
-                         'the reading it serves, so the method is paid over the brief, one walk per work order; a blocked '
-                         'task whose reason names its walks is asking for exactly this.')
+                         +(' · walks left: '+'; '.join(str(x['procedure'])+' ('+str(x['unticked'])+' unticked)' for x in w['walks_open']) if w.get('walks_open') else ''))
     waiting = [t for t in observation['tasks'] if t['status'] in ('ready', 'in_progress')]
     if waiting and mode == 'eval':
         lines.append('Already routed and waiting to run: '+', '.join(t['id'] for t in waiting)+' — they cover '
@@ -559,16 +535,11 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
     if budget:
         lines.append('Points: budget '+str(budget.get('budget_points'))+', planned '+str(budget.get('points_plan'))+
                      ', done '+str(budget.get('points_done'))+', unallocated '+str(budget.get('points_remaining_budget'))+
-                     ' — tasks draw on the budget (low 3, medium 8, high 21); Terra refuses a task the budget cannot cover.')
+                     '.')
     lines.append('')
     now = phases.current(brief)
-    scope = ' (phase '+now['id']+': its needs and deliverables are what is owed now; "done" means this phase is met)' if now else ''
-    if mode == 'route':
-        lines.append('Step: route. What does the map still owe the brief'+scope+'? Mint the unknowns and one task each.')
-    else:
-        lines.append('Step: project eval. A task just closed or the route is empty. Judge the map against the brief'+scope+': '
-                     'new unknowns if something is still owed, proposals if the evidence shows the brief itself '
-                     'should change, or nothing.')
+    lines.append('Step: '+('a work order landed' if mode == 'eval' else 'the route is empty')+'. Answer the gate\'s red'
+                 +(' (phase '+now['id']+')' if now else '')+'; an empty reply is right when the route already covers it.')
     if refusals:
         lines.append('')
         applied = observation.get('applied_so_far') or {}
@@ -594,13 +565,104 @@ def model_client(config: dict[str, Any]) -> ModelClient:
 _last_reasoning: list[str] = ['']   # set by decide(); read by the journal writer right after
 
 
-def decide(client: ModelClient, config: dict[str, Any], system: str, user: str) -> tuple[dict[str, Any], str]:
-    """One completion, parsed as the JSON object it was asked for; raw text kept for the journal."""
-    payload = dict(config['controller']['generation'], messages=[dict(role='system', content=system),
-                                                                   dict(role='user', content=user)],
-                   max_tokens=config['mizpah'].get('controller_output_tokens', 8192))
-    response = client.complete(payload, 'controller')
-    message = parse_turn(response).message
+# ---- the controller's verbs: read-only, journaled, no cap (the policy says be quick; every step ends in a decision)
+
+TERRA_READ_VERBS = {('known', 'show'), ('known', 'get'), ('known', 'list'), ('known', 'tree'), ('unknown', 'show'), ('unknown', 'list'),
+                    ('run', 'show'), ('run', 'list'), ('route', 'status'), ('route', 'log'), ('gate',), ('map', 'list'),
+                    ('map', 'status'), ('sitrep',), ('brief', 'show'), ('probe', 'list'), ('probe', 'show')}
+TOOL_RESULT_CHARS = 12000
+TOOL_CALL_CEILING = 60   # a safety, not a budget: a step that reads sixty things is not deciding
+MEMORY_CHARS = 4000
+
+CONTROLLER_TOOLS = [
+    dict(type='function', function=dict(name='terra', description='A read-only terra command against the project: known show <id>, '
+         'known get <id>, known list, known tree <id>, unknown show <id>, unknown list, run show <id>, run list, route status, route log, '
+         'gate [--map <id>], map list, map status, sitrep, brief show, probe list, probe show <id>. JSON back.',
+         parameters=dict(type='object', properties=dict(args=dict(type='string', description='the words after `terra`')), required=['args']))),
+    dict(type='function', function=dict(name='read', description='Numbered lines of a project file (200 at a time).',
+         parameters=dict(type='object', properties=dict(path=dict(type='string'), offset=dict(type='integer', description='1-based first line')), required=['path']))),
+    dict(type='function', function=dict(name='brief_read', description='A related brief from the library by title: its mission, needs, deliverables and the unknowns it resolved.',
+         parameters=dict(type='object', properties=dict(title=dict(type='string')), required=['title']))),
+    dict(type='function', function=dict(name='result', description='What a landed work order reported: verdict, turns, knowns, problems, what it minted, its last words.',
+         parameters=dict(type='object', properties=dict(task=dict(type='string')), required=['task']))),
+]
+
+
+def run_tool(config: dict[str, Any], project: Path, root: Path | None, name: str, args: dict[str, Any]) -> str:
+    """One verb, read-only, its result as text bounded for the window."""
+    try:
+        if name == 'terra':
+            words = [w for w in str(args.get('args') or '').split() if w]
+            head = tuple(words[:2]) if len(words) >= 2 and (words[0], words[1]) in TERRA_READ_VERBS else tuple(words[:1])
+            if head not in TERRA_READ_VERBS or any(w in ('--force', '>', '|', ';', '&&') for w in words):
+                return 'refused: `terra '+' '.join(words)[:80]+'` is not a read verb of the controller (known/unknown/run/probe show|list, route status|log, gate, map list|status, sitrep, brief show)'
+            text = json.dumps(terra(config, project, *words), indent=1)
+        elif name == 'read':
+            rel = str(args.get('path') or '').strip()
+            if not relative_path(rel) or not (project/rel).is_file():
+                return 'refused: '+repr(rel)+' is not a file inside the project'
+            lines = (project/rel).read_text(errors='replace').splitlines()
+            start = max(1, int(args.get('offset') or 1))
+            chunk = lines[start-1:start-1+200]
+            text = '\n'.join(f'{start+i:6d}\t{ln}' for i, ln in enumerate(chunk))+('' if start-1+200 >= len(lines) else f'\n… ({len(lines)-(start-1+200)} more lines; offset {start+200})')
+        elif name == 'brief_read':
+            title = str(args.get('title') or '').strip().lower()
+            docs = [d for d in briefs.stored(config) if str(d.get('title') or '').strip().lower() == title]
+            if not docs:
+                return 'no stored brief titled '+repr(title)
+            d = docs[-1]
+            text = json.dumps(dict(title=d.get('title'), mission=d.get('mission'), needs=d.get('needs'), deliverables=d.get('deliverables'),
+                                   outcome=d.get('stop'), tasks=d.get('tasks'), unknowns=d.get('unknowns')), indent=1)
+        elif name == 'result':
+            tid = str(args.get('task') or '').strip()
+            path = (root/'tasks'/tid/'result.json') if root else None
+            if not path or not path.exists() or not re.fullmatch(r'[a-z][a-z0-9_]*', tid):
+                return 'no landed work order '+repr(tid)
+            r = json.loads(path.read_text())
+            text = json.dumps({k: r.get(k) for k in ('verdict', 'turns', 'knowns', 'runs', 'problems', 'blocked_reason', 'playbook', 'widgets', 'reviewer_doubts')}
+                              | dict(final_text=(r.get('rounds') or [{}])[-1].get('final_text', '')[:2000]), indent=1)
+        else:
+            return 'refused: no such verb '+repr(name)
+    except (RuntimeError, OSError, ValueError, KeyError) as error:
+        return 'error: '+str(error)[:500]
+    return text if len(text) <= TOOL_RESULT_CHARS else text[:TOOL_RESULT_CHARS]+'\n… (cut at '+str(TOOL_RESULT_CHARS)+' characters)'
+
+
+_last_tools: list[list[dict[str, Any]]] = [[]]
+
+
+def decide(client: ModelClient, config: dict[str, Any], system: str, user: str,
+           project: Path | None = None, root: Path | None = None) -> tuple[dict[str, Any], str]:
+    """The controller's step: read what it needs with its verbs, then one JSON decision. Every call is kept for
+    the journal (`_last_tools`); the model ends the step by replying without a tool call."""
+    messages = [dict(role='system', content=system), dict(role='user', content=user)]
+    calls: list[dict[str, Any]] = []
+    _last_tools[0] = calls
+    while True:
+        payload = dict(config['controller']['generation'], messages=messages,
+                       max_tokens=config['mizpah'].get('controller_output_tokens', 8192))
+        if project is not None:
+            payload['tools'] = CONTROLLER_TOOLS
+        response = client.complete(payload, 'controller')
+        message = parse_turn(response).message
+        wanted = message.get('tool_calls') or []
+        if not wanted or project is None:
+            break
+        messages.append(dict(role='assistant', content=message.get('content') or '', tool_calls=wanted))
+        for call in wanted:
+            fn = call.get('function') or {}
+            try:
+                args = json.loads(fn.get('arguments') or '{}')
+            except ValueError:
+                args = {}
+            text = run_tool(config, project, root, str(fn.get('name')), args if isinstance(args, dict) else {})
+            calls.append(dict(name=fn.get('name'), args=args, chars=len(text), refused=text.startswith(('refused', 'error', 'no '))))
+            messages.append(dict(role='tool', tool_call_id=call.get('id'), name=fn.get('name'), content=text))
+        if len(calls) >= TOOL_CALL_CEILING:
+            messages.append(dict(role='user', content='That is '+str(TOOL_CALL_CEILING)+' reads; decide now with what you have.'))
+            payload = dict(config['controller']['generation'], messages=messages, max_tokens=config['mizpah'].get('controller_output_tokens', 8192))
+            message = parse_turn(client.complete(payload, 'controller')).message
+            break
     content = (message.get('content') or '').strip()
     # The model's own account of why, when the provider returns one (a reasoning summary, or a local
     # model's thinking). Kept beside the decision so a person can read the controller's mind.
@@ -1643,7 +1705,7 @@ def close_ready_phase(config: dict[str, Any], project: Path) -> dict[str, Any] |
     return dict(phase=now['id'], closed=True, next=following['id'] if following else None)
 
 
-def decide_through_outages(client: Any, config: dict[str, Any], system: str, user: str, wait_seconds: int = 300,
+def decide_through_outages(client: Any, config: dict[str, Any], system: str, user: str, wait_seconds: int = 300, project: Path | None = None, root: Path | None = None,
                            health: Any = None):
     """A model server that is restarting is waited for (its supervisor brings it back in seconds), not a failed step."""
     from cg.backend_persistent_model_session_python.src.persistent_model_session import ModelTransportError, RejectedGeneration
@@ -1651,7 +1713,7 @@ def decide_through_outages(client: Any, config: dict[str, Any], system: str, use
     outages = 0
     while True:
         try:
-            return decide(client, config, system, user)
+            return decide(client, config, system, user, project=project, root=root)
         except RejectedGeneration:
             raise
         except ModelTransportError as error:
@@ -1716,6 +1778,8 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
     observation['cautions'] = last_cautions(journal)
     observation['reviewer_doubts'] = reviewer_doubts(journal)
     observation['workspaces'] = task_workspaces(Path(journal).parent)
+    memory_file = Path(journal).parent/'memory.md'
+    observation['memory'] = memory_file.read_text().strip() if memory_file.exists() else ''
     refusals: list[str] = []
     accepted = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[], done=None, why='')
     record: dict[str, Any] = dict(mode=mode, observation=observation, attempts=[], usage=usage)
@@ -1724,28 +1788,26 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
     while attempt < 2:
         user = render_observation(observation, mode, refusals)
         try:
-            decision, raw = decide_through_outages(client, config, system, user)
+            decision, raw = decide_through_outages(client, config, system, user, project=project, root=Path(journal).parent)
         except ValueError as error:
-            record['attempts'].append(dict(user=user, error=str(error)))
+            record['attempts'].append(dict(user=user, error=str(error), tools=list(_last_tools[0])))
             refusals = ['reply was not one JSON object: '+str(error)[:200]]
             attempt += 1
             continue
-        wants = decision.get('look') if isinstance(decision, dict) else None
-        if isinstance(wants, list) and wants and looks < LOOK_ROUNDS \
-                and not any(decision.get(k) for k in ('unknowns', 'tasks', 'proposals', 'rebucket', 'unblock', 'retype')):
-            # A look costs no attempt: the controller reads before it decides, up to LOOK_ROUNDS times.
-            looks += 1
-            looked = observation.setdefault('looked', {})
-            refused = read_looks(project, wants, looked)
-            record['attempts'].append(dict(user=user, raw=raw, reasoning=_last_reasoning[0], look=[str(w) for w in wants][:LOOK_PATHS],
-                                           why=str(decision.get('why') or '')[:300], refused=refused))
-            refusals = refused
-            continue
         attempt += 1
         accepted, refusals = guard(decision, observation, project, require_deliverables=(mode == 'route'))
+        # The step's reflection is required — a manager's end-of-day line: what landed, what I did, what I am
+        # watching for. A decision without one is refused like an unknown that cites nothing.
+        memory = str(decision.get('memory') or '').strip() if isinstance(decision, dict) else ''
+        if not memory:
+            refusals = refusals+['no "memory": write your notes for the next step — what landed, what you did about it, what you are watching for']
+        elif len(memory) > MEMORY_CHARS:
+            refusals = refusals+['"memory" is '+str(len(memory))+' characters; keep it under '+str(MEMORY_CHARS)+' — notes, not a transcript']
+        else:
+            accepted['memory'] = memory
         # The message as sent, so a person can read the exchange the way the model saw it.
         record['attempts'].append(dict(user=user, raw=raw, reasoning=_last_reasoning[0], accepted=accepted, refusals=refusals,
-                                       noted=accepted.get('noted') or [], observation_chars=len(user)))
+                                       noted=accepted.get('noted') or [], observation_chars=len(user), tools=list(_last_tools[0])))
         record['noted'] = (record.get('noted') or [])+(accepted.get('noted') or [])
         minted_nothing = not any(accepted[k] for k in ('unknowns', 'tasks', 'proposals', 'rebucket', 'unblock', 'retype'))
         work_routed = any(t['status'] in ('ready', 'in_progress') for t in observation['tasks'])
@@ -1762,6 +1824,8 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
         if any(accepted[k] for k in ('unknowns', 'tasks', 'proposals', 'rebucket', 'unblock', 'retype')):
             # Keep what passed; ask only about what did not.
             applied = apply(config, project, accepted, root=journal.parent)
+            if accepted.get('memory'):
+                memory_file.write_text(accepted['memory']+'\n')
             record.setdefault('applied', dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[]))
             for key in applied:   # `refused` appears only when Terra refused a create; it is not in the template
                 record['applied'].setdefault(key, [])
@@ -1773,6 +1837,8 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
             observation['applied_so_far'] = {k: [str(x) for x in v] for k, v in record['applied'].items() if k in ('unknowns', 'tasks')}
             accepted = dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[], done=accepted.get('done'), why=accepted['why'])
     applied = apply(config, project, accepted, root=journal.parent)
+    if accepted.get('memory'):
+        memory_file.write_text(accepted['memory']+'\n')
     record.setdefault('applied', dict(unknowns=[], tasks=[], proposals=[], rebucket=[], unblock=[], retype=[]))
     for key in applied:
         record['applied'].setdefault(key, [])
