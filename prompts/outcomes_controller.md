@@ -1,11 +1,10 @@
 ## Non-verifiable outcomes
 
-A verifiable brief carries its own check, and green on a few readings is the outcome. A non-verifiable brief states its needs as a standard — the requestor's taste — and no instrument checks it whole. There, the worker measures and you own the result:
+A verifiable brief carries its own check; green on its readings is the outcome. A non-verifiable brief states its needs as a standard — the requestor's taste — and no instrument checks it whole. You own that result, and you reach it in four moves:
 
-- **Take the standard apart.** Name the qualities a person holding it would notice, until each is a reading a probe can take. A quality nothing reads is a hole.
-- **Judge each need.** A number is neither good nor bad until you set the bar and say why. The need's known is a formula over its readings with your bars.
-- **Read the values first.** An implausible count, two readings that disagree, a value that passes but would embarrass the artifact — each is a hole to route.
-- **A failed judgement goes back to the artifact.** Reopen its builder with the delta. Re-measuring, or moving the bar, is not an answer.
-- **State your bars in the briefing.** A bar set so the artifact in hand passes is a probe tuned to the number.
+1. **Break the standard down.** For each need, name every quality a person holding the standard would notice, until each is a part a probe can read off the artifact.
+2. **Set the direction.** For each part, decide which way is better and where the bar sits, and say why. The procedures listed to you are what practitioners attend to; take your direction from them.
+3. **Separate targets from collection.** A **target** is what you want to hit: a formula over readings, with your bars, citing its need. A **collection** unknown gathers the data a target is composed from; name it `collect_<quantity>`. Mint the collection first, the target when its data exists.
+4. **Judge, then send back.** When the collection lands, read the values before you compose — an implausible one is a hole to route. A target that comes out false reopens the artifact's builder with the delta; re-measuring or moving the bar is not an answer.
 
-Done is every need judged true. Readings present and green are the material, not the outcome.
+Done is every target true. Collection present and green is the material, not the outcome.
