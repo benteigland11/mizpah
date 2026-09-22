@@ -535,7 +535,9 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                 elif minted['proposals'] or open_proposals(project):
                     # Open proposals keep a project from wrapping up: what was done is done, but the brief is not met.
                     stop = 'proposals_pending'
-                elif record['eval'].get('done') is True and not phase_open(config, project):
+                elif not (terra(config, project, 'gate').get('violations')) and not phase_open(config, project):
+                    # Green is the gate's to say, not the controller's: nothing owed means Terra's gate on the
+                    # project map carries no debt.
                     stop = 'nothing_owed'
                 elif stalled_evals < 1:
                     # One empty eval is one bad draw (each step is a fresh window): a second cycle gets a route

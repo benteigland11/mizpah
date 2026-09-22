@@ -178,13 +178,20 @@ def test_route_log_done_without_evidence_still_logged(proj):
 
 def test_complete_requires_a_known_for_every_unknown_the_task_carries(proj):
     """`unknown:<id>` acceptance entries name further unknowns; the completion must cite each."""
+    from terra.knowns import promote_known
     for uid in ("a", "b"):
         create_unknown(proj, uid, claim=uid+"?", evidence_needed="e", map_type="number", quantity="q")
-        link_run(proj, uid, _run(proj))
+        for _ in range(3):
+            link_run(proj, uid, _run(proj))
         graduate_unknown(proj, uid, known_id=uid)
     add_task(proj, "both", title="Both", skill="terra-probe", bucket="low", map_id="a", acceptance=["unknown:b"])
     with pytest.raises(ValueError, match="missing: b"):
         complete_task(proj, "both", known_ids=["a"])
+    # A known below the bar is refused: med is the floor of belief.
+    with pytest.raises(ValueError, match="med is the floor"):
+        complete_task(proj, "both", known_ids=["a", "b"])
+    for uid in ("a", "b"):
+        promote_known(proj, uid, "med")
     t = complete_task(proj, "both", known_ids=["a", "b"])
     assert t["status"] == "done" and t["evidence"][0]["knowns"] == ["a", "b"]
 

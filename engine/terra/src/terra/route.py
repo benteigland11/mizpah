@@ -1041,16 +1041,40 @@ def complete_task(
     ]
     if task.get("map_id"):
         owed = [task["map_id"]] + [u for u in owed if u != task["map_id"]]
-    if len(owed) > 1 and not freehand:
+    if owed and not freehand:
         cited = set(known_ids or [])
         missing = [u for u in owed if u not in cited]
         if missing:
             raise ValueError(
-                f"task {task_id} resolves {len(owed)} unknowns "
+                f"task {task_id} resolves {len(owed)} unknown(s) "
                 f"({', '.join(owed)}); completion must cite a known for each "
                 f"— missing: {', '.join(missing)}. Resolve them first, or block "
                 "the task with the reason if one cannot be read."
             )
+        # A claim reaches the map only at the bar: each cited known at med or better, and believed where the
+        # project reads it — adopted above the active map when the work was done on a session map. The loop
+        # used to reconstruct this after the fact; it is the route's refusal now.
+        from .number_type import confidence_rank
+        from .paths import get_active_map_id, map_parent
+
+        active = get_active_map_id(project_root)
+        parent = map_parent(project_root, active) if active != "global" else None
+        for kid in known_ids or []:
+            rec_k = _find_known(project_root, kid)
+            if rec_k is None:
+                continue   # validate_evidence_refs already refused it
+            if confidence_rank(str(rec_k.get("confidence") or "low")) < confidence_rank("med"):
+                raise ValueError(
+                    f"known {kid} is {rec_k.get('confidence') or 'low'}: med is the floor of belief — "
+                    "ladder it (more runs for a variable quantity; a second method for a determined one)"
+                )
+            if parent is not None:
+                adopted_to = (rec_k.get("adopted_to") or {}).get("map")
+                if not adopted_to:
+                    raise ValueError(
+                        f"known {kid} is on {active} and not adopted: `terra known adopt {kid} --from {active}` — "
+                        "what is not adopted did not happen"
+                    )
 
     for t in rec["tasks"]:
         if t.get("id") == task_id:

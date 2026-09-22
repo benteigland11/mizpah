@@ -33,3 +33,27 @@ def test_identical_floats_pass_only_when_the_same_declared_inputs_explain_them(t
     _known(project, 'coin_contrast', 2.114721681067717, 'r5', {'fill': {'value': '#e3a83b'}})
     problems = worker.duplicate_reading_problems(project, ['heap_contrast', 'coin_contrast'])
     assert len(problems) == 1   # same number, different declared input: not explained
+
+
+def test_the_verdict_is_terras_gate_on_the_task_map(tmp_path: Path, monkeypatch) -> None:
+    """task_gate no longer reconstructs the route's refusals (cites, med, adopted); it reports the route's state,
+    the host's honesty checks, and Terra's gate on the work order's map — each violation as [kind] id: why."""
+    project = tmp_path
+    (project/'.terra').mkdir()
+    (project/'.terra'/'route.json').write_text(json.dumps(dict(tasks=[dict(id='t', status='done', map_id='u', acceptance=[],
+                                                                          evidence=[dict(runs=['r1'], knowns=['u'])])])))
+    calls = []
+
+    def fake_terra(config, project, *args):
+        calls.append(args)
+        return dict(violations=[dict(kind='known_stale', id='u', map_id='t_t', why='file moved')])
+
+    monkeypatch.setattr(worker, 'terra', fake_terra)
+    monkeypatch.setattr(worker, 'vacuous_truth_problems', lambda *a: [])
+    monkeypatch.setattr(worker, 'duplicate_reading_problems', lambda *a: [])
+    monkeypatch.setattr(worker, 'readopt_retaken', lambda *a: [])
+    monkeypatch.setattr(worker, 'artifact_agreement_problems', lambda *a: [])
+    monkeypatch.setattr(worker, 'unread_input_problems', lambda *a: [])
+    gate = worker.task_gate({}, project, dict(id='t', map_id='u'), 't_t')
+    assert calls == [('gate', '--map', 't_t')]
+    assert gate['ok'] is False and gate['problems'] == ['[known_stale] u: file moved'] and gate['knowns'] == ['u']

@@ -1053,7 +1053,11 @@ def open_checklists(snapshot: bytes) -> list[str]:
 
 def task_gate(config: dict[str, Any], project: Path, task: dict[str, Any], map_id: str,
               root: Path | None = None) -> dict[str, Any]:
-    """Mechanical verdict: the route, the project map, Terra's gate, and every widget the task touched."""
+    """The verdict on a claim is Terra's gate on the work order's task map, plus the host's honesty checks on
+    the claim — a probe that reads true on an empty file, an artifact that disagrees with the map, an input it
+    was told to read and did not, a widget it touched that does not validate. What the route already refuses at
+    `route complete` (a run and a known cited for every unknown, med or better, adopted) is not judged again;
+    the loop used to reconstruct all of it here and disagree with the gate it was standing on."""
     problems = []
     if root is not None:
         problems += widget_problems(config, project, root)
@@ -1061,63 +1065,57 @@ def task_gate(config: dict[str, Any], project: Path, task: dict[str, Any], map_i
     entry = next((t for t in route['tasks'] if t['id'] == task['id']), None)
     if entry is None:
         return dict(ok=False, problems=['task vanished from the route'], knowns=[], runs=[])
-    if entry['status'] != 'done':
-        problems.append('route task '+task['id']+' is '+entry['status']+', not done')
     evidence = entry.get('evidence') or []
     last = evidence[-1] if evidence else {}
     runs, knowns = list(last.get('runs') or []), list(last.get('knowns') or [])
-    if last.get('freehand'):
-        problems.append('task completed freehand ('+last['freehand']+'); freehand is not evidence')
-    if last.get('skip_gate'):
-        problems.append('gate override recorded ('+str(last['skip_gate'])+'); overrides are not evidence')
-    if entry['status'] == 'done' and not runs and not knowns:
-        problems.append('completion cites no run or known')
+    if entry['status'] != 'done':
+        problems.append('route task '+task['id']+' is '+entry['status']+', not done: `terra route complete` has not succeeded')
     unknown_ids = task_unknown_ids(task)
-    for unknown_id in unknown_ids:
-        if unknown_id not in knowns and entry['status'] == 'done':
-            problems.append('completion does not cite known '+unknown_id)
-    for known_id in dict.fromkeys(knowns+unknown_ids):
-        local = read_known(project, known_id, map_id)
-        adopted = read_known(project, known_id)
-        if local is None:
-            problems.append('known '+known_id+' has not been graduated on map '+map_id+': once its measure.py '
-                            'validates, `terra known ladder '+known_id+'` runs, links, graduates, promotes and adopts it')
-            continue
-        if adopted is None or (adopted.get('adopted_from') or {}).get('map') != map_id:
-            derived = local.get('confidence_derived') or 'low'
-            n = (local.get('stats') or {}).get('n') or 0
-            if CONFIDENCE_RANK.get(local.get('confidence') or 'low', 0) >= CONFIDENCE_RANK['med']:
-                problems.append('known '+known_id+' is ready on '+map_id+' (confidence '+str(local.get('confidence'))+
-                                ', n='+str(n)+') but not yet on the project map: run `terra known adopt '+known_id+
-                                ' --from '+map_id+'`')
-            else:
-                problems.append('known '+known_id+' is on '+map_id+' (n='+str(n)+', confidence '+derived+
-                                ') below the adoption bar: `terra known ladder '+known_id+'` takes the remaining '
-                                'readings, promotes and adopts in one call')
-            continue
-        if CONFIDENCE_RANK.get(adopted.get('confidence') or 'low', 0) < CONFIDENCE_RANK['med']:
-            problems.append('adopted known '+known_id+' is confidence '+str(adopted.get('confidence')))
-    for unknown_id in unknown_ids:
-        project_unknown = read_unknown(project, unknown_id)
-        if project_unknown.get('status') != 'resolved':
-            problems.append('project unknown '+unknown_id+' is '+str(project_unknown.get('status')))
     problems += vacuous_truth_problems(project, unknown_ids)
-    problems += duplicate_reading_problems(project, unknown_ids)
+    problems += duplicate_reading_problems(project, unknown_ids)   # two knowns, one float, no shared input: a copy
     resynced = readopt_retaken(config, project, map_id, unknown_ids)
     if resynced:
         (root/'resynced.jsonl').open('a').write(json.dumps(dict(at=time.time(), readopted=resynced))+'\n') if root else None
     problems += artifact_agreement_problems(project, unknown_ids)
     problems += unread_input_problems(project, unknown_ids)
-    gate = terra(config, project, 'gate')
-    own_ids = set(knowns) | set(runs) | set(unknown_ids)
+    gate = terra(config, project, 'gate', '--map', map_id)
     for violation in gate.get('violations') or []:
-        if violation.get('map_id') == map_id or violation.get('id') in own_ids:
-            line = 'terra gate: '+str(violation.get('why') or violation.get('kind'))
-            if line not in problems:  # the same unknown is open on both the task map and the project map
-                problems.append(line)
-    return dict(ok=not problems, problems=problems, knowns=knowns, runs=runs,
-                foreign_violations=[v for v in gate.get('violations') or []
-                                    if v.get('map_id') != map_id and v.get('id') not in own_ids])
+        problems.append('['+str(violation.get('kind'))+'] '+str(violation.get('id') or '')+': '+str(violation.get('why') or ''))
+    return dict(ok=not problems, problems=problems, knowns=knowns, runs=runs)
+
+
+def duplicate_reading_problems(project: Path, unknown_ids: list[str]) -> list[str]:
+    """Two quantities that are different things cannot agree to twelve digits by chance: the light and dark body
+    contrasts, and the accent's, all read 16.075361130695477 (palette2) — one computation read three times. A
+    re-measurement reruns the same probe and reproduces it, so the gate has to notice the coincidence itself.
+    Integers and round values are exempt (counts and booleans coincide honestly)."""
+    values: dict[str, list[str]] = {}
+    inputs: dict[str, dict[str, Any]] = {}
+    for uid in unknown_ids:
+        known = read_known(project, uid)
+        if not known or (known.get('stats') or {}).get('kind') != 'number':
+            continue
+        value = extract_known_value(known)
+        if not isinstance(value, float) or value == int(value) or round(value, 2) == value:
+            continue
+        values.setdefault(repr(value), []).append(uid)
+        inputs[uid] = run_inputs(project, known)
+    problems = []
+    for value, ids in values.items():
+        if len(ids) < 2:
+            continue
+        # Two contrasts of the same fill against white agree to every digit honestly (logo_mark7: both #19324a). The
+        # record shows why only when each probe declares the input it read (a known: binding) and the bound values
+        # coincide; an unexplained coincidence is still the same computation read twice.
+        explained = all(inputs[i] for i in ids) and len({json.dumps(inputs[i], sort_keys=True) for i in ids}) == 1
+        if explained:
+            continue
+        problems.append(', '.join(ids)+' all read exactly '+value+': different quantities do not agree to every digit — '
+                        'each probe is reading the same computation (the same pair, the same scheme, the same file). '
+                        'Give each its own inputs and re-take them; void the runs that repeat. If they truly share an input '
+                        '(the same fill, the same file), make that input a known and declare it on both probes (probe init '
+                        '--input name=known:<id>) so the record shows why they agree')
+    return problems
 
 
 def remeasure(config: dict[str, Any], project: Path, root: Path, known_ids: list[str]) -> list[str]:
@@ -1325,39 +1323,6 @@ def artifact_agreement_problems(project: Path, unknown_ids: list[str]) -> list[s
                             'quantities, so the brief can be made to name them apart')
     return problems
 
-
-def duplicate_reading_problems(project: Path, unknown_ids: list[str]) -> list[str]:
-    """Two quantities that are different things cannot agree to twelve digits by chance: the light and dark body
-    contrasts, and the accent's, all read 16.075361130695477 (palette2) — one computation read three times. A
-    re-measurement reruns the same probe and reproduces it, so the gate has to notice the coincidence itself.
-    Integers and round values are exempt (counts and booleans coincide honestly)."""
-    values: dict[str, list[str]] = {}
-    inputs: dict[str, dict[str, Any]] = {}
-    for uid in unknown_ids:
-        known = read_known(project, uid)
-        if not known or (known.get('stats') or {}).get('kind') != 'number':
-            continue
-        value = extract_known_value(known)
-        if not isinstance(value, float) or value == int(value) or round(value, 2) == value:
-            continue
-        values.setdefault(repr(value), []).append(uid)
-        inputs[uid] = run_inputs(project, known)
-    problems = []
-    for value, ids in values.items():
-        if len(ids) < 2:
-            continue
-        # Two contrasts of the same fill against white agree to every digit honestly (logo_mark7: both #19324a). The
-        # record shows why only when each probe declares the input it read (a known: binding) and the bound values
-        # coincide; an unexplained coincidence is still the same computation read twice.
-        explained = all(inputs[i] for i in ids) and len({json.dumps(inputs[i], sort_keys=True) for i in ids}) == 1
-        if explained:
-            continue
-        problems.append(', '.join(ids)+' all read exactly '+value+': different quantities do not agree to every digit — '
-                        'each probe is reading the same computation (the same pair, the same scheme, the same file). '
-                        'Give each its own inputs and re-take them; void the runs that repeat. If they truly share an input '
-                        '(the same fill, the same file), make that input a known and declare it on both probes (probe init '
-                        '--input name=known:<id>) so the record shows why they agree')
-    return problems
 
 
 def run_inputs(project: Path, known: dict[str, Any]) -> dict[str, Any]:
@@ -2463,7 +2428,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
     result = dict(task=task['id'], unknown=task['map_id'], unknowns=task_unknown_ids(task), map=map_id, resumed=resuming,
                   verdict=verdict,
                   blocked_reason=blocked_reason, problems=gate['problems'], knowns=gate['knowns'],
-                  runs=gate['runs'], foreign_violations=gate.get('foreign_violations', []),
+                  runs=gate['runs'],
                   turns=turns(status), turn_budget=budget, turn_estimate=estimate, overruns=overruns,
                   session=status['status'],
                   handoffs=status['handoffs'], checkins=status['controller_reviews'], held_guidance=status['held_guidance'],
