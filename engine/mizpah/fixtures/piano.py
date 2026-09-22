@@ -97,12 +97,14 @@ def benchmark() -> Path:
 
 def melody_bass() -> Path:
     return gym(
-        'Melody over a broken-chord bass',
-        'Write and play a short tune for piano: the right hand singing over a left hand that keeps moving.',
+        'Melody over a moving bass',
+        'Write and play a short piano tune over a left hand that keeps moving: the tune is what a listener remembers, '
+        'the bass is what carries it — and show the two are one piece.',
         needs=[
-            'It has a tune: a line you could hum, in one major key, that ends properly.',
-            'The left hand moves under it in a broken-chord figure.',
-            'The tune is louder than what is under it, and each phrase has a shape.',
+            'It has a tune: a line you could hum after one hearing, that goes somewhere and ends as if it meant to.',
+            'The left hand moves under it in a figure that fits the harmony and never gets in the tune\'s way.',
+            'The relation is read, not asserted: readings over the finished file separate the tune from the bass and '
+            'show the tune leads and the bass agrees with it — and would fail a piece whose bass contradicts its tune.',
         ],
         deliverables=['piece.mid'],
         budget=120, non_goals=NON_GOALS)
@@ -110,12 +112,15 @@ def melody_bass() -> Path:
 
 def voice_leading() -> Path:
     return gym(
-        'Four-voice chorale for piano',
-        'Write and play a short chorale for piano: four voices, in a minor key, with voice leading a teacher would pass.',
+        'Four voices a teacher would pass',
+        'Write and play a short chorale for piano in four voices, the kind a harmony teacher would hand back with '
+        'nothing marked — and show why it passes.',
         needs=[
-            'Four voices throughout, two to a hand, in a minor key with a proper ending.',
-            'The voices lead well: no parallel fifths or octaves, common tones kept, no voice crossing.',
-            'The top voice carries, and the pedal follows the chord changes.',
+            'Four voices throughout, each singable on its own, in a minor key with a cadence that closes.',
+            'The voices move the way a harmony teacher expects: each finds the nearest good note, and the motions a '
+            'teacher marks are absent.',
+            'It passes on the file, not on the plan: readings follow every voice through every chord and name each '
+            'motion a teacher would mark — and would fail a chorale that has one.',
         ],
         deliverables=['piece.mid'],
         budget=120, non_goals=NON_GOALS)
@@ -123,15 +128,17 @@ def voice_leading() -> Path:
 
 def pedal_dynamics() -> Path:
     return gym(
-        'Pedal and dynamics over a progression',
-        'Perform a given progression (I vi IV V, twice, then I) as block chords with sustain pedal, a crescendo and '
-        'diminuendo, and a closing ritardando.',
+        'Pedal and dynamics',
+        'Play a short chord progression so it sounds like a pianist\'s hands and feet, not a sequencer: the pedal and '
+        'the dynamics carry its shape — and show that shape can be read off the file.',
         needs=[
-            'Nine bars of block chords in both hands on that progression, one chord per bar, in one stated major key.',
-            'Pedalled the way a pianist pedals block chords: down with each chord, clean before the next, never '
-            'smeared across a change.',
-            'Shaped: a crescendo through the first half and a diminuendo through the second that a listener would '
-            'hear, the final bar the softest and noticeably slower.',
+            'Pedalled the way a pianist pedals: the sound held through each harmony and cleared at every change, never '
+            'smeared across one.',
+            'Shaped in loudness: it grows and recedes the way a phrase breathes, and the close is its softest and '
+            'slowest moment.',
+            'The playing is read, not asserted: readings over the finished file say where the pedal holds and clears '
+            'against the harmony and how the loudness moves — and would fail a version pedalled through the changes or '
+            'played at one level.',
         ],
         deliverables=['piece.mid'],
         budget=120, non_goals=NON_GOALS)
@@ -139,16 +146,16 @@ def pedal_dynamics() -> Path:
 
 def rubato_phrase() -> Path:
     return gym(
-        'Rubato on a cantabile phrase',
-        'Write an 8-bar cantabile melody with a simple accompaniment and perform it with rubato: the phrase peak '
-        'stretched, the ending slowed, the line shaped by touch.',
+        'Rubato on a singing phrase',
+        'Write a singing phrase with a simple accompaniment and play it with rubato: time bends where the line leans, '
+        'and the line is shaped by touch — and show the bend can be read off the file.',
         needs=[
-            'Eight bars in 3/4: a single-line right-hand melody over sustained left-hand chords, in one stated key, '
-            'ending with a cadence.',
-            'Rubato a listener would call musical: the peak of the phrase stretched, the last bars slowed, the pulse '
-            'otherwise kept.',
-            'The line is shaped by touch — loudest at its peak, softest at its close — and the accompaniment never '
-            'covers it.',
+            'Rubato a listener would call musical: time stretches where the phrase peaks and slows into the close, and '
+            'the pulse is otherwise kept.',
+            'The line sings over its accompaniment: shaped by touch, fullest where it leans, never covered by what is '
+            'under it.',
+            'The bend is read, not asserted: readings over the finished file find where time stretches and where the '
+            'line peaks — and would fail a version played strictly in time or at one level.',
         ],
         deliverables=['piece.mid'],
         budget=120, non_goals=NON_GOALS)
@@ -156,12 +163,15 @@ def rubato_phrase() -> Path:
 
 def nocturne_lh() -> Path:
     return gym(
-        'Nocturne left hand',
-        'Write and play a short passage in a nocturne texture: a wide, rolling left hand under a singing right hand.',
+        'A nocturne texture',
+        'Write and play a short passage in a nocturne texture: a wide, rolling left hand under a singing right hand — '
+        'and show the texture can be read off the file.',
         needs=[
-            'The left hand is wide and rolls: bass low, chord tones above it, in compound time.',
-            'The melody floats above it, with a couple of ornamental runs.',
-            'The accompaniment stays under the melody, and the pedal follows the harmony.',
+            'The left hand is wide and rolls under the melody, carrying the harmony and the pulse.',
+            'The melody floats above it in long lines, with an ornament where a singer would add one.',
+            'The texture is read, not asserted: readings over the finished file say how wide the left hand ranges, where '
+            'the melody sits above it and that the pedal follows the harmony — and would fail a texture where the '
+            'hands collide.',
         ],
         deliverables=['piece.mid'],
         budget=120, non_goals=NON_GOALS)
@@ -170,16 +180,15 @@ def nocturne_lh() -> Path:
 def voicing_touch() -> Path:
     return gym(
         'Voicing and touch',
-        'Perform a given 8-bar chord sequence so the top voice sings: the melody note of each chord above the rest, '
-        'the left hand under it, legato in the melody and a detached final bar.',
+        'Play a chord sequence so the melody inside it sings: the top voice heard above the rest, joined where it '
+        'should be and placed where it should be — and show the voicing can be read off the file.',
         needs=[
-            'Eight bars in 4/4 in one stated major key, two chords a bar on the 16-chord progression '
-            'I V vi iii IV I IV V | I V vi iii IV I V I, four-note voicings two to a hand, the top notes a '
-            'stepwise melody.',
-            'Voiced so the top voice sings: the melody note of every chord clearly above the rest, the left hand '
-            'under both.',
-            'Touched like a pianist: legato in the melody through bar 7, detached in the final bar with the last '
-            'chord held full, the pedal changing with every chord, a ritardando to close.',
+            'Voiced so the melody sings: the top note of every chord heard above the others, the lower hand beneath.',
+            'Touched like a pianist: the melody joined as one line, the chords beneath it placed rather than struck all '
+            'alike, the pedal changing with the harmony.',
+            'The voicing is read, not asserted: readings over the finished file separate the melody from the chords and '
+            'say how far above them it sits and how it is joined — and would fail a version where every note is struck '
+            'the same.',
         ],
         deliverables=['piece.mid'],
         budget=120, non_goals=NON_GOALS)
