@@ -1735,18 +1735,17 @@ def green_message(gate: dict[str, Any], unknown_id: str | list[str], used: list[
     (There is no write-up phase otherwise — the harvest of what was minted while working is the review.)"""
     if isinstance(unknown_id, list):
         unknown_id = ', '.join(unknown_id)
-    held = ('widgets checked in: '+(', '.join('`'+w+'`' for w in widgets) or 'none')
+    held = ('widgets: '+(', '.join('`'+w+'`' for w in widgets) or 'none')
             +'; procedures created or improved: '+(', '.join('`'+p+'`' for p in procedures) or 'none')
             +('; walked: '+', '.join('`'+u+'`' for u in used) if used else ''))
     asks = []
     if not procedures:
-        asks.append('the method — is there a way of working you followed here that the next worker on a task like this '
-                    'should start from? If so, `playbook create <id>` it (one `add-step` per rule, from the steps you took; '
-                    '`playbook edit <id> --widgets a,b` names the widgets it calls), or `add-step`/`edit-step` the one you '
-                    'walked if it is that procedure with a step missing; `playbook validate <id>` once')
+        asks.append('Is there a method here — instincts the next worker on a work order like this should start from? '
+                    'If so, `playbook create` it under the general procedure that should lead to it, each step a thing to '
+                    'attend to; or improve the one you walked where it fell short. `playbook validate` once.')
     if not widgets:
-        asks.append('the instrument — did a probe here compute a reading that another project would want from a call? '
-                    'If so, make it a widget under `cg/` (validated; it is checked in after this round)')
+        asks.append('Is there an instrument here — a reading a probe computed inline that another bench would call? '
+                    'If so, make it a widget under `cg/` and validate it.')
     from . import prompts as _prompts
     return _prompts.message('library_asks_worker', known=unknown_id, made=(' and you made '+', '.join('`'+m+'`' for m in made) if made else ''),
                             held=held, asks='; and '.join(asks))

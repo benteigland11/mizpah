@@ -1,19 +1,11 @@
-Write the working memory for the next context window to continue this task accurately.
+Write the handoff: the working memory the next window continues this work order from. It receives the work order, this memory, the retained recent tool results, and the workspace; nothing else of this window survives, and the archive is there to be read if a detail is missing.
 
-The next context receives the original assignment, this memory, retained recent tool results, and access to the existing workspace and history archive. Preserve the additional information it needs to understand the current situation and choose its next action.
+Organize it around:
 
-Organize the memory around:
+- **The work order and what still binds it:** the unknowns you are resolving, the reviewer's correction if one stands, decisions and boundaries that still apply.
+- **Established:** readings taken and their runs, knowns graduated or adopted, artifacts made or changed, instruments minted, checks that passed — with exact ids and values.
+- **Unfinished:** what is owed on your task map, open questions, walk steps not yet ticked, any action whose outcome is uncertain.
+- **Continuation point:** what the last completed action established and the next action with its prerequisites.
+- **Where things are:** the files, the walk, the probes, the archive.
 
-- **Current objective and constraints:** the user’s current intent, later corrections, decisions, and boundaries that still apply.
-- **Established state:** relevant findings, changes actually made, and verification actually completed. Keep exact identifiers and values where precision matters.
-- **Unfinished work:** obligations, unresolved questions, blockers, and any action whose outcome remains uncertain.
-- **Continuation point:** what the last completed action established, what remains to be done with its result, and the next intended action with its prerequisites.
-- **Essential references:** where supporting material lives and what to retrieve there.
-
-Distinguish observed results, prior claims, assumptions, and proposed actions. Record completion only when the available evidence supports it. Preserve the reasons behind decisions when forgetting them would invite repeated mistakes.
-
-Reconcile earlier memory with newer evidence into one current account. Correct superseded claims and remove resolved or irrelevant material.
-
-Condense repeated discussion and bulky outputs. Preserve information whose loss could cause incorrect work, violated constraints, or expensive reconstruction.
-
-Output only the memory in plain Markdown. Describe pending work without performing it. Omit copied message envelopes, nested handoffs, and tool-call markup.
+Keep observed results, prior claims, assumptions and proposed actions distinct. Record a thing as done only when the evidence says so. Reconcile earlier memory with newer evidence into one current account; drop what is resolved. Plain Markdown, nothing performed, no copied envelopes.

@@ -1,3 +1,3 @@
-The gate is green and your work is done; one thing remains. The library refused what you built, for these reasons — fix them and it is checked in; leave them and the work stays only in this project:
+Gate green, and one thing remains: the library refused an instrument you made. It is checked in when it validates; left as it is, it stays in this project and no other bench gets it.
 $reasons
-A widget must validate (`cartograph validate cg/<dir>`): tests under tests/ that pass, no project names or paths in src/, every dependency declared. A procedure must validate (`playbook validate <id>`). Fix, validate, then call `done`; do not start other work.
+`cartograph validate cg/<dir>` for a widget (tests that pass, no project paths in src/, dependencies declared); `playbook validate <id>` for a procedure. Fix, validate, `done`. Nothing else.

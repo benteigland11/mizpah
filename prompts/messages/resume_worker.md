@@ -1,1 +1,1 @@
-Continue your work from your own handoff and the retained tool results. Resolve unfinished follow-up from the last completed action before moving past it. Read existing accumulated notes before updating them and preserve their established findings; retrieve the archived history when a needed detail is missing.
+A new window. Continue from your handoff and the retained tool results: resolve what the last completed action left unfinished before moving past it; read the walk and the map before adding to them; retrieve the archive when a needed detail is missing.
