@@ -1,6 +1,6 @@
 {
   "prompts_dir": "../../prompts",
- "harness_config": "../harness/tools/config.landing.json",
+  "harness_config": "../harness/tools/config.landing.json",
   "terra": "/home/Vinscen/mizpah/.venv/bin/terra",
   "playbook": "/home/Vinscen/mizpah/.venv/bin/playbook",
   "playbook_store": "~/.local/share/playbook/procedures",
@@ -50,7 +50,6 @@
   "repeated_success_rollover": 5,
   "cartograph": "/home/Vinscen/mizpah/.venv/bin/cartograph",
   "widget_library": "~/.local/share/cartograph/Widget_Library",
-
   "turn_cap": 400,
   "controller_output_tokens": 8192,
   "checkin_output_tokens": 2048,
@@ -63,5 +62,6 @@
     "restart_cooldown_seconds": 600,
     "disk_high_percent": 92,
     "notify_command": "notify-send \"$MIZPAH_TITLE\" \"$MIZPAH_BODY\""
-  }
+  },
+  "controller_reads": 12
 }
