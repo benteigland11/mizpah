@@ -93,3 +93,47 @@ def test_harvest_merges_onto_a_store_that_moved(tmp_path: Path, monkeypatch):
     out = worker._harvest_playbook(_snapshot(json.loads((base/'midi-check.json').read_text())), store, config, allowed=('midi-check',), base=base, workspace_store=ws)
     assert out['installed'] == [] and out['conflicts'] == []
     assert 'edit-step' in worker.procedure_merge_message([dict(id='midi-check', conflicts=['step "Count": theirs "a" / yours "b"'])])
+
+
+def test_a_procedure_linking_one_created_in_the_same_task_is_installed(tmp_path: Path, monkeypatch):
+    """The archive is alphabetical: the general procedure that links the new one is validated first. It must not be
+    refused for a link the same harvest is about to install (rhythm gym, 2026-09-22: the method landed an orphan)."""
+    store = tmp_path/'data'/'playbook'/'procedures'
+    store.mkdir(parents=True)
+    general = _proc([('s1', 'Hear the form', 'Hear the form before writing a note.')])
+    general['id'] = 'compose-romantic-piano-midi'
+    (store/'compose-romantic-piano-midi.json').write_text(json.dumps(general))
+    linked = json.loads(json.dumps(general))
+    linked['steps'].append(dict(id='s2', title='Shape the returning cell', do='Walk the cell.', procedure='shape-a-returning-rhythmic-cell'))
+    leaf = _proc([('c1', 'Name the cell', 'Hear the opening figure as ratios.')])
+    leaf['id'] = 'shape-a-returning-rhythmic-cell'
+
+    def validate(args, **kwargs):   # what `playbook validate` checks here: every linked procedure is in the store
+        doc = json.loads((store/(args[-1]+'.json')).read_text())
+        missing = [s['procedure'] for s in doc['steps'] if s.get('procedure') and not (store/(s['procedure']+'.json')).exists()]
+        return type('R', (), dict(returncode=1 if missing else 0, stdout='', stderr=f"linked procedure '{missing[0]}' does not exist" if missing else ''))()
+    monkeypatch.setattr(worker.subprocess, 'run', validate)
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode='w:') as archive:
+        for doc in (linked, leaf):   # alphabetical, as the workspace archive is
+            data = json.dumps(doc).encode()
+            info = tarfile.TarInfo(worker.PLAYBOOK_PREFIX+'/playbook/procedures/'+doc['id']+'.json')
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+    out = worker._harvest_playbook(buffer.getvalue(), store, {'mizpah': {'playbook': 'playbook'}},
+                                   allowed=('compose-romantic-piano-midi', 'shape-a-returning-rhythmic-cell'))
+    assert out['rejected'] == []
+    assert out['created'] == ['shape-a-returning-rhythmic-cell'] and out['improved'] == ['compose-romantic-piano-midi']
+    assert json.loads((store/'compose-romantic-piano-midi.json').read_text())['steps'][-1]['procedure'] == 'shape-a-returning-rhythmic-cell'
+    # A link to a procedure nobody installs still fails, with the validator's reason, and the store keeps its copy.
+    (store/'compose-romantic-piano-midi.json').write_text(json.dumps(general))
+    (store/'shape-a-returning-rhythmic-cell.json').unlink()
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode='w:') as archive:
+        data = json.dumps(linked).encode()
+        info = tarfile.TarInfo(worker.PLAYBOOK_PREFIX+'/playbook/procedures/compose-romantic-piano-midi.json')
+        info.size = len(data)
+        archive.addfile(info, io.BytesIO(data))
+    out = worker._harvest_playbook(buffer.getvalue(), store, {'mizpah': {'playbook': 'playbook'}}, allowed=('compose-romantic-piano-midi',))
+    assert out['installed'] == [] and len(out['rejected']) == 1 and 'does not exist' in out['rejected'][0]
+    assert json.loads((store/'compose-romantic-piano-midi.json').read_text()) == general

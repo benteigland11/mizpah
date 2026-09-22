@@ -665,6 +665,7 @@ def _harvest_playbook(snapshot: bytes, store: Path, config: dict[str, Any],
                       workspace_store: Path | None = None) -> dict[str, list[Any]]:
     installed, rejected, ignored = [], [], []
     created, improved, merged_ids, conflicts = [], [], [], []
+    pending: list[tuple[Path, bytes]] = []
     prefix = PLAYBOOK_PREFIX+'/playbook/procedures/'
     with tarfile.open(fileobj=io.BytesIO(snapshot), mode='r:') as archive:
         for member in archive:
@@ -705,6 +706,15 @@ def _harvest_playbook(snapshot: bytes, store: Path, config: dict[str, Any],
                     conflicts.append(dict(id=target.stem, conflicts=clashes))
                     continue   # the worker reconciles in a merge round; the merge lands then
                 merged_ids.append(target.stem)
+            pending.append((target, data))
+    # Install in passes until nothing more validates: a procedure that links one created in the same task fails
+    # validation until that one is in the store, and the archive is alphabetical. compose-romantic-piano-midi was
+    # refused for linking shape-a-returning-rhythmic-cell, installed a moment later; the repair round then moved the
+    # link to a procedure the task never opened, and the method landed an orphan (rhythm gym, 2026-09-22).
+    failed: dict[str, str] = {}
+    while pending:
+        retry = []
+        for target, data in pending:
             staged = target.with_suffix('.json.staged')
             staged.write_bytes(data)
             backup = target.read_bytes() if target.exists() else None
@@ -716,12 +726,18 @@ def _harvest_playbook(snapshot: bytes, store: Path, config: dict[str, Any],
                 installed.append(target.stem)
                 # New to the library, or an existing procedure improved: the notice tells them apart.
                 (improved if backup is not None else created).append(target.stem)
+                failed.pop(target.stem, None)
             else:
-                rejected.append(target.stem+': '+(check.stderr or check.stdout).strip()[:300])
+                failed[target.stem] = (check.stderr or check.stdout).strip()[:300]
+                retry.append((target, data))
                 if backup is None:
                     target.unlink()
                 else:
                     target.write_bytes(backup)
+        if len(retry) == len(pending):
+            break   # a pass that installed nothing: what is left fails on its own
+        pending = retry
+    rejected += [stem+': '+why for stem, why in failed.items()]
     return dict(installed=installed, rejected=rejected, ignored=ignored, created=created, improved=improved,
                 merged=merged_ids, conflicts=conflicts)
 
