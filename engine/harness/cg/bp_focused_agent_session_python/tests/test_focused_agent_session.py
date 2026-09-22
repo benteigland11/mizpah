@@ -1639,7 +1639,7 @@ def test_rebind_accepts_a_new_model_and_rolls_the_window_over_to_it(tmp_path):
     assert rebound.status()['status'] == 'ready'
     events = [json.loads(line) for line in (root/'events'/'session.jsonl').read_text().splitlines()]
     marks = [e['payload'] for e in events if e['event_type'] == 'rebound']
-    assert marks == [dict(worker=True, generation=dict(before='worker', after='other'), rollover=True, window=0)]
+    assert marks == [dict(worker=True, generation=dict(before='worker', after='other'), system_text=False, rollover=True, window=0)]
     done = rebound.run()
     assert done['status'] == 'complete' and done['handoffs'] == 1
     # The new model wrote the memory and continued on it: its first request is the handoff, the rest carry
@@ -1661,6 +1661,23 @@ def test_rebind_with_an_empty_window_needs_no_rollover(tmp_path):
     rebound = FocusedSession.rebind(root, worker=other, shell=shell)
     assert rebound.state.get('rollover_requested') is None
     assert rebound.run()['status'] == 'complete' and rebound.status()['handoffs'] == 0
+
+
+def test_rebind_swaps_a_revised_system_text_in_place_without_a_rollover(tmp_path):
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, total=3, enabled=False, rollover=False)
+    root = tmp_path/'session'
+    session = FocusedSession.create(root, settings, worker=worker, shell=shell)
+    session.run(maximum_worker_turns=2)
+    revised = FocusedSession.rebind(root, worker=worker, shell=shell, worker_system='You operate the shell, carefully.')
+    assert revised.state.get('rollover_requested') is None
+    assert revised.settings.worker_system == 'You operate the shell, carefully.'
+    done = revised.run()
+    assert done['status'] == 'complete' and done['handoffs'] == 0
+    assert wt.requests[-1]['messages'][0] == dict(role='system', content='You operate the shell, carefully.')
+    reopened = FocusedSession.open(root, worker=worker, shell=shell)
+    assert reopened.settings.worker_system == 'You operate the shell, carefully.'
+    events = [json.loads(line) for line in (root/'events'/'session.jsonl').read_text().splitlines()]
+    assert [e['payload'] for e in events if e['event_type'] == 'rebound'] == [dict(system_text=True, rollover=False, window=0)]
 
 
 def test_reviews_can_be_suspended_and_resumed(tmp_path):
@@ -1751,6 +1768,58 @@ def test_a_final_tool_call_is_a_completion_claim(tmp_path):
     assert any(c.startswith('echo done:') and 'run r1' in c for c in shell.calls)   # the call ran like any command tool
 
 
+class EditUnderCorrectionTransport(FileToolTransport):
+    """Scripted worker: claims done, then edits the probe the correction names across five turns, then claims again."""
+
+    def __init__(self):
+        super().__init__()
+        self.script = [('done', dict(summary='first claim')),
+                       ('write', dict(path='probes/a/probe.py', content='x = 1\n')),
+                       ('edit', dict(path='probes/a/probe.py', old_text='x = 1', new_text='x = 2')),
+                       ('edit', dict(path='probes/a/probe.py', old_text='x = 2', new_text='x = 3')),
+                       ('edit', dict(path='probes/a/probe.py', old_text='x = 3', new_text='x = 4')),
+                       ('edit', dict(path='probes/a/probe.py', old_text='x = 4', new_text='x = 5')),
+                       ('done', dict(summary='second claim'))]
+
+
+def test_a_standing_correction_is_rechecked_only_when_the_worker_says_done(tmp_path):
+    """Edits to a file the correction is about are not a review boundary; the next claim is."""
+    settings, _, shell, _, _, _ = setup(tmp_path, total=0, enabled=True, rollover=False)
+    settings = replace(settings, worker_tools=('bash', 'write', 'edit'), final_tools=('done',),
+                       review_focus_globs=('probes/*/probe.py',),
+                       command_tools=(dict(name='done', description='say you are done', command='echo done: {summary}',
+                                           parameters=dict(type='object', properties=dict(summary=dict(type='string')), required=['summary'])),),
+                       controller=replace(settings.controller, plain_review=True, maximum_completion_corrections=1))
+    endpoint = EndpointConfig('http://example.invalid', 5, 1000000, {}, '/complete', '/template', '/tokenize', False, True)
+    reviewer = SendBackTransport()
+    item = FocusedSession.create(tmp_path/'session', settings, worker=ModelClient(endpoint, transport=EditUnderCorrectionTransport()),
+                                 shell=shell, controller=ModelClient(endpoint, transport=reviewer))
+    assert item.run()['status'] == 'complete'
+    events = [json.loads(line) for line in (tmp_path/'session'/'events'/'session.jsonl').read_text().splitlines()]
+    reviews = [e['payload'] for e in events if e['event_type'] == 'controller_review']
+    assert [(r['boundary'], r['turn']) for r in reviews] == [('completion', 1), ('completion', 7)]
+    assert [json.loads(r['messages'][1]['content'])['boundary'] for r in reviewer.requests] == ['completion', 'completion']
+
+
+def test_rebind_can_discard_a_torn_call_left_by_a_killed_process(tmp_path):
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, total=3, enabled=False, rollover=False)
+    root = tmp_path/'session'
+    session = FocusedSession.create(root, settings, worker=worker, shell=shell)
+    session.run(maximum_worker_turns=1)
+    # A model call that never came back: the state says so, as it would after a kill.
+    with session._locked():
+        session.state['pending_io'] = dict(kind='model', purpose='worker', prompt_tokens=10)
+        session._save()
+    other = ModelClient(replace(worker.config, timeout_seconds=7), transport=WorkerTransport(total=3, rollover=False))
+    with pytest.raises(ValueError, match='resolved boundary'):
+        FocusedSession.rebind(root, worker=other, shell=shell)
+    rebound = FocusedSession.rebind(root, worker=other, shell=shell, discard_pending=True)
+    assert rebound.state['pending_io'] is None and rebound.status()['status'] == 'ready'
+    events = [json.loads(line) for line in (root/'events'/'session.jsonl').read_text().splitlines()]
+    kinds = [e['event_type'] for e in events]
+    assert kinds.index('pending_discarded') < kinds.index('rebound')
+
+
 def test_reopen_accepts_another_scratch_root_and_other_refusal_wording(tmp_path):
     # A session adopted into another task's root (continue_from) is opened with that root's scratch; the
     # refusal patterns are host policy text. Neither is the sandbox binding.
@@ -1776,6 +1845,64 @@ def test_a_continuation_and_an_interjection_journal_their_text(tmp_path):
     events = [json.loads(line) for line in (root/'events'/'session.jsonl').read_text().splitlines()]
     [cont] = [e for e in events if e['event_type'] == 'continued']
     assert cont['payload']['label'] == 'gate red: repair round' and cont['payload']['text'].startswith('Gate red. Missing:')
+
+
+class VerbTransport(WorkerTransport):
+    """A worker that calls one host verb, then a second with bad arguments, then answers."""
+
+    def __call__(self, path, payload, **kwargs):
+        if path in ('/template', '/tokenize') or 'tools' not in payload:
+            return super().__call__(path, payload, **kwargs)
+        self.requests.append(deepcopy(payload))
+        self.turns += 1
+        if self.turns == 1:
+            calls = [dict(id='v1', type='function', function=dict(name='draft_show', arguments=json.dumps(dict(slug='a'))))]
+            return WireResponse(200, json.dumps(response('Showing.', calls)), 0)
+        if self.turns == 2:
+            calls = [dict(id='v2', type='function', function=dict(name='draft_show', arguments=json.dumps(dict(slug='missing'))))]
+            return WireResponse(200, json.dumps(response('Again.', calls)), 0)
+        return WireResponse(200, json.dumps(response('Verified final report.')), 0)
+
+
+def test_a_seat_of_host_verbs_never_enters_the_shell(tmp_path):
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, total=3, enabled=False, rollover=False)
+    verbs = (dict(name='draft_show', description='show a draft', host=True,
+                  parameters=dict(type='object', properties=dict(slug=dict(type='string')), required=['slug'])),)
+    settings = replace(settings, worker_tools=(), command_tools=verbs)
+    shown = []
+
+    def draft_show(args):
+        if args['slug'] == 'missing':
+            raise FileNotFoundError('no draft named missing')
+        shown.append(args['slug'])
+        return dict(status='ok', showing=dict(draft=args['slug']))
+
+    worker = ModelClient(worker.config, transport=VerbTransport(total=3, rollover=False))
+    session = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, handlers=dict(draft_show=draft_show))
+    done = session.run()
+    assert done['status'] == 'complete' and shown == ['a']
+    assert shell.commands == [] if hasattr(shell, 'commands') else True   # nothing went to the shell
+    # The model's tool list is the verbs alone; no bash, read, write or edit.
+    names = [t['function']['name'] for t in worker.transport.requests[0]['tools']]
+    assert names == ['draft_show']
+    events = [json.loads(line) for line in (tmp_path/'session'/'events'/'session.jsonl').read_text().splitlines()]
+    calls = [e['payload'] for e in events if e['event_type'] == 'command_tool']
+    outcomes = [e['payload'] for e in events if e['event_type'] == 'tool_outcome']
+    assert calls[0]['host'] is True and calls[0]['command'] == 'draft_show {"slug": "a"}'
+    assert outcomes[0]['status'] == 'ok' and json.loads(outcomes[0]['stdout'])['showing'] == dict(draft='a')
+    assert outcomes[1]['status'] == 'error' and 'no draft named missing' in outcomes[1]['error']
+    # The model was handed the verb's result as its tool output.
+    handed = worker.transport.requests[1]['messages'][-1]
+    assert handed['role'] == 'tool' and 'draft' in handed['content']
+    # Reopen binds handlers again; without them the verb is unknown.
+    again = FocusedSession.open(tmp_path/'session', worker=worker, shell=shell)
+    assert again.handlers == {}
+
+
+def test_a_seat_needs_verbs_when_it_has_no_worker_tools(tmp_path):
+    settings, *_ = setup(tmp_path, enabled=False)
+    with pytest.raises(ValueError, match='typed verbs'):
+        replace(settings, worker_tools=(), command_tools=())
 
 
 def test_stream_progress_lands_beside_the_journal_not_in_it(tmp_path):

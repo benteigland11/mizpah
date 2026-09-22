@@ -874,24 +874,6 @@ class FocusedSession:
                 ago=str(max(0, self.progress.turns-self.progress.last_review_turn)), correction=text))]
         return [dict(role='user', content=prefix+'\n'+text)]
 
-    def _touched_focus_file(self, turn: dict[str, Any]) -> bool:
-        """Whether one of the turn's applied write/edit calls named a file the review focuses on."""
-        globs = self.settings.review_focus_globs
-        if not globs:
-            return False
-        for call in ((turn.get('response') or {}).get('tool_calls') or []):
-            fn = call.get('function') or {}
-            if fn.get('name') not in ('write', 'edit'):
-                continue
-            try:
-                args = json.loads(fn.get('arguments') or '{}')
-            except ValueError:
-                continue
-            path = str(args.get('path') or '').lstrip('/').removeprefix('work/')
-            if path and any(fnmatch.fnmatch(path, g) for g in globs):
-                return True
-        return False
-
     def worker_payload(self) -> dict[str, Any]:
         """Exact next worker request; private reference and progress are not inserted. A correction is a line in
         the transcript when it is issued and when it is withdrawn, not a message re-put every turn — put every
@@ -993,12 +975,9 @@ class FocusedSession:
                 # `done` inside the reflection says the record is written (or there is nothing general): not a claim.
                 self.state['proposed_final'] = None
                 self.state['reflect_turns_left'] = 0
-        if self.progress.guidance.get('correction') and self._touched_focus_file(self.state['active_turn']):
-            # A held correction names files; the worker just changed one of them. The reviewer withdraws
-            # a correction only when it looks, and between claims it never looked: a probe rewritten at
-            # turn 164 answered a turn-109 correction that stood, word for word, for forty turns while the
-            # worker re-read its own file trying to satisfy it. Ask for the look at this boundary.
-            self.state['review_requested'] = True
+        # A held correction is looked at again only when the worker says done. The recheck on an edit of a named
+        # file fired on a half-written probe (a hold that cost a call) and again five turns later (Grok, story of
+        # a song, 2026-09-22): the worker's claim is the boundary, not its keystrokes.
         self._event('worker_turn', deepcopy(self.state['active_turn']))
         self.state['active_turn'] = None
         image = self.state.pop('pending_image', None)
@@ -1006,10 +985,9 @@ class FocusedSession:
             self.session.append_image('read '+image['path']+' (image):', image['mime'], image['data'])
             self._event('image_shown', dict(path=image['path'], mime=image['mime'], bytes=len(image['data'])*3//4))
         final = self.state['proposed_final'] is not None
-        requested = (self.state.pop('review_requested', False)
-                     and self.progress.turns-self.progress.last_review_turn >= 3)   # not on every edit of a file
+        self.state.pop('review_requested', None)   # a session saved under the recheck may still carry the flag
         review = self.settings.reference is not None and not self.state.get('reviews_suspended') and (
-            self.progress.due() or requested or (final and self.settings.review_on_completion))
+            self.progress.due() or (final and self.settings.review_on_completion))
         self.state['phase'] = 'review' if review else ('complete' if final else 'worker')
         if final and not review:
             self.state['final_text'] = self.state['proposed_final']
