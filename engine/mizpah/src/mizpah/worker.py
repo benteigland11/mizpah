@@ -1509,7 +1509,7 @@ def session_calls(root: Path) -> list[tuple[str, dict[str, Any], dict[str, Any]]
     journal = root/'events'/'session.jsonl'
     if not journal.exists():
         return calls
-    for line in journal.read_text().splitlines():
+    for line in ops.jsonl_lines(journal):
         event = json.loads(line)
         if event.get('event_type') != 'worker_turn':
             continue
@@ -1519,8 +1519,8 @@ def session_calls(root: Path) -> list[tuple[str, dict[str, Any], dict[str, Any]]
             try:
                 args = json.loads(arguments) if isinstance(arguments, str) else arguments
             except ValueError:
-                # The model's arguments were not JSON (a write cut mid-string at 10 KB, 2026-09-22): the harness
-                # refused that call at the time; here it is a call with no arguments, not a reason to fail the task.
+                # Arguments that were not JSON: the harness refused that call at the time; here it is a call with
+                # no arguments, not a reason to fail the task.
                 args = {}
             calls.append((call['function']['name'], args if isinstance(args, dict) else {}, results.get(call.get('id'), {})))
     return calls

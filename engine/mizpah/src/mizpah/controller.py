@@ -21,7 +21,7 @@ from cg.bp_focused_agent_session_python.src import EndpointConfig, ModelClient, 
 from cg.backend_persistent_model_session_python.src.persistent_model_session import parse_turn
 
 from . import briefs, capabilities, enablers, phases
-from . import layout
+from . import layout, ops
 from . import priorart
 from .worker import terra
 
@@ -321,7 +321,7 @@ def task_workspaces(root: Path) -> list[dict[str, Any]]:
                          if (p/'measure.py').exists() and p.name.removesuffix('_probe') in unknowns}) if (root.parent.parent/'map').is_dir() else []
         walks, widgets = [], []
         try:
-            for line in (d/'events'/'session.jsonl').read_text().splitlines():
+            for line in ops.jsonl_lines(d/'events'/'session.jsonl'):
                 if 'playbook open ' in line:
                     # The procedure named on the open command, and nothing else on the line: an `"id"` regex
                     # over the whole line took every id near it — call ids, the procedures a search listed —
@@ -358,7 +358,7 @@ def task_workspaces(root: Path) -> list[dict[str, Any]]:
 def last_cautions(journal: Path) -> list[str]:
     """What the guard noted on the previous briefing: applied as decided, said once here."""
     try:
-        lines = Path(journal).read_text().splitlines()
+        lines = ops.jsonl_lines(Path(journal))
     except OSError:
         return []
     for line in reversed(lines):

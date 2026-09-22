@@ -442,11 +442,20 @@ def notify(config: dict[str, Any], root: Path, title: str, body: str) -> None:
 
 # ---------------------------------------------------------------- report
 
+def jsonl_lines(path: Path) -> list[str]:
+    """The lines of a JSONL file, split on newline only. `str.splitlines` also splits on U+0085, U+2028, U+001C…
+    which json.dumps(ensure_ascii=False) leaves raw inside a string: a worker that read an mp3 as text put one in
+    a tool result, the record split in two, and every reader of that journal failed (render, 2026-09-22)."""
+    if not path.exists():
+        return []
+    return [line for line in path.read_text(errors='replace').split('\n') if line.strip()]
+
+
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     rows = []
-    for line in path.read_text().splitlines():
+    for line in jsonl_lines(path):
         try:
             rows.append(json.loads(line))
         except ValueError:
@@ -524,7 +533,7 @@ def write_report(config: dict[str, Any], project: Path, root: Path, cycles: list
                      +'); '+str(sum(refused.values()))+' refused ('+', '.join(h+' ×'+str(n) for h, n in sorted(refused.items(), key=lambda kv: -kv[1])[:6])+')')
     sizes = []
     if (root/'controller.jsonl').exists():
-        for line in (root/'controller.jsonl').read_text().splitlines():
+        for line in jsonl_lines(root/'controller.jsonl'):
             try:
                 sizes += [int(a.get('observation_chars') or 0) for a in json.loads(line).get('attempts') or [] if a.get('observation_chars')]
             except ValueError:
@@ -583,7 +592,7 @@ def _refusals(root: Path) -> dict[str, list[dict[str, Any]]]:
                 out[journal.parts[-3]] = cached[1]
             continue
         rows = []
-        for line in journal.read_text().splitlines():
+        for line in jsonl_lines(journal):
             try:
                 event = json.loads(line)
             except ValueError:
