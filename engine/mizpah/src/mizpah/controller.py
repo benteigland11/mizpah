@@ -271,10 +271,8 @@ def reviewer_doubts(journal: Path) -> list[dict[str, Any]]:
 
 
 def task_workspaces(root: Path) -> list[dict[str, Any]]:
-    """The worker workspaces this loop holds, one per task that reached a turn: what each was for and what it
-    left behind (probes, walks, widgets), so the controller can route a task onto one instead of starting a
-    worker from nothing. Every repair task tonight rewrote a probe that was sitting in the last worker's
-    workspace (2026-09-21)."""
+    """Past work orders, one per task that reached a turn: what each was for and what it left on disk (probes,
+    walks, widgets) for a fresh worker to find."""
     out = []
     tasks = root/'tasks'
     if not tasks.is_dir():
@@ -1301,16 +1299,6 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         carried = {u['enabler'] for u in unknowns if u['id'] in ids and u.get('enabler')}
         if len(carried) > 1:
             refusals.append('task '+tid+': one enabler per task ('+', '.join(sorted(carried))+')'); continue
-        # A task may continue a worker workspace this loop holds: its worker resumes with the probe, the walk
-        # and the widgets of that task rather than starting from nothing. A name that is not a workspace here is
-        # dropped with a caution (method, not integrity).
-        continue_from = str(item.get('continue_from') or '').strip()
-        if continue_from:
-            held = {w['task'] for w in observation.get('workspaces') or []}
-            if continue_from not in held:
-                cautions.append('task '+tid+': continue_from '+repr(continue_from)+' names no workspace this loop holds ('
-                                +(', '.join(sorted(held)) or 'none')+'); routed fresh')
-                continue_from = ''
         walk = str(item.get('walk') or '').strip()
         walk_from = int(item.get('walk_from') or 0) if str(item.get('walk_from') or '').isdigit() or isinstance(item.get('walk_from'), int) else 0
         if walk:
@@ -1339,7 +1327,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
                                 'workspace; it starts from 0 — the next walk is routed when the first leaves it')
                 walk_from = 0
         tasks.append(dict(id=tid, title=title, unknowns=ids, unknown=ids[0], bucket=item['bucket'], deps=deps,
-                          enabler=next(iter(carried), ''), continue_from=continue_from, walk=walk, walk_from=walk_from))
+                          enabler=next(iter(carried), ''), walk=walk, walk_from=walk_from))
     accepted_ids = existing_tasks | {t['id'] for t in tasks}
     for t in tasks:
         gone = [d for d in t['deps'] if d not in accepted_ids]
@@ -1594,8 +1582,6 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any], root:
                 args += ['--sector', now['id']]   # the phase's provision: its points, not the next phase's
         for extra in ids[1:]:
             args += ['--accept', 'unknown:'+extra]  # the task resolves these too; Terra's map_id holds only one
-        if t.get('continue_from'):
-            args += ['--accept', 'continue_from:'+t['continue_from']]   # the worker workspace this task resumes
         if t.get('walk'):
             args += ['--accept', 'walk:'+t['walk']+'@'+str(int(t.get('walk_from') or 0))]   # the procedure walk this task opens
         for dep in t['deps']:
