@@ -416,3 +416,26 @@ def test_a_formula_composes_readings_and_a_transitional_unknown_cites_the_one_it
     # exist); the record is on the map with its expression and its variable bound to the known.
     rec = json.loads((gym/'.terra'/'map'/'unknowns'/'composition_level.json').read_text())
     assert rec.get('type') == 'formula' and rec.get('expression') == 'grid_lock < 0.7' and rec['vars']['grid_lock'] == dict(known_id='grid_lock')
+
+
+def test_a_task_maps_readings_are_on_the_sitrep(tmp_path: Path, gym: Path) -> None:
+    """Every quantity a worker's probes read on its task map is listed with the past work order, whether or not an
+    unknown asked for it — the controller composes from these and links a run before minting a probe."""
+    state = tmp_path/'.mizpah'
+    root = state/'sessions'/'s1'
+    old = root/'tasks'/'compose'
+    (old/'events').mkdir(parents=True)
+    (old/'events'/'session.jsonl').write_text('')
+    (old/'task.json').write_text(json.dumps(dict(task=dict(id='compose'), unknowns=[dict(id='piece_mid_built')], map='t_compose')))
+    (old/'state.sqlite3').write_bytes(b'')
+    for i, (voided, val) in enumerate([(False, 0.407), (False, 0.41), (True, 0.9)]):
+        r = state/'map'/'sessions'/'t_compose'/'runs'/f'r{i}'
+        r.mkdir(parents=True)
+        (r/'meta.json').write_text(json.dumps(dict(id=f'r{i}', probe_id='performance', status='ok', voided=voided,
+                                                  measures=[dict(quantity='grid_lock', value=val), dict(quantity='piece_mid_built', value=True)])))
+    spaces = controller.task_workspaces(root)
+    readings = {r['quantity']: r for r in spaces[0]['readings']}
+    assert readings['grid_lock'] == dict(quantity='grid_lock', probe='performance', runs=2, value=0.41)
+    assert readings['piece_mid_built']['runs'] == 2
+    text = controller.render_observation(controller.observe(CONFIG, gym) | dict(workspaces=spaces), 'eval')
+    assert 'readings on its map: grid_lock=0.41 (n=2, performance); piece_mid_built=true (n=2, performance)' in text

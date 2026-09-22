@@ -270,6 +270,33 @@ def reviewer_doubts(journal: Path) -> list[dict[str, Any]]:
     return out[:8]
 
 
+def map_readings(state: Path, map_id: str) -> list[dict[str, Any]]:
+    """Every quantity read on a task map, from its live runs: what a worker's probes put there whether or not an
+    unknown asked for it. The controller composes from these and links a run before it mints a probe. One line
+    per quantity: the latest value, how many runs read it, which probe."""
+    if not map_id or map_id == 'global':
+        return []
+    runs_dir = state/'map'/'sessions'/map_id/'runs'   # `state` is the project's .mizpah (the session root's grandparent)
+    if not runs_dir.is_dir():
+        return []
+    seen: dict[str, dict[str, Any]] = {}
+    for meta in sorted(runs_dir.glob('*/meta.json')):
+        try:
+            run = json.loads(meta.read_text())
+        except (OSError, ValueError):
+            continue
+        if run.get('voided') or run.get('status') != 'ok':
+            continue
+        for m in run.get('measures') or []:
+            q = str(m.get('quantity') or '')
+            if not q:
+                continue
+            entry = seen.setdefault(q, dict(quantity=q, probe=run.get('probe_id'), runs=0, value=None))
+            entry['runs'] += 1
+            entry['value'] = m.get('value')
+    return sorted(seen.values(), key=lambda e: e['quantity'])
+
+
 def task_workspaces(root: Path) -> list[dict[str, Any]]:
     """Past work orders, one per task that reached a turn: what each was for and what it left on disk (probes,
     walks, widgets) for a fresh worker to find."""
@@ -321,7 +348,7 @@ def task_workspaces(root: Path) -> list[dict[str, Any]]:
             pass
         out.append(dict(task=d.name, unknowns=unknowns, verdict=(result or {}).get('verdict') or 'live',
                         turns=(result or {}).get('turns'), probes=probes, walks=sorted(set(walks))[:6],
-                        widgets=sorted(set(widgets))[:6],
+                        widgets=sorted(set(widgets))[:6], readings=map_readings(root.parent.parent, saved.get('map') or ''),
                         walks_open=[dict(procedure=w.get('procedure'), unticked=w.get('unticked'), next=w.get('next'),
                                          continues=w.get('continues') or 0, next_from=w.get('next_from') or 0)
                                     for w in ((result or {}).get('walks_open') or [])][:8]))
@@ -505,6 +532,9 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
                          +', '.join(w['unknowns'])+(' · probes: '+', '.join(w['probes']) if w['probes'] else '')
                          +(' · walked: '+', '.join(w['walks']) if w['walks'] else '')+(' · widgets: '+', '.join(w['widgets']) if w['widgets'] else '')
                          +(' · walks left: '+'; '.join(str(x['procedure'])+' ('+str(x['unticked'])+' unticked)' for x in w['walks_open']) if w.get('walks_open') else ''))
+            if w.get('readings'):
+                lines.append('    readings on its map: '+'; '.join(str(r['quantity'])+'='+json.dumps(r['value'])[:24]+' (n='+str(r['runs'])+', '+str(r['probe'])+')'
+                                                                 for r in w['readings'][:12]))
     waiting = [t for t in observation['tasks'] if t['status'] in ('ready', 'in_progress')]
     if waiting and mode == 'eval':
         lines.append('Already routed and waiting to run: '+', '.join(t['id'] for t in waiting)+' — they cover '
