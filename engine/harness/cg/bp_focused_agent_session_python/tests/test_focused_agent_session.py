@@ -298,8 +298,11 @@ def test_20_turn_cadence_10_turn_pairs_and_state_survive_resets_and_reopen(tmp_p
     assert all('tools' in payload for payload in ct.requests)
     assert all('PRIVATE_PROJECT_DOCUMENT' not in json.dumps(payload) for payload in wt.requests)
     assert all('reasoning_content' not in observation['response'] for item in ct.inputs for observation in item['recent_turns'])
-    for payload in wt.requests[1:]:
-        assert sum(message.get('content', '').startswith('Controller guidance:') for message in payload['messages']) == 1
+    # The correction is a line in the transcript from the turn it was issued, not a message re-put every request:
+    # requests before the first review carry none, requests after carry it once (as history), never twice.
+    # Across a rollover the handoff carries it, like every constraint that still applies; nothing is re-put.
+    counts = [sum(message.get('content', '').startswith('Controller guidance:') for message in payload['messages']) for payload in wt.requests]
+    assert counts[0] == 0 and max(counts) == 1 and 1 in counts
     for item in ct.inputs[1]['recent_turns']:
         assert item['response']['tool_calls'][0]['id'] == item['tool_results'][0]['call_id']
         assert 'applied_input' in item

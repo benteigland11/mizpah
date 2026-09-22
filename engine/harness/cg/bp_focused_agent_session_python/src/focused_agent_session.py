@@ -835,15 +835,16 @@ class FocusedSession:
         return False
 
     def worker_payload(self) -> dict[str, Any]:
-        """Exact next worker request; private reference and progress are not inserted."""
-        value = self.session.payload()
-        value['messages'].extend(self._guidance_message())
-        return value
+        """Exact next worker request; private reference and progress are not inserted. A correction is a line in
+        the transcript when it is issued and when it is withdrawn, not a message re-put every turn — put every
+        turn, a ninety-turn-old correction read as news each time. Across a rollover it is the handoff's to
+        carry, like every other constraint that still applies."""
+        return self.session.payload()
 
     def _incoming(self) -> list[dict[str, Any]]:
         # Completed prior assistant messages are not new input. Tool results and
         # user/system text since the preceding call are applied incoming context.
-        return deepcopy(self.session.messages[self.state['input_cursor']:])+self._guidance_message()
+        return deepcopy(self.session.messages[self.state['input_cursor']:])
 
     def _complete(self, client: ModelClient, payload: dict[str, Any], purpose: str,
                   capacity: int, prompt_tokens: int | None = None,
@@ -1498,6 +1499,11 @@ class FocusedSession:
         self.state.setdefault('review_log', []).append(dict(
             turn=self.progress.turns, boundary=boundary, operation=decision.get('operation'),
             correction=decision.get('correction') or '', evidence=(decision.get('evidence') or '')[:300]))
+        # The correction as a line in the transcript, once: issued (replace) or withdrawn (clear). A hold says nothing.
+        if decision.get('operation') == 'replace' and not self.session.pending_tools:
+            self.session.append_guidance(self._guidance_message()[0]['content'])
+        elif decision.get('operation') == 'clear' and not self.session.pending_tools:
+            self.session.append_guidance('The reviewer withdrew its correction: the files no longer show it. Nothing stands against your work.')
         self.state.update(pending_io=None, review=None)
         if final and decision['operation'] != 'replace':
             self.state.update(phase='complete', final_text=self.state['proposed_final'])
