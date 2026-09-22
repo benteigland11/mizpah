@@ -2,5 +2,7 @@ glossary
 map
 unknowns
 probes
+playbook
+cartograph
 route
 policy
