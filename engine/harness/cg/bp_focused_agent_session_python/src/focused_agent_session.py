@@ -133,6 +133,7 @@ class SessionSettings:
     maximum_write_characters: int | None = None
     maximum_edit_characters: int | None = None
     maximum_read_lines: int = 200
+    maximum_read_characters: int = 24000   # a read is bounded by lines; a one-line file needs a bound by characters too
     # An image the worker reads is shown whole (a projector needs the pixels); this bounds the request body.
     maximum_image_bytes: int = 2*1024*1024
     # Workspace paths (fnmatch globs) write and edit refuse: records a tool owns and the worker only reads.
@@ -1125,6 +1126,17 @@ class FocusedSession:
                         limit = min(int(args.get('limit', self.settings.maximum_read_lines)), self.settings.maximum_read_lines)
                         report = read_workspace_lines(self.workspace(), args['path'], offset=int(args.get('offset', 1)),
                             limit=limit, **options)
+                        cap = self.settings.maximum_read_characters
+                        if len(report.get('content') or '') > cap:
+                            # Lines bound a text file; a one-line file (a JSON archive, a minified asset) is not
+                            # bounded by lines. Twenty "lines" of a window archive were 400K characters and the
+                            # request overran the context capacity (follow-the-score, 2026-09-22).
+                            longest = max((len(ln) for ln in report['content'].splitlines()), default=0)
+                            report['content'] = report['content'][:cap]
+                            report['truncated'] = True
+                            report['note'] = (f'cut at {cap:,} characters: this file is not line-structured (its longest line '
+                                              f'here is {longest:,} characters). Read it with a tool that takes ranges '
+                                              f'(python, cut -c, jq) instead of by line')
                     # Remember what the worker saw: an edit must anchor on a read of the current content.
                     self.state.setdefault('read_hashes', {})[args['path']] = hashlib.sha256(
                         read_workspace_file(self.workspace(), args['path'], **options)).hexdigest()
