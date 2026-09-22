@@ -55,8 +55,8 @@
     "subscription": "openai_chatgpt"
   },
   "session_policy": {
-    "context_capacity": 61440,
-    "rollover_threshold": 50000,
+    "context_capacity": 102400,
+    "rollover_threshold": 61440,
     "worker_output_tokens": -1,
     "handoff_output_tokens": -1,
     "output_headroom_tokens": 10000,
@@ -69,7 +69,8 @@
     "handoff_generation_overrides": {
       "reasoning_budget_tokens": 2048
     },
-    "argument_excerpt_characters": 2001
+    "argument_excerpt_characters": 2001,
+    "reflect_turns": 8
   },
   "review_policy": {
     "update_interval": 20,
@@ -115,7 +116,7 @@
       "workspace_bytes": 268435456,
       "temporary_bytes": 268435456,
       "output_bytes": 1048576,
-      "visible_output_bytes": 262144,
+      "visible_output_bytes": 8192,
       "processes": 256,
       "cpu_percent": 200,
       "command_seconds": 90,
@@ -123,7 +124,7 @@
       "max_files": 10000
     }
   },
-  "maximum_generation_retries": 2,
+  "maximum_generation_retries": 8,
   "worker_tools": [
     "bash",
     "read",

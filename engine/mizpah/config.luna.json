@@ -9,7 +9,8 @@
    "/home/Vinscen/mizpah",
    "/home/Vinscen/.local/share/uv/python",
    "/home/Vinscen/.local/share/cartograph/Widget_Library",
-   "/sys"
+   "/sys",
+   "/etc/fonts"
   ],
   "environment": {
    "PATH": "/home/Vinscen/mizpah/.venv/bin:/usr/bin",
@@ -50,8 +51,7 @@
  "repeated_success_rollover": 5,
  "cartograph": "/home/Vinscen/mizpah/.venv/bin/cartograph",
  "widget_library": "~/.local/share/cartograph/Widget_Library",
-
- "turn_cap": 400,
+ "turn_cap": 4000,
  "controller_output_tokens": 8192,
  "checkin_output_tokens": 2048,
  "scaffolding": {
