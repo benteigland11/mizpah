@@ -72,3 +72,12 @@ def test_tick_shape_guards_are_scaffolding_off_by_default():
     assert refused({}) == []
     assert refused(dict(tick_guards=True)) == bulk
     assert any('pip' in p for p, _ in worker.refused_patterns(dict(mizpah=dict(scaffolding={}))))   # verification stays
+
+
+def test_a_formula_unknown_reaches_the_task_map_with_its_expression_and_vars():
+    """The copy onto a task map dropped expression and vars; the first composed target died there (2026-09-22)."""
+    u = dict(id='target_visible', type='formula', expression='v >= 0.95 and s >= 10',
+             vars={'v': {'known_id': 'collect_visible_fraction'}, 's': {'quantity': 'staff_px', 'kind': 'number'}})
+    assert worker.formula_args(u) == ['--expression', 'v >= 0.95 and s >= 10',
+                                      '--var', 'v=known:collect_visible_fraction', '--var', 's=staff_px:number']
+    assert worker.formula_args(dict(id='x', type='number')) == []

@@ -233,8 +233,26 @@ def open_task_map(config: dict[str, Any], project: Path, task: dict[str, Any], m
             args += ['--unit', unknown['unit']]
         if unknown.get('notes'):
             args += ['--notes', unknown['notes']]  # carries `cites need:N; source ...` for the check-in reference
+        args += formula_args(unknown)
         terra(config, project, *args)
     return map_id
+
+
+def formula_args(unknown: dict[str, Any]) -> list[str]:
+    """A formula unknown's expression and variables, in the form `terra unknown create` takes them. The copy onto
+    a task map carried claim, evidence and type only, so the first target a controller composed (a turn-ahead
+    gym on GPT-6 Sol, 2026-09-22) was refused on the task map and the driver died three times."""
+    if unknown.get('type') != 'formula':
+        return []
+    args = ['--expression', str(unknown.get('expression') or '')]
+    for name, spec in (unknown.get('vars') or {}).items():
+        if isinstance(spec, dict) and spec.get('known_id'):
+            args += ['--var', f"{name}=known:{spec['known_id']}"]
+        elif isinstance(spec, dict) and spec.get('quantity'):
+            args += ['--var', f"{name}={spec['quantity']}" + (f":{spec['kind']}" if spec.get('kind') else '')]
+        elif isinstance(spec, str):
+            args += ['--var', f'{name}={spec}']
+    return args
 
 
 
