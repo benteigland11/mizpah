@@ -309,6 +309,11 @@ class SessionPolicy:
     overflow_excerpt_characters: int = 16000
     reasoning_retention: str = 'all'
     argument_excerpt_characters: int | None = None
+    # Stop and reflect before the window rolls: at the threshold the worker is told to record its method (the
+    # reflect prompt) and given this many turns for it, overshooting the threshold into the capacity's buffer;
+    # then it writes the handoff. 0 turns: no reflection, the handoff at once (the old shape).
+    reflect_prompt: str = ''
+    reflect_turns: int = 0
 
     def __post_init__(self) -> None:
         if self.reasoning_retention not in REASONING_RETENTION:

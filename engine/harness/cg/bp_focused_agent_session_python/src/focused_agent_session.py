@@ -929,6 +929,12 @@ class FocusedSession:
                     self.state['proposed_final'] = summary
                     break
         self.progress.observe(self.state['active_turn'])
+        if self.state.get('reflect_turns_left') is not None:
+            self.state['reflect_turns_left'] -= 1
+            if self.state.get('proposed_final') is not None:
+                # `done` inside the reflection says the record is written (or there is nothing general): not a claim.
+                self.state['proposed_final'] = None
+                self.state['reflect_turns_left'] = 0
         if self.progress.guidance.get('correction') and self._touched_focus_file(self.state['active_turn']):
             # A held correction names files; the worker just changed one of them. The reviewer withdraws
             # a correction only when it looks, and between claims it never looked: a probe rewritten at
@@ -969,10 +975,30 @@ class FocusedSession:
             self.state['phase'] = 'handoff'
             self._save(commit=False)
             return
-        if self.session.needs_rollover(count):
+        reflecting = self.state.get('reflect_turns_left')
+        if reflecting is None and self.session.needs_rollover(count):
             # A just-reset window must leave room for actual work.
             if self.session.window_index and len(self.session.messages) <= len(self.session.base_messages)+1:
                 raise ContextCapacityExceeded('The resumed context is already above the rollover threshold')
+            policy = self.settings.session_policy
+            if policy.reflect_turns > 0 and policy.reflect_prompt.strip() and not self.session.pending_tools:
+                # Stop and reflect first: the method is recorded while the window still holds it; the handoff
+                # follows. The buffer above the threshold is what the reflection runs in.
+                self.session.append_guidance(policy.reflect_prompt)
+                self.state['reflect_turns_left'] = policy.reflect_turns
+                self._event('reflect_started', dict(window=self.session.window_index, turns=policy.reflect_turns, prompt_tokens=count))
+                self._save(commit=False)
+                payload = self.worker_payload()
+                count = self._client(self.worker).count(payload, 'worker')['tokens']
+            else:
+                self.state['phase'] = 'handoff'
+                self._save(commit=False)
+                return
+        elif reflecting is not None and (reflecting <= 0 or count >= self.settings.session_policy.context_capacity
+                                          -self.settings.session_policy.output_headroom_tokens):
+            # The reflection's turns are spent, or the buffer is: hand off now.
+            self.state.pop('reflect_turns_left', None)
+            self._event('reflect_ended', dict(window=self.session.window_index, why='turns' if reflecting <= 0 else 'buffer'))
             self.state['phase'] = 'handoff'
             self._save(commit=False)
             return
@@ -1832,7 +1858,7 @@ class FocusedSession:
             self._save()
             return self.status()
 
-    RETUNABLE = ('reasoning_retention', 'rollover_threshold', 'output_headroom_tokens', 'context_capacity',
+    RETUNABLE = ('reasoning_retention', 'rollover_threshold', 'output_headroom_tokens', 'context_capacity', 'reflect_prompt', 'reflect_turns',
                  'recent_result_count', 'recent_result_characters')
 
     def retune(self, **changes: Any) -> dict[str, Any]:

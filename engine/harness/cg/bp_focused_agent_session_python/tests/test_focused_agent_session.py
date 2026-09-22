@@ -1814,3 +1814,23 @@ def test_focus_files_follow_the_widgets_a_probe_names(tmp_path):
     assert 'probes/p/measure.py' in focus and 'cg/data-x-python/src/x.py' in focus
     assert 'cg/data-y-python/src/y.py' not in focus
     assert list(focus)[0] == 'probes/p/measure.py'
+
+
+def test_at_the_threshold_the_worker_reflects_then_hands_off(tmp_path):
+    # With a reflect prompt and turns, the threshold does not roll the window at once: the prompt goes in as
+    # a message, the worker takes up to N turns above the threshold (in the buffer), then the handoff. A
+    # `done` inside the reflection ends it early and is not a completion claim.
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, total=40, enabled=False, rollover=True)
+    policy = replace(settings.session_policy, reflect_prompt='REFLECT: record the method', reflect_turns=3)
+    settings = replace(settings, session_policy=policy)
+    session = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell)
+    session.run(maximum_worker_turns=25)
+    events = SessionEventLog((tmp_path/'session')/'events').read_strict('session')
+    kinds = [e.event_type for e in events]
+    assert 'reflect_started' in kinds and kinds.index('reflect_started') < kinds.index('worker_handoff')
+    reflect_at = next(i for i, e in enumerate(events) if e.event_type == 'reflect_started')
+    turns_between = [e for e in events[reflect_at:] if e.event_type == 'worker_turn'][:3]
+    assert len(turns_between) == 3   # the reflection's turns happened before the handoff
+    assert any('REFLECT: record the method' in json.dumps(r['messages']) for r in wt.requests)
+    handoff_requests = [r for r in wt.requests if 'tools' not in r]
+    assert handoff_requests and 'REFLECT' not in handoff_requests[0]['messages'][0].get('content', '')

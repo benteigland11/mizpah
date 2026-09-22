@@ -102,7 +102,9 @@ def load_config(path: str | Path) -> dict[str, Any]:
     config['worker_policy'] = _prompts.compose('worker', prompts_dir)
     # The window's messages are pieces too: the config's handoff_prompt / resume_prefix give way to them.
     sp = harness.setdefault('session_policy', {})
-    sp['handoff_prompt'] = _prompts.message('reflect_worker')+'\n'+_prompts.message('handoff_worker')
+    sp['handoff_prompt'] = _prompts.message('handoff_worker')
+    sp['reflect_prompt'] = _prompts.message('reflect_worker')
+    sp.setdefault('reflect_turns', 8)
     sp['resume_prefix'] = _prompts.message('resume_worker')
     harness['guidance_prefix'] = (prompts_dir/'messages'/'correction_worker.md').read_text()   # a template; the harness fills it
     # Scaffolding is method the host imposes; each piece is a toggle so a model that can orchestrate
