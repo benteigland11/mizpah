@@ -570,6 +570,7 @@ class _store_lock:
 
 PLAYBOOK_BASE = 'playbook_base'   # under the task root: the store as the task received it, for three-way merges
 WRITEUP_MARK = 'writeup.started'   # under the task root: the green message went out; a resume harvests, never re-asks
+REFLECTED_MARK = 'reflected.at-green'   # the green reflection was asked for once; a resume never re-asks
 
 
 def merge_procedure(base: dict[str, Any], theirs: dict[str, Any], yours: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
@@ -2395,7 +2396,15 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         # it made an artifact and touched no procedure at all (one round to record what it did).
         (root/WRITEUP_MARK).write_text(str(turns(status)))
         session.suspend_reviews('gate green: the harvest is the review')
-        session.prune_workspaces()
+        # The reflection fires at the window's threshold, so a work order that never filled a window never had
+        # the moment to record its method: the render task that distilled its own procedure did so only because
+        # it ran long (2026-09-22). Green is the other moment it is owed, and the one the harvest reads.
+        if not (root/REFLECTED_MARK).exists():
+            from . import prompts as _prompts
+            (root/REFLECTED_MARK).write_text(str(turns(status)))
+            session.continue_with(_prompts.message('reflect_worker'), label='gate green: record the method')
+            status = run_through_outages(session, config, root, maximum_worker_turns=max(1, budget-turns(status)))
+            session.prune_workspaces()
         widgets = harvest_widgets(evidence(session), root, config, project)
         playbook = harvest_playbook(evidence(session), store, config,
                                     allowed=tuple(procedures_used(root)+procedures_created(root)),
