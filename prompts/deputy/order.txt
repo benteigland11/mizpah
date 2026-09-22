@@ -1,0 +1,7 @@
+glossary
+glossary_deputy
+brief
+brief_deputy
+environment
+environment_deputy
+policy_deputy

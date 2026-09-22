@@ -1,0 +1,3 @@
+## Environment
+
+Every project runs somewhere: in the requestor's own repo, where the worker has the code and whatever the repo already holds, or in a gym — a folder with nothing but the brief, set up in an environment. The environment is installed once on the host and bound read-only into the sandbox of every gym set up in it, its note told to the worker verbatim as an enabler of every work order. Every gym has one; the default is `bare` — Python and a shell — unless another default is set. Nothing installs inside a sandbox: no pip, no network. So the work either fits the environment or the environment is built first; a need that assumes a tool the environment does not provide cannot be met, and a brief naming an environment the host does not have cannot be signed.

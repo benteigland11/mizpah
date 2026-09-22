@@ -20,5 +20,6 @@ default. Its prompt is `order_reviewer.txt`, an explicit list of exactly what it
 probes, `probes_reviewer.md`, `policy_reviewer.md`) — a `_reviewer` tag marks a piece written for it, and only that list
 includes it. The engine composes at load (`mizpah.prompts.compose`); a piece not yet finished is taken from `wip/` so the loop runs while it is written.
 
-Terms are used in the glossary's sense and no other, by every seat. A block explains; a policy instructs; the
-glossary names. Engine configs name this folder (`prompts_dir`); the engine composes each seat's prompt from it.
+The Deputy is the other seat of that kind, kept apart in `deputy/`: its `order.txt` is its list, and a name on
+it is looked up in that folder first, then here — so it gets the glossary and nothing else of this level. Its
+README says the rest.

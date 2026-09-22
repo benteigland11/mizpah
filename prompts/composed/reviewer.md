@@ -1,7 +1,5 @@
 # Glossary
 
-The words every seat in this loop uses, with one meaning each. A term below is used in that sense and no other, by the controller, the worker and the reviewer alike; where a tool's command is the term's verb, the command is named. The glossary names; the philosophy files explain the workflow.
-
 ## General
 
 - **Requestor** — Entity that has authority to authorize briefs and all administrative actions. User is always a requestor.
