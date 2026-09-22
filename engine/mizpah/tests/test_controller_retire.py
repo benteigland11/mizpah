@@ -52,3 +52,14 @@ def test_a_route_refusal_carries_what_terra_said_not_the_echoed_command() -> Non
     assert 'exceed free pool 60' in controller.terra_refusal(error)[:300]
     assert controller.terra_refusal(RuntimeError('terra map create x failed: no such map')) == 'no such map'
     assert controller.terra_refusal(RuntimeError('something else')) == 'something else'
+
+
+def test_a_long_note_from_the_person_is_marked_where_it_is_cut() -> None:
+    """The person's note was cut silently at 1,200 characters, and the controller cannot open operator.jsonl."""
+    long = 'keep the tempo. '*400
+    observation = dict(_observation([], []), operator_notes=[dict(at=0, text=long)])
+    text = controller.render_observation(observation, 'eval')
+    assert 'keep the tempo. '*200 in text
+    assert f'cut here at {controller.NOTE_CHARACTERS:,} of {len(long.strip()):,} characters' in text
+    short = controller.render_observation(dict(_observation([], []), operator_notes=[dict(at=0, text='the video marks no note')]), 'eval')
+    assert 'the video marks no note' in short and 'cut here' not in short

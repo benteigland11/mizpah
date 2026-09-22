@@ -214,6 +214,7 @@ def observe(config: dict[str, Any], project: Path) -> dict[str, Any]:
     return observation
 
 
+NOTE_CHARACTERS = 4000   # a person's note is read whole up to this; past it, cut with a marker
 OPERATOR_NOTES = 'operator.jsonl'   # under the session root: {at, text, read?} — the person's replies to the loop's notices
 
 
@@ -382,7 +383,11 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
         lines.append('# From the person (a reply to this run; answer it in this briefing — route what it asks, propose '
                      'what would change the brief, or say why nothing changes)')
         for note in observation['operator_notes']:
-            lines.append('  '+time.strftime('%Y-%m-%d %H:%M', time.gmtime(float(note.get('at') or 0)))+': '+str(note.get('text') or '').strip()[:1200])
+            text = str(note.get('text') or '').strip()
+            if len(text) > NOTE_CHARACTERS:
+                # Cut silently at 1,200 before, and the controller cannot reach operator.jsonl (audit, 2026-09-22).
+                text = text[:NOTE_CHARACTERS]+f' …[the person\'s note is cut here at {NOTE_CHARACTERS:,} of {len(text):,} characters]'
+            lines.append('  '+time.strftime('%Y-%m-%d %H:%M', time.gmtime(float(note.get('at') or 0)))+': '+text)
         lines.append('')
     if observation.get('reviewer_doubts'):
         # The check-in reviewer's leftover doubt about a probe, after the reading stood: not a task for the same

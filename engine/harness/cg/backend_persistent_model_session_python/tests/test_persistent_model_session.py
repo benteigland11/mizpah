@@ -161,8 +161,11 @@ def test_pending_tools_and_rollover_are_explicit():
     s.append_tool_result('one', 'measure', 'abcdefgh')
     restored=PersistentSession.from_state(s.export_state())
     restored.append_tool_result('two', 'measure', '123456')
-    assert restored.recent_tail() == [dict(tool_call_id='one', name='measure', content='ab', truncated=True),
-                                     dict(tool_call_id='two', name='measure', content='123456', truncated=False)]
+    tail = restored.recent_tail()
+    assert tail[1] == dict(tool_call_id='two', name='measure', content='123456', truncated=False)
+    assert tail[0]['content'] == 'ab' and tail[0]['truncated'] is True
+    # A cut result says what ran and where the rest is — this one names no file, so it points at the window archive.
+    assert tail[0]['note'].startswith('result cut at 2 of 8 characters; the call ran in full') and '.session-history/' in tail[0]['note']
     boundary=restored.rollover('keep the findings')
     assert boundary['old_messages'][2]['reasoning_content'] == 'retained reasoning'
     assert restored.window_index == 1 and len(restored.messages) == 3
@@ -364,7 +367,9 @@ def test_completed_arguments_are_excerpted_only_after_their_result_arrives():
     s.accept(response('', [big_call('b', 30)])); s.append_tool_result('b', 'write', '{"status":"rejected"}')
     second = s.payload()['messages']
     assert second[2] == first[2]
-    assert 'all 30 characters' in second[4]['tool_calls'][0]['function']['arguments'] and 'saved at' not in second[4]['tool_calls'][0]['function']['arguments']
+    rejected = second[4]['tool_calls'][0]['function']['arguments']
+    # A rejected call is never described as applied (it was, until 2026-09-22: "applied … Nothing to redo").
+    assert 'NOT applied' in rejected and 'says rejected' in rejected and 'were applied' not in rejected and 'saved at' not in rejected
     assert s.export_state()['policy']['argument_excerpt_characters'] == 20
 
 
@@ -426,3 +431,17 @@ def test_images_count_as_an_allowance_and_only_the_latest_stays_in_view():
     # Stored messages keep both images: the wire view is a projection.
     assert sum(1 for m in item.messages if isinstance(m.get('content'), list)
                and m['content'][1]['type'] == 'image_url') == 2
+
+
+def test_a_cut_shell_result_keeps_its_file_pointers_in_the_note():
+    """The cut takes the end of a shell result, where `output_files` sit; the note restates them (audit, 2026-09-22)."""
+    from src.persistent_model_session import cut_note
+    full = json.dumps(dict(status='ok', exit_code=0, stdout='x'*5000, output_truncated=True,
+                           output_files=['.tool-output/c1.stdout', '.tool-output/c1.stderr']))
+    note = cut_note(full, 1200)
+    assert note.startswith(f'result cut at 1,200 of {len(full):,} characters; the call ran in full')
+    assert '.tool-output/c1.stdout, .tool-output/c1.stderr' in note and 'do not re-run' in note
+    stopped = cut_note(json.dumps(dict(status='output_limit', output_files=['.tool-output/c2.stdout'])), 10)
+    assert 'did NOT finish' in stopped
+    refused = cut_note(json.dumps(dict(status='rejected')), 5, '.tool-output/c3.args.json')
+    assert 'NOT applied' in refused and '.tool-output/c3.args.json' in refused

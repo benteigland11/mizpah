@@ -1992,3 +1992,19 @@ def test_file_tools_act_on_the_host_scratch_tree_the_sandbox_sees(tmp_path):
     assert 'x = 1' in outcomes[1]['content'] and 'scratch/missing.py' in outcomes[3]['error']
     files = workspace_files(item.workspace(), byte_limit=1000000, file_limit=1000)
     assert 'notes.py' in files and not any(f.startswith('scratch/') for f in files)
+
+
+def test_a_cut_or_stopped_command_says_whether_it_finished_and_where_the_rest_is():
+    """Audit, 2026-09-22: a cut stdout carried no sentence, and a command stopped at the output cap was not said to have
+    died."""
+    from src.focused_agent_session import shell_output_note, _marked_cut
+    limits = ShellLimits(1000000, 1000000, 1000000, 1048576, 8192, 20, 100, 5, 2, 1000)
+    files = ['.tool-output/c1.stdout', '.tool-output/c1.stderr']
+    cut = shell_output_note(dict(status='completed', output_truncated=True, output_files=files), limits)
+    assert 'cut at 8,192 bytes' in cut and 'ran in full' in cut and '.tool-output/c1.stdout' in cut and 'Do not re-run' in cut
+    stopped = shell_output_note(dict(status='output_limit', output_truncated=True, output_files=files), limits)
+    assert 'did NOT finish' in stopped and '1,048,576' in stopped and '.tool-output/c1.stdout' in stopped
+    assert shell_output_note(dict(status='completed', output_truncated=False, output_files=files), limits) == ''
+    assert _marked_cut('x'*10, 600) == 'x'*10
+    marked = _marked_cut('y'*700, 600)
+    assert marked.startswith('y'*600) and 'cut at 600 of 700 characters' in marked and 'not the end' in marked

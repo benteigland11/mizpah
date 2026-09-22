@@ -38,6 +38,33 @@ from cg.universal_context_payload_projection_python.src.context_payload_projecti
 
 
 
+def _marked_cut(text: str, limit: int) -> str:
+    """Text for a seat that has no way to fetch the rest: whole when short, else cut with a marker. The plain reviewer
+    saw bare 600-character prefixes and could read a cut as the output ending or a write left incomplete (audit,
+    2026-09-22)."""
+    if len(text) <= limit:
+        return text
+    return text[:limit]+f' …[cut at {limit:,} of {len(text):,} characters; it continues — a cut, not the end]'
+
+
+def shell_output_note(output: dict[str, Any], limits: Any) -> str:
+    """One sentence when a command's output is cut or the command was stopped: whether it finished, where the whole
+    output is, how to read it. A cut stdout used to come back as `output_truncated: true` and a file list, and a
+    command killed at the output cap as `status: output_limit`, with nothing saying it never finished (audit,
+    2026-09-22)."""
+    files = [f for f in output.get('output_files') or [] if isinstance(f, str)]
+    where = (' in '+', '.join(files)+' — read it in ranges with `read` (offset/limit)') if files else ''
+    if output.get('status') == 'output_limit':
+        return ('The command was stopped after '+f'{limits.output_bytes:,}'+' bytes of output and did NOT finish; what it '
+                'printed is'+(where or ' lost')+'. Run it again writing its output to a file, or print less.')
+    if output.get('status') == 'timeout' or output.get('timed_out'):
+        return ('The command hit its time limit and did NOT finish'+('; what it printed is'+where if where else '')+'.')
+    if output.get('output_truncated'):
+        return ('stdout/stderr are cut at '+f'{limits.visible_output_bytes:,}'+' bytes each; the command ran in full; the '
+                'rest is'+(where or ' not saved')+'. Do not re-run it to see more.')
+    return ''
+
+
 def _refuse_transcript_note(text: str) -> None:
     """The wire view shows an applied call as its first line plus "[transcript note: … applied in full …]". A model
     that has seen enough of its own history writes that shape back: on compose (2026-09-22) Grok sent a 222-line
@@ -1311,6 +1338,9 @@ class FocusedSession:
                     raise UnresolvedOperation('Shell outcome is uncertain; inspect the saved event before recovery')
                 self.state['workspace'] = self._put_workspace(result.workspace)
                 output = {key:value for key,value in asdict(result).items() if key != 'workspace'}
+                note = shell_output_note(output, self.shell.config.limits)
+                if note:
+                    output['note'] = note
         # Any call repeated byte-for-byte gets a distinct, counted response, whatever
         # its outcome. Identical calls with identical responses make the context
         # periodic, and a model continues a periodic context; the counter breaks the
@@ -1376,7 +1406,8 @@ class FocusedSession:
         self._save(commit=False)
         archive_message = dict(role='user', content=
             'Your complete original history for this window is saved in your workspace at '+source_archive+'. '
-            'Use it when a needed detail is absent from your own handoff or retained results. '
+            'Use it when a needed detail is absent from your own handoff or retained results: it is one JSON object '
+            '(`messages` in order), so pull what you need with python or jq rather than `read`, which cuts a long line. '
             'Read existing accumulated notes before updating them; retain established findings. '
             'Preserve any unfinished obligation following the last completed tool result.')
         payload = self.session.handoff_payload()
@@ -1569,9 +1600,9 @@ class FocusedSession:
                 text = arguments if isinstance(arguments, str) else json.dumps(arguments, ensure_ascii=False)
                 outcome = result['result']
                 shown = (outcome.get('stdout') or outcome.get('error') or outcome.get('content') or '')
-                calls.append(dict(tool=call['function']['name'], arguments=text[:600], status=outcome.get('status'),
-                                  exit_code=outcome.get('exit_code'), output=str(shown)[:600]))
-            recent.append(dict(turn=item['turn'], said=(item['response'].get('content') or '')[:600], calls=calls))
+                calls.append(dict(tool=call['function']['name'], arguments=_marked_cut(text, 600), status=outcome.get('status'),
+                                  exit_code=outcome.get('exit_code'), output=_marked_cut(str(shown), 600)))
+            recent.append(dict(turn=item['turn'], said=_marked_cut(item['response'].get('content') or '', 600), calls=calls))
         history = list(self.state.get('review_log') or [])
         envelope = dict(reference=self.settings.reference, boundary=boundary, completed_turns=self.progress.turns,
                         held_guidance=self.progress.guidance, focus_files=self._focus_files(),

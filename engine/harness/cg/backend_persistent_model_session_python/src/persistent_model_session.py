@@ -216,7 +216,7 @@ def wire_messages(messages: list[dict[str, Any]], retention: str) -> list[dict[s
                    and any(isinstance(p, dict) and p.get('type') == 'image_url' for p in m['content'])]
     for index in with_images[:-1]:
         projected[index]['content'] = [p if not (isinstance(p, dict) and p.get('type') == 'image_url')
-                                       else dict(type='text', text='[an image was shown here earlier; it is no longer in view]')
+                                       else dict(type='text', text='[an image was shown here earlier; it is no longer in view — read that file again to see it]')
                                        for p in projected[index]['content']]
     if retention == 'all':
         return projected
@@ -265,6 +265,8 @@ def project_completed_arguments(messages: list[dict[str, Any]], excerpt_characte
     if type(excerpt_characters) is not int or excerpt_characters < 0:
         raise ValueError('argument_excerpt_characters must be a nonnegative integer or None')
     answered = {message.get('tool_call_id') for message in projected if message.get('role') == 'tool'}
+    outcome = {message.get('tool_call_id'): _result_status(message.get('content'))
+               for message in projected if message.get('role') == 'tool'}
     archives = dict(archives or {})
     for message in projected:
         if message.get('role') != 'assistant':
@@ -273,11 +275,18 @@ def project_completed_arguments(messages: list[dict[str, Any]], excerpt_characte
             if call.get('id') not in answered:
                 continue
             saved = archives.get(call.get('id'))
-            # The fact first, the caveat second: "applied in full; only the first line is shown" was read by two
-            # models as "your write was truncated" — one rewrote the file, one wrote the note back as the file.
-            marker = ('\n[transcript note: all {total:,} characters ({lines} lines) of this call were applied and are in '
-                      'the workspace; this transcript keeps only the first line of it.'
-                      +(' The call as sent is saved at '+saved+'.' if saved else '')+' Nothing to redo.]')
+            read_it = (' The call as sent is saved at '+saved+'; read it in ranges with `read` (offset/limit).' if saved else '')
+            status = outcome.get(call.get('id'))
+            if status in ('rejected', 'error'):
+                # A refused or failed call was noted as "applied … Nothing to redo" for as long as it stayed in the
+                # window: the worker was told a write that never landed was in the workspace (audit, 2026-09-22).
+                marker = ('\n[transcript note: this call was NOT applied (its result says '+status+'); this transcript '
+                          'keeps only the first line of its {total:,} characters ({lines} lines).'+read_it+']')
+            else:
+                # The fact first, the caveat second: "applied in full; only the first line is shown" was read by two
+                # models as "your write was truncated" — one rewrote the file, one wrote the note back as the file.
+                marker = ('\n[transcript note: all {total:,} characters ({lines} lines) of this call were applied and are in '
+                          'the workspace; this transcript keeps only the first line of it.'+read_it+' Nothing to redo.]')
             function = call['function']
             value = function['arguments']
             if isinstance(value, str):
@@ -290,6 +299,36 @@ def project_completed_arguments(messages: list[dict[str, Any]], excerpt_characte
             else:
                 function['arguments'] = _argument_projection(value, excerpt_characters, marker)
     return projected
+
+
+def cut_note(content: str, kept: int, saved: str | None = None) -> str:
+    """One sentence for a tool result shown cut: whether the call ran, where the whole of it is, how to read it."""
+    try:
+        parsed = json.loads(content)
+    except ValueError:
+        parsed = None
+    parsed = parsed if isinstance(parsed, dict) else {}
+    status = parsed.get('status')
+    files = [f for f in parsed.get('output_files') or [] if isinstance(f, str)]
+    if isinstance(parsed.get('arguments_saved_at'), str):
+        files.append(parsed['arguments_saved_at'])
+    if saved and saved not in files:
+        files.append(saved)
+    ran = ('the call was NOT applied (status '+str(status)+')' if status in ('rejected', 'error') else
+           'the command was stopped at its output limit and did NOT finish' if status == 'output_limit' else
+           'the call ran in full')
+    where = ('; the whole of it is in '+', '.join(files)+' — read it in ranges with `read` (offset/limit), do not re-run it'
+             if files else '; the full result is in your window archive under .session-history/')
+    return f'result cut at {kept:,} of {len(content):,} characters; {ran}{where}.'
+
+
+def _result_status(content: Any) -> str | None:
+    """The `status` a tool result reports (`ok`, `rejected`, `error`, `timeout`, …), or None when it is not JSON."""
+    try:
+        parsed = json.loads(content) if isinstance(content, str) else content
+    except ValueError:
+        return None
+    return str(parsed.get('status')) if isinstance(parsed, dict) and parsed.get('status') is not None else None
 
 
 def _reject_constant(value: str) -> None:
@@ -439,6 +478,10 @@ class PersistentSession:
             value = item['content']
             item['content'] = value[:remaining]
             item['truncated'] = len(value) > remaining
+            if item['truncated']:
+                # The cut takes the end of the result, which is where a shell result names its files: say what ran
+                # and where the whole of it is before the pointer is lost (audit, 2026-09-22).
+                item['note'] = cut_note(value, len(item['content']), self.argument_archives.get(item['tool_call_id']))
             remaining -= len(item['content'])
             result.append(item)
             if remaining <= 0:
@@ -464,8 +507,12 @@ class PersistentSession:
         limit = self.policy.recent_result_characters
         identities = [call['id'] for call in calls]
         results = [item for item in self.recent_tail() if item['tool_call_id'] in identities]
+        saved = [self.argument_archives[i] for i in identities if i in self.argument_archives]
+        last_action = dict(text=text[:limit], total_characters=len(text), truncated=len(text)>limit)
+        if saved:
+            last_action['saved_at'] = saved   # the calls as sent, whole: read them in ranges rather than re-sending
         return dict(awaiting_worker_response=True,
-            last_action=dict(text=text[:limit], total_characters=len(text), truncated=len(text)>limit),
+            last_action=last_action,
             tool_results=results,
             omitted_tool_result_ids=[identity for identity in identities
                                      if identity not in {item['tool_call_id'] for item in results}])
