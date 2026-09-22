@@ -1516,7 +1516,12 @@ def session_calls(root: Path) -> list[tuple[str, dict[str, Any], dict[str, Any]]
         results = {r['call_id']: r['result'] for r in event['payload'].get('tool_results') or []}
         for call in event['payload']['response'].get('tool_calls') or []:
             arguments = call['function']['arguments']
-            args = json.loads(arguments) if isinstance(arguments, str) else arguments
+            try:
+                args = json.loads(arguments) if isinstance(arguments, str) else arguments
+            except ValueError:
+                # The model's arguments were not JSON (a write cut mid-string at 10 KB, 2026-09-22): the harness
+                # refused that call at the time; here it is a call with no arguments, not a reason to fail the task.
+                args = {}
             calls.append((call['function']['name'], args if isinstance(args, dict) else {}, results.get(call.get('id'), {})))
     return calls
 

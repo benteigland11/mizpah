@@ -663,11 +663,25 @@ def decide(client: ModelClient, config: dict[str, Any], system: str, user: str,
     messages = [dict(role='system', content=system), dict(role='user', content=user)]
     calls: list[dict[str, Any]] = []
     _last_tools[0] = calls
+    started = time.time()
+
+    def live(phase: str) -> None:
+        # The step as it stands, for a watcher: the journal gets the record when the step ends, and a first step on
+        # a local model can be ten minutes of reads and thinking with nothing on disk to show it is alive.
+        if root is None:
+            return
+        try:
+            (root/'controller.live.json').write_text(json.dumps(dict(
+                phase=phase, started_at=started, at=time.time(), model_calls=len([m for m in messages if m.get('role') == 'assistant'])+(1 if phase == 'model' else 0),
+                user=user.split('\n', 1)[0][:200], tools=calls), ensure_ascii=False))
+        except OSError:
+            pass
     while True:
         payload = dict(config['controller']['generation'], messages=messages,
                        max_tokens=config['mizpah'].get('controller_output_tokens', 8192))
         if project is not None:
             payload['tools'] = CONTROLLER_TOOLS
+        live('model')
         response = client.complete(payload, 'controller')
         message = parse_turn(response).message
         wanted = message.get('tool_calls') or []
@@ -683,6 +697,7 @@ def decide(client: ModelClient, config: dict[str, Any], system: str, user: str,
             text = run_tool(config, project, root, str(fn.get('name')), args if isinstance(args, dict) else {})
             calls.append(dict(name=fn.get('name'), args=args, chars=len(text), refused=text.startswith(('refused', 'error', 'no '))))
             messages.append(dict(role='tool', tool_call_id=call.get('id'), name=fn.get('name'), content=text))
+            live('tools')
         if len(calls) >= TOOL_CALL_CEILING:
             messages.append(dict(role='user', content='That is '+str(TOOL_CALL_CEILING)+' reads; decide now with what you have.'))
             payload = dict(config['controller']['generation'], messages=messages, max_tokens=config['mizpah'].get('controller_output_tokens', 8192))
@@ -1890,4 +1905,5 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
     journal.parent.mkdir(parents=True, exist_ok=True)
     with journal.open('a') as handle:
         handle.write(json.dumps(record)+'\n')
+    (journal.parent/'controller.live.json').unlink(missing_ok=True)   # the record is the step now
     return dict(mode=mode, applied=record['applied'], refused=refusals, why=record['why'], done=accepted.get('done'))
