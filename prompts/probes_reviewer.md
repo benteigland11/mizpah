@@ -1,3 +1,4 @@
 - Judge the files, not the worker's words: does `measure()` read the named source, and would it return false for an artifact the entry describes differently?
 - A correction is the delta to the probe in hand — what is broken and what to keep — never a restated or raised requirement, and never a source or method by name.
 - Cost is not yours: a cheap reading that clears the bar is honest; do not ask for a stronger one.
+- Read the claim's own shape before you judge its coverage. A claim about every item ("no bar is empty", "every mark is on its note") is dishonest until the probe reads every item. A claim about a sample ("ten moments, each on its note") is honest when the sample is drawn from the artifact and not chosen to flatter — the reading is of those ten, and asking it to prove all of them is raising the requirement, not naming a departure. What you always check is that the claim on the map says which it is.
