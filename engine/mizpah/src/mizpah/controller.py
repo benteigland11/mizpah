@@ -237,6 +237,41 @@ def operator_notes(root: Path | None, *, unread_only: bool = True) -> list[dict[
     return out
 
 
+def _marked(text: str, limit: int) -> str:
+    """Whole when short; past `limit`, cut with a marker that says so."""
+    return text if len(text) <= limit else text[:limit]+f' …[cut at {limit:,} of {len(text):,} characters]'
+
+
+def record_decisions(root: Path | None, decided: list[dict[str, Any]]) -> list[str]:
+    """A reason the person gave when deciding a proposal is a reply to the run: it goes on the note record once, so the
+    controller reads it first and answers it (`operator_notes`), not only as a line of history. A reject that said
+    "investigate whether you need an existing tool … if an environment capability is missing we can fix it" was read
+    as a bare "no": the resumed controller said "the requestor has not authorized a new approach" and stopped
+    (mark the sounding note, 2026-09-22)."""
+    if root is None:
+        return []
+    path = root/OPERATOR_NOTES
+    seen: set[str] = set()
+    if path.exists():
+        for line in path.read_text().splitlines():
+            try:
+                seen.add(str(json.loads(line).get('decision') or ''))
+            except ValueError:
+                continue
+    added = []
+    for p in decided:
+        reason = str(p.get('decision_reason') or '').strip()
+        pid = str(p.get('id') or '')
+        if not reason or not pid or pid in seen:
+            continue
+        at = time.time()
+        text = 'On '+pid+' (you '+str(p.get('status') or 'decided')+' it): '+reason
+        with path.open('a') as handle:
+            handle.write(json.dumps(dict(at=at, text=text, decision=pid))+'\n')
+        added.append(pid)
+    return added
+
+
 def mark_notes_read(root: Path | None, notes: list[dict[str, Any]]) -> None:
     """A note is put before the controller once; the briefing that follows is its answer."""
     if root is None or not notes or not (root/OPERATOR_NOTES).exists():
@@ -451,7 +486,7 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
         lines.append('Decided proposals (the person\'s reasons; a rejected change is not proposed again in other words):')
         for p in decided:
             lines.append('  '+str(p.get('id'))+' '+str(p.get('status'))+': '+str(p.get('summary') or '').split(' \u2014 evidence:')[0][:120]
-                         +(' — reason: '+str(p['decision_reason'])[:160] if p.get('decision_reason') else ''))
+                         +(' — reason: '+_marked(str(p['decision_reason']), 400) if p.get('decision_reason') else ''))
     if states:
         n_met = sum(1 for v in states.values() if v.startswith('MET') and 'FALSE' not in v)
         lines.append('Coverage: '+str(n_met)+' of '+str(len(states))+' entries met; owed: '
@@ -1901,6 +1936,7 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
     previous_observer = getattr(client, 'observer', None)
     client.observer = (lambda k, p: (observe_usage(k, p), previous_observer(k, p) if previous_observer else None)[0])
     observation = observe(config, project)
+    record_decisions(Path(journal).parent, (observation.get('brief') or {}).get('decided') or [])
     notes = operator_notes(Path(journal).parent)
     if notes:
         observation['operator_notes'] = notes

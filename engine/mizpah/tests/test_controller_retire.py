@@ -63,3 +63,18 @@ def test_a_long_note_from_the_person_is_marked_where_it_is_cut() -> None:
     assert f'cut here at {controller.NOTE_CHARACTERS:,} of {len(long.strip()):,} characters' in text
     short = controller.render_observation(dict(_observation([], []), operator_notes=[dict(at=0, text='the video marks no note')]), 'eval')
     assert 'the video marks no note' in short and 'cut here' not in short
+
+
+def test_a_decision_reason_reaches_the_controller_as_the_persons_note_once(tmp_path) -> None:
+    """A reject that says what to do instead is a reply to the run, answered first — not only a line of history."""
+    decided = [dict(id='CR-001', status='rejected', decision_reason='Investigate whether an existing tool does this.'),
+               dict(id='CR-002', status='accepted', decision_reason=''),
+               dict(id='CR-003', status='rejected')]
+    assert controller.record_decisions(tmp_path, decided) == ['CR-001']
+    assert controller.record_decisions(tmp_path, decided) == []   # once
+    notes = controller.operator_notes(tmp_path)
+    assert len(notes) == 1 and notes[0]['text'] == 'On CR-001 (you rejected it): Investigate whether an existing tool does this.'
+    text = controller.render_observation(dict(_observation([], []), operator_notes=notes), 'eval')
+    assert '# From the person' in text and 'On CR-001 (you rejected it)' in text
+    controller.mark_notes_read(tmp_path, notes)
+    assert controller.operator_notes(tmp_path) == []
