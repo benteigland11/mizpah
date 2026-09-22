@@ -214,6 +214,16 @@ SERVICES_MOUNT = '/svc'
 REQUESTS_DIR = '.svc/requests'   # inside the workspace: what `svc start/stop/wait` leaves for the host
 
 
+
+def _unit_result(systemctl: str, unit: str) -> str:
+    """systemd's verdict on a transient unit that exited non-zero: 'oom-kill', 'exit-code', 'signal', …"""
+    try:
+        out = subprocess.run([systemctl, '--user', 'show', unit, '-p', 'Result', '--value'],
+                             capture_output=True, text=True, timeout=10, check=False).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ''
+    return out
+
 def _name(value: str, *, user: bool = False) -> str:
     """Canonical member name; `user` marks a path the model supplied, which gets the stray-tree refusal."""
     path = PurePosixPath(value)
@@ -888,6 +898,15 @@ class SandboxedShell:
                 return ShellResult('interrupted', None, '', '', False, False, self._state(workspace, bound), (), time.monotonic()-start, str(error))
         try:
             if process.returncode != 0:
+                if _unit_result(config.systemctl, unit) == 'oom-kill':
+                    # The kernel killed the unit at its memory limit: a known outcome, told to the model as the
+                    # failed command it was. It had come back as "uncertain" and blocked the task — an ffmpeg
+                    # encode at exactly 3 GB, twice, on follow-the-score (2026-09-22).
+                    return ShellResult('error', 137, '', '', False, False, self._state(workspace, bound), (),
+                                       time.monotonic()-start,
+                                       'killed: the command exceeded the sandbox memory limit ('
+                                       +str(limits.memory_bytes//(1024*1024))+' MB); nothing of it was applied. '
+                                       'Do the work in smaller pieces or with less in memory at once')
                 raise ValueError('Sandbox service failed: '+stderr.decode(errors='replace')[:limits.visible_output_bytes])
             response = json.loads(stdout)
             if response['capture_id'] != payload['capture_id']:
