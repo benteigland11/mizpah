@@ -103,7 +103,10 @@ def load(name: str) -> dict[str, Any]:
     env = record.get('env') or {}
     if not isinstance(env, dict) or any(not isinstance(v, str) for v in env.values()):
         raise ValueError('base.json env must map names to strings: '+str(folder))
-    return dict(name=name, note=str(record.get('note') or ''), env=dict(env), path=str(folder))
+    network = record.get('network') or []
+    if not isinstance(network, list) or any(not isinstance(h, str) or not h for h in network):
+        raise ValueError('base.json network must be a list of host names: '+str(folder))
+    return dict(name=name, note=str(record.get('note') or ''), env=dict(env), path=str(folder), network=list(network))
 
 
 BUILD_EXCLUDE = ('.git', '.mizpah', '.terra', '.tool-output', '.session-history', '.playbook', '.svc', '__pycache__')
@@ -216,6 +219,12 @@ def apply(config: dict[str, Any], name: str) -> dict[str, Any]:
         env[key] = value.replace('$BASE', root)
     env['MIZPAH_BASE'] = root
     sandbox['environment'] = env
+    # The hosts a base's gyms may reach (datasheets for a PCB bench) join the egress allowlist when the config
+    # runs the private network; a base with none leaves the config's list as it is.
+    network = sandbox.get('network')
+    if base['network'] and isinstance(network, dict):
+        allowed = list(network.get('allowed_domains') or ())
+        network['allowed_domains'] = allowed+[h for h in base['network'] if h not in allowed]
     config['mizpah']['base'] = base
     return config
 
@@ -233,6 +242,8 @@ def enabler_text(config: dict[str, Any]) -> str:
                      'What you need beyond it goes in the project (a venv under the project, `pip install --target`).')
     if base['env']:
         lines.append('Environment: '+', '.join(k+'='+v.replace('$BASE', base['path']) for k, v in sorted(base['env'].items())))
+    if base.get('network'):
+        lines.append('Reachable hosts: '+', '.join(base['network'])+'; nothing else answers.')
     return '\n'.join(lines)+'\n'
 
 
