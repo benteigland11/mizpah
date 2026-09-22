@@ -265,10 +265,38 @@ def rhythm_and_feeling() -> Path:
         budget=120, non_goals=NON_GOALS)
 
 
+COHERENCE_SOURCE = Path.home()/'mizpah-runs'/'piano'/'coherence'/'piece.mid'
+
+
+def coherence_pass() -> Path:
+    """The last pass on a finished piece: the notes stand, the playing becomes one intention. The input is the
+    benchmark piece after Block A (2026-09-22), whose performance was a set of patches — a cycled timing jitter to
+    miss the grid, chords cut short for a melody reader, tempo switched for one bar — each true to its probe."""
+    import shutil
+    folder = gym(
+        'Make it one performance',
+        'Take a finished piano piece whose playing has come apart — nuances added one at a time, each for its own '
+        'reason — and give it back as one performance: the same piece, played by one pianist with one idea of where '
+        'it goes. In: piece.mid.',
+        needs=[
+            'It is played from one intention: where the time bends, how loud each note is and when the pedal changes all '
+            'follow where the phrases lean and arrive — no nuance that belongs to no phrase.',
+            'It is still the same piece: the melody and the harmony a listener would recognise are kept; what changes is '
+            'how it is played.',
+            'Coherence is read, not asserted: readings over the finished file show the timing, loudness and pedal moving '
+            'with the phrase structure — and would fail a performance whose nuances are one pattern applied everywhere.',
+        ],
+        deliverables=['piece.mid'],
+        budget=120, non_goals=NON_GOALS)
+    shutil.copy2(COHERENCE_SOURCE, folder/'piece.mid')
+    return folder
+
+
 MAKERS = dict(benchmark=benchmark, melody_bass=melody_bass, voice_leading=voice_leading,
               pedal_dynamics=pedal_dynamics, rubato_phrase=rubato_phrase, nocturne_lh=nocturne_lh,
               voicing_touch=voicing_touch, same_piece_two_ways=same_piece_two_ways,
-              whole_piece=whole_piece, emotion_arc=emotion_arc, rhythm_and_feeling=rhythm_and_feeling)
+              whole_piece=whole_piece, emotion_arc=emotion_arc, rhythm_and_feeling=rhythm_and_feeling,
+              coherence_pass=coherence_pass)
 
 PINNED = Path.home()/'mizpah-runs'/'piano'/'benchmark.brief.json'
 
