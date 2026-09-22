@@ -193,7 +193,8 @@ def observe(config: dict[str, Any], project: Path) -> dict[str, Any]:
         budget=(sitrep.get('route') or {}).get('budget'),
         knowns=[dict(id=k.get('id'), type=k.get('type'), status=k.get('status'), confidence=k.get('confidence'),
                      n=(k.get('stats') or {}).get('n'), mean=(k.get('stats') or {}).get('mean'),
-                     rate=(k.get('stats') or {}).get('rate'), mode=(k.get('stats') or {}).get('mode'), claim=k.get('claim'),
+                     rate=(k.get('stats') or {}).get('rate'), mode=(k.get('stats') or {}).get('mode'),
+                     holds=(k.get('stats') or {}).get('holds'), claim=k.get('claim'),
                      stale=k.get('stale', False), stale_reasons=k.get('stale_reasons') or []) for k in knowns],
         unknowns=[dict(id=u['id'], status=u.get('status'), type=u.get('type'), quantity=u.get('quantity'),
                        claim=u.get('claim'), resolved_by=u.get('resolved_by'), notes=u.get('notes')) for u in unknowns],
@@ -603,8 +604,23 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
                      '.')
     lines.append('')
     now = phases.current(brief)
-    lines.append('Step: '+('a work order landed' if mode == 'eval' else 'the route is empty')+'. Answer the gate\'s red'
-                 +(' (phase '+now['id']+')' if now else '')+'; an empty reply is right when the route already covers it.')
+    unjudged = [ref for ref, state in states.items() if state.startswith('COLLECTED')]
+    delivered = [line.split(' — ')[0] for line in ledger if line.endswith(' — built')]
+    if delivered and unjudged:
+        # A built deliverable is the thing the brief asked for, on disk: the step is to judge it, not to wait
+        # for the gate. The ledger always knew it was built; it reached the controller as one line among many.
+        lines.append('# Delivered, not yet judged')
+        lines += ['  '+d+' is on disk' for d in delivered]
+        lines.append('  Needs whose readings are in but carry no target: '+', '.join(unjudged)+'.')
+        lines.append('')
+        lines.append('Step: '+('a work order landed' if mode == 'eval' else 'the route is empty')+' and the project holds '
+                     +'deliverables nobody has judged. Review them: read what you can of each, set it beside the map\'s '
+                     +'readings, and judge it against the needs it serves — compose their targets, or reopen the work order '
+                     +'that built it with the delta. An empty reply leaves them unjudged'
+                     +(' (phase '+now['id']+')' if now else '')+'.')
+    else:
+        lines.append('Step: '+('a work order landed' if mode == 'eval' else 'the route is empty')+'. Answer the gate\'s red'
+                     +(' (phase '+now['id']+')' if now else '')+'; an empty reply is right when the route already covers it.')
     if refusals:
         lines.append('')
         applied = observation.get('applied_so_far') or {}
@@ -822,6 +838,8 @@ def coverage(observation: dict[str, Any]) -> tuple[dict[str, str], list[tuple[st
                 if u.get('status') == 'resolved' and k and order.get(str(k.get('confidence')), 0) >= 2 and not k.get('stale'):
                     value = k.get('mean') if k.get('mean') is not None else (k.get('rate') if k.get('rate') is not None else k.get('mode'))
                     bad = k.get('type') == 'boolean' and k.get('rate') is not None and float(k['rate']) < 0.5
+                    if k.get('type') == 'formula':
+                        value, bad = k.get('holds'), k.get('holds') is False
                     met.append(u['id']+'='+str(value)+(' FALSE' if bad else ''))
                 else:
                     open_.append(u['id']+(' → '+task_of[u['id']] if u['id'] in task_of else ' (unrouted)'))
@@ -830,6 +848,12 @@ def coverage(observation: dict[str, Any]) -> tuple[dict[str, str], list[tuple[st
                 owed.append((ref, str(text)))
             elif open_:
                 states[ref] = 'OWED: '+', '.join(open_)+((' | met: '+', '.join(met)) if met else '')
+                owed.append((ref, str(text)))
+            elif key == 'needs' and not any(u.get('type') == 'formula' for u in us):
+                # Readings in are not a need met: a need is met when its targets are true, and a target is the
+                # controller's composition over the readings. Printed as MET, decision 2 of the romantic piano
+                # benchmark took the collection for the verdict and waved the delivered piece through (2026-09-22).
+                states[ref] = 'COLLECTED, NOT JUDGED (no target): '+', '.join(met)
                 owed.append((ref, str(text)))
             else:
                 states[ref] = 'MET: '+', '.join(met)
