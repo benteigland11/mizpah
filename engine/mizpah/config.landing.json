@@ -62,6 +62,5 @@
     "restart_cooldown_seconds": 600,
     "disk_high_percent": 92,
     "notify_command": "notify-send \"$MIZPAH_TITLE\" \"$MIZPAH_BODY\""
-  },
-  "controller_reads": 12
+  }
 }

@@ -665,11 +665,12 @@ def decide(client: ModelClient, config: dict[str, Any], system: str, user: str,
     _last_tools[0] = calls
     started = time.time()
     seen: set[str] = set()
-    # The reads a step may make before it is told to decide. A safety for a model that reads like a person (60);
-    # a seat for one that wanders the verbs — Ornith made 21 reads in five minutes on an empty map, seven of
-    # them refused shell pipes and invented ids — is set lower in its config (`controller_reads`), a scaffold
-    # turned down as the model earns it, not a budget.
-    ceiling = int(config['mizpah'].get('controller_reads') or TOOL_CALL_CEILING)
+    ceiling = TOOL_CALL_CEILING
+    # Reads that brought nothing: a refused verb or a read already made. Three in a row is a step that has stopped
+    # learning and is told to decide — the same rule as a worker's rounds that fix nothing. Ornith made 21 reads in
+    # five minutes on an empty map (landing, 2026-09-22): seven refused shell pipes and invented ids, `probe list`
+    # three times. A model that reads like a person never trips it.
+    empty_run = 0
 
     def live(phase: str) -> None:
         # The step as it stands, for a watcher: the journal gets the record when the step ends, and a first step on
@@ -709,11 +710,14 @@ def decide(client: ModelClient, config: dict[str, Any], system: str, user: str,
             else:
                 text = run_tool(config, project, root, str(fn.get('name')), args if isinstance(args, dict) else {})
                 seen.add(key)
-            calls.append(dict(name=fn.get('name'), args=args, chars=len(text), refused=text.startswith(('refused', 'error', 'no '))))
+            refused = text.startswith(('refused', 'error', 'no ', 'the same read'))
+            calls.append(dict(name=fn.get('name'), args=args, chars=len(text), refused=refused))
             messages.append(dict(role='tool', tool_call_id=call.get('id'), name=fn.get('name'), content=text))
+            empty_run = empty_run+1 if refused else 0
             live('tools')
-        if len(calls) >= ceiling:
-            messages.append(dict(role='user', content='That is '+str(ceiling)+' reads; decide now with what you have.'))
+        if len(calls) >= ceiling or empty_run >= 3:
+            messages.append(dict(role='user', content=('That is '+str(ceiling)+' reads' if len(calls) >= ceiling else
+                                 'The last three reads brought nothing new')+'; decide now with what you have.'))
             payload = dict(config['controller']['generation'], messages=messages, max_tokens=config['mizpah'].get('controller_output_tokens', 8192))
             message = parse_turn(client.complete(payload, 'controller')).message
             break
