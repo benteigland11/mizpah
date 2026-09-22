@@ -935,6 +935,15 @@ def add_dependency(
             if not any(r.get("id") == target for r in rows):
                 rows.append({"id": target, "as_of": None})
         else:
+            if any(part.startswith(".") for part in Path(target).parts):
+                # A hidden directory is state or scratch (.tool-output, .svc, .cache, the map's own tree):
+                # kept per window or per task, not part of the project a gate reads. A known that depended on
+                # .tool-output/ly-compile.log was stale from the host's side however often its worker
+                # reaffirmed it (engrave, 2026-09-22).
+                raise ValueError(
+                    f"file dep {target} is under a hidden directory: that is scratch or state, not the "
+                    f"project; a known depends on project files (the artifact it reads, the source it came from)"
+                )
             if not (project_root / target).is_file():
                 raise FileNotFoundError(
                     f"file dep not found: {target} (path is relative to "
