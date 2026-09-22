@@ -37,6 +37,16 @@ from cg.universal_context_payload_projection_python.src.context_payload_projecti
 
 
 
+def _refuse_transcript_note(text: str) -> None:
+    """The wire view shows an applied call as its first line plus "[transcript note: … applied in full …]". A model
+    that has seen enough of its own history writes that shape back: on compose (2026-09-22) Grok sent a 222-line
+    file as one line and a note with an invented call id, twice, and spent twenty turns recovering the content
+    from the earlier call's saved arguments. The note is the transcript's, never a file's."""
+    if '[transcript note:' in text:
+        raise ValueError('the content carries a "[transcript note: …]" line: that is how this transcript shows a call '
+                         'already applied, not something to write. Send the whole content; a long file goes as a '
+                         'skeleton write and edits')
+
 def _looks_like_handoff(text: str) -> bool:
     """A handoff has structure: a heading or a list item somewhere, and more than a sentence or two.
     A reply without either is the worker narrating what it would do, not the working memory."""
@@ -1123,6 +1133,7 @@ class FocusedSession:
                     if set(args) != {'path', 'content'} or not all(isinstance(args[k], str) for k in args):
                         raise ValueError('write requires exactly path and content strings')
                     self._refuse_protected(args['path'])
+                    _refuse_transcript_note(args['content'])
                     limit = self.settings.maximum_write_characters
                     if limit is not None and len(args['content']) > limit:
                         raise ValueError('write content is too long for one call; write the skeleton first and fill it in with edit')
@@ -1151,6 +1162,7 @@ class FocusedSession:
                         if current is not None and seen != current:
                             raise ValueError(args['path']+' has changed since you last read it: read the region again '
                                              'and copy old_text from the current lines')
+                    _refuse_transcript_note(args['new_text'])
                     limit = self.settings.maximum_edit_characters
                     size = len(args['old_text'])+len(args['new_text'])
                     if limit is not None and size > limit:
