@@ -2,8 +2,9 @@
 
 One file, one thing; a seat's prompt is the pieces in `order.txt`, each as the shared file (`name.md`, every
 seat that runs the loop) followed by the seat's own (`name_<seat>.md`). The reviewer is a different kind of
-seat and composes only from `order_reviewer.txt`, an explicit list. A piece not yet finished lives in `wip/`
-and is taken from there with a note, so the loop runs while the pieces are written.
+seat and composes only from `order_reviewer.txt`, an explicit list; the deputy likewise from
+`order_deputy.txt`. A piece not yet finished lives in `wip/` and is taken from there with a note, so the loop
+runs while the pieces are written.
 """
 from __future__ import annotations
 
@@ -11,7 +12,8 @@ from pathlib import Path
 from string import Template
 from typing import Any
 
-SEATS = ('worker', 'controller', 'reviewer')
+SEATS = ('worker', 'controller', 'reviewer', 'deputy')
+LISTED = ('reviewer', 'deputy')   # seats off the loop: an explicit list, no shared-then-own pairing
 
 
 def _read(folder: Path, name: str) -> tuple[str | None, bool]:
@@ -29,17 +31,14 @@ def compose(seat: str, folder: str | Path) -> str:
     if seat not in SEATS:
         raise ValueError('seat must be one of '+', '.join(SEATS))
     folder = Path(folder)
-    if seat == 'reviewer':
-        order_file, names = folder/'order_reviewer.txt', None
-    else:
-        order_file = folder/'order.txt'
+    listed = seat in LISTED
+    order_file = folder/(f'order_{seat}.txt' if listed else 'order.txt')
     if not order_file.exists():
         raise FileNotFoundError(f'{order_file} names the pieces of the {seat} prompt; it does not exist')
     names = [line.strip() for line in order_file.read_text().splitlines() if line.strip() and not line.startswith('#')]
     pieces: list[str] = []
     for name in names:
-        candidates = [name] if seat == 'reviewer' else [name, name+'_'+seat]
-        for candidate in candidates:
+        for candidate in ([name] if listed else [name, name+'_'+seat]):
             text, from_wip = _read(folder, candidate)
             if text is None:
                 continue
@@ -52,11 +51,12 @@ def compose(seat: str, folder: str | Path) -> str:
 def pieces_of(seat: str, folder: str | Path) -> list[tuple[str, bool]]:
     """What compose() would take, in order, with whether each came from wip/ — for the app and for a check."""
     folder = Path(folder)
-    order_file = folder/('order_reviewer.txt' if seat == 'reviewer' else 'order.txt')
+    listed = seat in LISTED
+    order_file = folder/(f'order_{seat}.txt' if listed else 'order.txt')
     names = [line.strip() for line in order_file.read_text().splitlines() if line.strip() and not line.startswith('#')]
     out: list[tuple[str, bool]] = []
     for name in names:
-        for candidate in ([name] if seat == 'reviewer' else [name, name+'_'+seat]):
+        for candidate in ([name] if listed else [name, name+'_'+seat]):
             text, from_wip = _read(folder, candidate)
             if text is not None:
                 out.append((candidate, from_wip))

@@ -28,7 +28,7 @@ import sys
 import time
 from typing import Any
 
-from . import draft as draft_module, init as init_module
+from . import draft as draft_module, init as init_module, prompts
 from .worker import (
     FocusedSession, ModelClient, ModelTransportError, NetworkPolicy, ReviewPolicy, SandboxedShell, SessionPolicy,
     SessionSettings, ShellConfig, ShellLimits, client_for, load_config, observe_model, string,
@@ -212,25 +212,14 @@ def shell_for(config: dict[str, Any], root: Path) -> SandboxedShell:
     return SandboxedShell(shell)
 
 
-PROMPT_DIR = Path(__file__).parents[4]/'prompts'/'deputy'   # the repo's prompts/ when no config names one
+PROMPTS_DIR = Path(__file__).parents[4]/'prompts'   # the repo's, when no config names one
 
 
 def policy_text(config: dict[str, Any] | None = None) -> str:
-    """The system prompt, composed from `prompts/deputy/*.md` in name order (README.md aside), one blank line
-    between files. One file per subject — the role, what a brief becomes, each part of the brief, the tools — so
-    an edit is one subject. The folder is `deputy/` under the config's `prompts_dir`, where the other seats'
-    pieces live; `deputy_prompt_dir` in the engine config points elsewhere for an experiment."""
-    folder = PROMPT_DIR
-    if config is not None:
-        if config['mizpah'].get('deputy_prompt_dir'):
-            folder = Path(config['mizpah_config_path']).parent/config['mizpah']['deputy_prompt_dir']
-        elif config.get('prompts_dir'):
-            folder = Path(config['prompts_dir'])/'deputy'
-    parts = [p.read_text().strip() for p in sorted(folder.glob('*.md')) if p.name.lower() != 'readme.md']
-    parts = [p for p in parts if p]
-    if not parts:
-        raise SystemExit('no prompt files under '+str(folder))
-    return '\n\n'.join(parts)+'\n'
+    """The system prompt: the pieces `prompts/order_deputy.txt` lists, composed like the other seats'
+    (`mizpah.prompts.compose`) from the config's `prompts_dir`."""
+    folder = Path(config['prompts_dir']) if config is not None and config.get('prompts_dir') else PROMPTS_DIR
+    return prompts.compose('deputy', folder)
 
 
 def settings_for(config: dict[str, Any], assignment: str) -> SessionSettings:

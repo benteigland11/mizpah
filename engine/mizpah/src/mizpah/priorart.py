@@ -109,7 +109,5 @@ def render(config: dict[str, Any], project: Path, owed: list[tuple[str, str]]) -
         if hits:
             lines.append('  '+label+': '+'; '.join(hits[:5]))
     if lines:
-        lines.insert(0, 'Prior art for what is still owed (the library, looked up by entry: a widget or procedure here is the '
-                        'instrument to name in the unknown\'s source, an install to route rather than a build; a reading another '
-                        'project resolved is the shape to mint):')
+        lines.insert(0, 'Prior art in the library for what is owed, by entry:')
     return lines

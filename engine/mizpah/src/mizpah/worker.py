@@ -334,47 +334,19 @@ def render_assignment(task: dict[str, Any], unknowns: list[dict[str, Any]], map_
     if acceptance:
         lines.append('Acceptance: '+'; '.join(acceptance))
     if task.get('enabler_id'):
-        lines.append('This task builds the enabler `'+str(task['enabler_id'])+'`: an instrument the brief needs before its '
-                     'readings can be taken, which is a widget. Search the widget library first (`cartograph search`, '
-                     'several terms): an installed widget that does the job is the instrument — install it at the path the '
-                     'unknown names and the unknown reads true when its validate passes. Only when nothing fits, create it, '
-                     'give it tests, and it is checked in after green. The instrument is never itself a finding: the reading '
-                     'is that it exists at its path and validates. An enabler is packed as a small repo from its path: leave '
-                     'a README there that is its interface (what to call, with what, what comes back) — the next project '
-                     'installs the directory and reads only that.')
+        lines.append('This work order builds the enabler `'+str(task['enabler_id'])+'`: an instrument the brief needs before '
+                     'its readings can be taken — a widget, installed at the path the unknown names, read true when it validates.')
     made = [unknown_notes(u)['creates'] for u in unknowns if unknown_notes(u).get('creates')] if not task.get('enabler_id') else []
     if made:
-        lines.append('This task makes '+', '.join('`'+m+'`' for m in made)+'. The code that makes it is an instrument, and '
-                     'an instrument is a widget: build it under `cg/<domain>-<name>-python` (`cartograph create`), with a small '
-                     'API that names the decisions it makes (for a piece: `apply_pedal_per_harmony(...)`, `shape_phrase_velocity(...)`, '
-                     '`ritardando(...)`; for a document: the sections it lays down), tests that assert those decisions on its '
-                     'output, and a README that is its interface. Name the widget for the skill, what it does to the thing '
-                     '(`music-pedal-per-harmony`, not `nine-bar-progression`). The widget is the general logic: every '
-                     'function takes the thing it acts on — the notes, the chords, the strokes, the document — as an argument '
-                     'and returns it changed. What is specific to this project (this piece\'s notes, this file\'s name, this '
-                     'run\'s tempo) is glue: a short script in the project that calls the widget with that material. A widget '
-                     'that carries the material (a literal melody or chord list in src/, a function that writes a file and '
-                     'takes nothing but a path) is not general and does not go in. If a widget you install carries hardcoded values that '
-                     'should be parameters, that is the improvement: change it to take them, keep its tests passing, call it '
-                     'from your glue — the harvest checks it in. Then produce the artifact by calling it. Widgets are not a '
-                     'clean-up after the work: they are how the work meets the bar — `cartograph validate` passing on the '
-                     'maker is the reading that its rules hold, before the artifact is measured. Search first (`cartograph '
-                     'search`, two or three words for the skill); a script at the project root is invisible to the library '
-                     'and lost when the task ends. After green the widget is checked in and the next worker installs it.')
-    lines.append('Your map is `'+map_id+'` (TERRA_MAP is set): probes are shared, but the unknowns, your runs and '
-                 'the knowns you graduate live there.')
+        lines.append('This work order makes '+', '.join('`'+m+'`' for m in made)+'.')
+    lines.append('Your task map is `'+map_id+'` (TERRA_MAP is set). A probe runs with the project root as its working '
+                 'directory: relative paths; do not derive the root from `__file__`.')
     ids = [u['id'] for u in unknowns]
-    lines.append('Your probes already exist, one per unknown, each measuring only its own quantity: '+
-                 ', '.join('`'+state_dirname+'/map/probes/'+i+'_probe/`' for i in ids)+'. For each, write its `measure.py` '
-                 '(a few lines returning {"<unknown id>": value}), validate, run. Do not create other probes. '
-                 'A probe runs with the project root as its working directory: open files and run commands by '
-                 'relative path; do not derive the root from `__file__` (measure.py is four levels down).')
     for uid, known_ids in (inputs or {}).items():
-        lines.append('`'+uid+'_probe` declares the map knowns '+', '.join('`'+k+'`' for k in known_ids)+
-                     ' as inputs: its measure() gets their values in ctx["inputs"] and compares against them.')
-    lines.append('Done means `terra known adopt <known> --from '+map_id+'` succeeded for '+
-                 ('it' if len(ids) == 1 else 'each of '+', '.join(ids))+' and then '
-                 '`terra route complete '+task['id']+' --run <run_id>'+''.join(' --known '+i for i in ids)+'` succeeded.')
+        lines.append('A probe for `'+uid+'` may declare the map knowns '+', '.join('`'+k+'`' for k in known_ids)+
+                     ' as inputs: its measure() gets their values in ctx["inputs"].')
+    lines.append('Done: `terra known adopt <known> --from '+map_id+'` for '+('it' if len(ids) == 1 else 'each of '+', '.join(ids))
+                 +', then `terra route complete '+task['id']+' --run <run_id>'+''.join(' --known '+i for i in ids)+'`.')
     return '\n'.join(lines)+'\n'
 
 

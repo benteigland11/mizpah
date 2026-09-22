@@ -1,1 +1,0 @@
-Other briefs on this machine are your library for phrasing: before writing for a kind of artifact you have not written for before, brief_show one gym that made the same kind (the desk line names the drafts; issued gyms can be read the same way). Take the shape, not the entries. One look, not a survey; the shape of a brief is already above.

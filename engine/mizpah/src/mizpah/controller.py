@@ -424,10 +424,8 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
                          +(' — reason: '+str(p['decision_reason'])[:160] if p.get('decision_reason') else ''))
     if states:
         n_met = sum(1 for v in states.values() if v.startswith('MET') and 'FALSE' not in v)
-        lines.append('Coverage (computed): '+str(n_met)+' of '+str(len(states))+' entries met; owed or uncovered: '
-                     +(', '.join(ref for ref, _ in owed) if owed else 'none')+'. Route only for these'
-                     +(' — and in this reply only what can start now: builders of deliverable files, readings of sources '
-                       'that exist; readings of files to be built are minted once they exist.' if mode == 'route' else '.'))
+        lines.append('Coverage: '+str(n_met)+' of '+str(len(states))+' entries met; owed: '
+                     +(', '.join(ref for ref, _ in owed) if owed else 'none')+'.')
     lines += observation.get('prior_art') or []
     lines.append('')
     lines += briefs.render(observation.get('related_briefs') or [])
@@ -487,10 +485,6 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
                      'was), retype it: "retype": [{"unknown": "<id>", "type": "number|boolean|label", "claim": "<sharper '
                      'claim, optional>"}] — the same id, asked right, and its task is released. Otherwise propose the '
                      'change and leave it — the artifacts that depend on the map may still be built.')
-    if observation['knowns']:
-        lines.append('A known\'s claim is what its probe reads, reviewed against the brief entry it cites when the reading '
-                     'stood. An entry with several clauses that one reading covers is answered; it is not owed a '
-                     'reading per clause. Mint a reading for an entry only for something no known\'s claim says.')
     lines.append('Route tasks:'+('' if observation['tasks'] else ' (none)'))
     finished = [t for t in observation['tasks'] if t['status'] in ('done', 'cancelled')]
     if finished:
