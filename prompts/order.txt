@@ -6,4 +6,5 @@ probes
 playbook
 cartograph
 route
+budget
 policy

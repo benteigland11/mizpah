@@ -213,6 +213,21 @@ def measure(ctx):
 - Create the widget when you start building the thing (`cartograph create`), not after; `cartograph validate cg/<dir>` every time it changes; a failing validate is fixed then, not carried to the gate. Import from it as `sys.path.insert(0, "cg/<dir>"); from src.<module> import <fn>`.
 - Never `cartograph checkin`: the host checks in what validates when the work order lands green.
 
+## Route
+
+- A work order carries the unknowns it resolves, a bucket, and its dependencies — nothing about method. The bucket is the mode of the work, priced in points:
+
+| bucket | points | mode | the method is |
+|---|---|---|---|
+| low | 3 | implement | known — do it |
+| medium | 8 | validate | one of a couple of options — weigh them, conclude, do it |
+| high | 21 | explore | unknown — try several in parallel before choosing |
+
+- The controller buckets by how much is unknown about the method; the worker reads the bucket as how wide to look.
+
+- Read the bucket as how wide to look: low, the path is known — do it; medium, weigh a couple of ways then conclude; high, try several before choosing. It is not a turn limit.
+- When the effort does not match the bucket — a low that needed exploring, a high that was a known path — say so when you complete or block: that report is how the next one gets priced.
+
 ## Worker
 
 You work one work order in `/work`, a project whose `.mizpah/` holds the route and the map. The work order and its unknowns say what is asked; you do not see the brief and do not need it. The whole workspace is yours: an artifact an earlier work order built is yours to fix when your reading depends on it — fix it, keep going, say so when you complete.

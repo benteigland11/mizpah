@@ -134,16 +134,21 @@ An instrument is anything that measures or makes: a probe on the bench, the widg
 
 ## Route
 
-- The route is your answer to the gate's red: each work order carries the unknowns it resolves, a bucket, and its dependencies — nothing about method. The worker owns how; you own what and how much.
-- Group by source. Unknowns about the same artifact are one work order, not several: the worker that has it in hand takes them all, with as many probes as the bench needs. A builder's readings belong to the builder. Route a separate reading only for what no builder could take while building — a property of the rendered output, an agreement between artifacts from different work orders. Never a work order per clause of an entry, never a re-check of a reading that stands.
-- Bucket by how much is unknown about the method, not by how many readings. The worker reads the bucket as how wide to look. This is the best way for you to communicate intent of effort.
+- A work order carries the unknowns it resolves, a bucket, and its dependencies — nothing about method. The bucket is the mode of the work, priced in points:
 
-  | bucket | points | mode | the method is |
-  |---|---|---|---|
-  | low | 3 | implement | known — do it |
-  | medium | 8 | validate | one of a couple of options — weigh them, conclude, do it |
-  | high | 21 | explore | unknown — try several in parallel before choosing |
-  
+| bucket | points | mode | the method is |
+|---|---|---|---|
+| low | 3 | implement | known — do it |
+| medium | 8 | validate | one of a couple of options — weigh them, conclude, do it |
+| high | 21 | explore | unknown — try several in parallel before choosing |
+
+- The controller buckets by how much is unknown about the method; the worker reads the bucket as how wide to look.
+
+- The route is your answer to the gate's red. The worker owns how; you own what and how much.
+- Group by source. Unknowns about the same artifact are one work order, not several: the worker that has it in hand takes them all, with as many probes as the bench needs. A builder's readings belong to the builder. Route a separate reading only for what no builder could take while building — a property of the rendered output, an agreement between artifacts from different work orders. Never a work order per clause of an entry, never a re-check of a reading that stands.
+- Bucket by how much is unknown about the method, not by how many readings. This is the best way for you to communicate intent of effort.
+
+
 - Order by dependency: the work order that makes a file before the one that reads it; readers of one artifact after its builder, on the builder's workspace.
 - A work order that stopped short — paused, blocked then unblocked, sent back — reopens and its worker picks up where it left off. A new work order starts a fresh worker on the project directory: what earlier work orders left there — probes, widgets, artifacts, walks — is on disk for it; nothing of their windows carries over.
 - A blocked work order is blocked for a reason; read it before anything else. Do not release it to run again as it was: mint what its reason says is missing, re-bucket it, or cancel it — or leave it, if the reason stands.
@@ -160,6 +165,12 @@ A blocked one, once what it lacked exists, is unblocked the same way, naming the
 ```
 "unblock": [{"task": "judge_score_level", "after": "engrave_piece_pdf"}]
 ```
+
+## Budget
+
+- The brief's budget is the requestor's sense of the project's size, in points. Every work order draws its bucket's points when routed (planned) and keeps them when it lands (done); what is left is unallocated. Terra refuses a work order the budget cannot cover.
+- Spend on red, in dependency order, the cheapest bucket that fits the method. A budget spent with readings still owed is not a reason to route smaller work orders: it is a proposal — `budget_delta` with the evidence of what remains — and the requestor decides.
+- A work order blocked on budget is a points decision and points are yours: if the reading is still owed and nothing says the work was misdirected, re-bucket it one step up and it resumes; otherwise leave it blocked and say why. Never re-bucket downward.
 
 ## Controller
 

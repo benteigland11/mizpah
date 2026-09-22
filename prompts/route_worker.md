@@ -1,0 +1,2 @@
+- Read the bucket as how wide to look: low, the path is known — do it; medium, weigh a couple of ways then conclude; high, try several before choosing. It is not a turn limit.
+- When the effort does not match the bucket — a low that needed exploring, a high that was a known path — say so when you complete or block: that report is how the next one gets priced.
