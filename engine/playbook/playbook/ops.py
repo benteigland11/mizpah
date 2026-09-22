@@ -894,6 +894,42 @@ def gravity(procedure_id: str) -> int:
     return len(seen)
 
 
+def upstream(procedure_id: str) -> dict[str, Any]:
+    """The chains above a procedure: every procedure that links to it, and theirs, up to the roots nobody links
+    — how far up the library's waterfall this one sits. A leaf with no chain is an orphan: nothing general
+    leads to it, so no worker following the general method will find it. `chains` are root-first paths ending
+    at this procedure; `roots` the tops; `orphan` when there is no chain at all."""
+    links: dict[str, set[str]] = {}
+    titles: dict[str, str] = {}
+    for path in store.procedures_dir().glob("*.json"):
+        if path.name.startswith("."):
+            continue
+        try:
+            document = read_document(path)
+        except (OSError, ValueError):
+            continue
+        pid = str(document.get("id") or path.stem)
+        titles[pid] = str(document.get("title") or "")
+        for step in document.get("steps") or []:
+            if isinstance(step, dict) and step.get("procedure"):
+                links.setdefault(str(step["procedure"]), set()).add(pid)
+    chains: list[list[str]] = []
+
+    def climb(node: str, path: list[str]) -> None:
+        parents = [p for p in sorted(links.get(node, ())) if p not in path]
+        if not parents:
+            if len(path) > 1:
+                chains.append(list(reversed(path)))
+            return
+        for parent in parents:
+            climb(parent, path+[parent])
+
+    climb(procedure_id, [procedure_id])
+    roots = sorted({c[0] for c in chains})
+    return dict(id=procedure_id, title=titles.get(procedure_id, ""), orphan=not chains, roots=roots,
+                chains=[[dict(id=n, title=titles.get(n, "")) for n in c] for c in chains][:12], depth=max((len(c)-1 for c in chains), default=0))
+
+
 def reach(procedure_id: str) -> dict[str, Any]:
     """How long the method really is: steps through links, the procedures it runs, and how many walks that is."""
     entries = expand(procedure_id)

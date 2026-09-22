@@ -111,6 +111,10 @@ def _build_parser() -> argparse.ArgumentParser:
     reach.add_argument("id")
     reach.set_defaults(handler=_cmd_reach)
 
+    upstream = sub.add_parser("upstream", help="how far up the library this procedure sits: the chains of procedures that link down to it, root first; orphan when none does")
+    upstream.add_argument("id")
+    upstream.set_defaults(handler=_cmd_upstream)
+
     tick = sub.add_parser("tick", help="mark steps of an open walk: --done N,M get [x]; --skip N --because ... gets [-] with the reason under it")
     tick.add_argument("target", help="the walk file under .playbook/open/, or the procedure id of its one unfinished walk")
     tick.add_argument("--done", nargs="*", default=[], help="step numbers done: --done 1,3 or --done 1 3")
@@ -250,6 +254,10 @@ def _cmd_load(args: argparse.Namespace) -> dict[str, Any]:
 def _cmd_open(args: argparse.Namespace) -> dict[str, Any]:
     return ops.open_procedure(args.id, args.purpose, args.dir, again=args.again, nested=args.nested,
                               limit=args.limit or ops.FLAT_LIMIT, start=args.start)
+
+
+def _cmd_upstream(args: argparse.Namespace) -> dict[str, Any]:
+    return ops.upstream(args.id)
 
 
 def _cmd_reach(args: argparse.Namespace) -> dict[str, Any]:

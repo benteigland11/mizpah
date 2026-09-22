@@ -15,3 +15,4 @@ diverged: a walk shows every step; before any tick the worker writes <walk>.plan
 diverged: procedures carry a `widgets` field (the instruments the method calls; `edit --widgets`), listed at the top of a walk and in `reach`
 diverged: the walk names its plan file's exact path (plan: …) and tick takes x.plan.md or x.md.plan.md
 diverged: `create` refuses a twin (id/title share three skill stems with a procedure in the store), naming the one to improve
+diverged: `playbook upstream <id>` — the chains of procedures that link down to this one, root first (how far up the waterfall it sits); `orphan` when nothing links it
