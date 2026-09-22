@@ -2564,6 +2564,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         merges = list(playbook.get('conflicts') or [])
         # Rounds continue while each one fixes something (the count of problems falls) and turns remain; a round
         # that fixes nothing ends it — the same rule as red gate rounds.
+        stuck = 0   # rounds in a row that fixed nothing; the second ends it (a validator's refusal can take two tries)
         while (refused or conflicts or merges or unrecorded) and status['status'] == 'complete' \
                 and budget-turns(status) > 0:
             if conflicts:
@@ -2599,7 +2600,11 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
                                                or not (widgets['checked_in'] or widgets['unchanged']))
             if len(still)+len(still_conflicts)+len(still_merges)+int(still_unrecorded) \
                     >= len(refused)+len(conflicts)+len(merges)+int(unrecorded):
-                break   # nothing fixed this round: the worker has had its say
+                stuck += 1
+                if stuck >= 2:
+                    break   # two rounds fixed nothing: the worker has had its say
+            else:
+                stuck = 0
             refused, conflicts, merges, unrecorded = still, still_conflicts, still_merges, still_unrecorded
     verdict = ('complete' if gate['ok'] else 'blocked_by_worker' if blocked_reason is not None
                else 'stopped' if status['status'] == 'stopped' else 'incomplete')
