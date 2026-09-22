@@ -243,11 +243,16 @@ def _name(value: str, *, user: bool = False) -> str:
     return str(path)
 
 
+
+SCRATCH_STATE = ('.tool-output', '.session-history')   # state that is scratch, not evidence (see DirectoryWorkspace.snapshot)
+
 def _members(snapshot: bytes, byte_limit: int, file_limit: int) -> list[tuple[tarfile.TarInfo, bytes]]:
     if not snapshot:
         return []
     # Tar headers are bounded separately from file content.
-    if len(snapshot) > byte_limit + file_limit * 2048 + 10240:
+    if len(snapshot) > 4*byte_limit + file_limit * 2048 + 10240:
+        # Four times the evidence cap: scratch state is exempt from the content count below, so the tar may
+        # carry more than the cap, but not without bound.
         raise ValueError('Workspace archive exceeds its limit')
     result: list[tuple[tarfile.TarInfo, bytes]] = []
     names: set[str] = set()
@@ -264,7 +269,11 @@ def _members(snapshot: bytes, byte_limit: int, file_limit: int) -> list[tuple[ta
                 target = PurePosixPath(member.linkname)
                 if target.is_absolute() or '..' in target.parts:
                     raise ValueError('Workspace symlinks must remain relative without parent traversal')
-            total += member.size
+            # Scratch state (saved outputs, window archives) rides in the state tar but is not the evidence the
+            # cap is for: a window that rendered 242 MB of video frames under .tool-output/ could not even write
+            # its handoff archive (follow-the-score, 2026-09-22). The tar's own size is still bounded above.
+            if not (name.split('/')[0] in SCRATCH_STATE):
+                total += member.size
             if total > byte_limit:
                 raise ValueError('Workspace file content exceeds its limit')
             if member.isfile():
@@ -367,7 +376,7 @@ class DirectoryWorkspace:
     # State that is scratch, not evidence: saved tool output and the window archives. A harvest, a checklist and a
     # detached check read none of it, and a worker that renders 1,175 video frames under .tool-output/ (follow-
     # the-score, 2026-09-22) put 242 MB there — past the evidence cap, so every harvest failed and the task with it.
-    SCRATCH_STATE = ('.tool-output', '.session-history')
+    SCRATCH_STATE = SCRATCH_STATE
 
     def snapshot(self, *, byte_limit: int, file_limit: int) -> bytes:
         """The evidence part of the tree as a tar — the directory (caches left out) plus the state part that is
