@@ -57,3 +57,18 @@ def test_the_verdict_is_terras_gate_on_the_task_map(tmp_path: Path, monkeypatch)
     gate = worker.task_gate({}, project, dict(id='t', map_id='u'), 't_t')
     assert calls == [('gate', '--map', 't_t')]
     assert gate['ok'] is False and gate['problems'] == ['[known_stale] u: file moved'] and gate['knowns'] == ['u']
+
+
+def test_tick_shape_guards_are_scaffolding_off_by_default():
+    """After the walk's plan the model closes steps by its own judgement: loops, lists and tick-only commands
+    pass unless `scaffolding.tick_guards` puts the rail back."""
+    import re
+    bulk = ['for n in 1 2 3; do playbook tick w.md --done $n --note ok; done',
+            'playbook tick w.md --skip 4 5 6 --because "solo piano"',
+            'playbook tick w.md --done 1; playbook tick w.md --done 2; playbook tick w.md --done 3; playbook tick w.md --done 4']
+    def refused(scaffolding):
+        patterns = worker.refused_patterns(dict(mizpah=dict(scaffolding=scaffolding)))
+        return [cmd for cmd in bulk if any(re.search(p, cmd) for p, _ in patterns)]
+    assert refused({}) == []
+    assert refused(dict(tick_guards=True)) == bulk
+    assert any('pip' in p for p, _ in worker.refused_patterns(dict(mizpah=dict(scaffolding={}))))   # verification stays

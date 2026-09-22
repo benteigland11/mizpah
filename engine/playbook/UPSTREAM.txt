@@ -17,3 +17,4 @@ diverged: the walk names its plan file's exact path (plan: …) and tick takes x
 diverged: `create` refuses a twin (id/title share three skill stems with a procedure in the store), naming the one to improve
 diverged: `playbook upstream <id>` — the chains of procedures that link down to this one, root first (how far up the waterfall it sits); `orphan` when nothing links it
 diverged: the tick cooldown (one tick per ten seconds on a walk) is gone — it bought `sleep 9` turns from an honest worker closing a finished walk (engrave, 2026-09-22); the plan file and the closed-walk rule are the loop guards
+diverged: with the walk's plan written, one tick call closes any number of steps (several --skip under one --because, any count of --done under one --note); without a plan the old limits hold (at most TICK_AT_ONCE done, one skip) and a bulk call is refused as 'no plan yet' — the plan is the read, the rest is the model's judgement (2026-09-22)

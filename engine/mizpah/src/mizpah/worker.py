@@ -116,7 +116,9 @@ def load_config(path: str | Path) -> dict[str, Any]:
     harness['guidance_prefix'] = (prompts_dir/'messages'/'correction_worker.md').read_text()   # a template; the harness fills it
     # Scaffolding is method the host imposes; each piece is a toggle so a model that can orchestrate
     # can be run without it and compared. Verification guards are not toggles.
-    scaffolding = dict(bootstrap=True, checkins=True, command_tools=True) | (config.get('scaffolding') or {})
+    # tick_guards: a tick rides on the step's work, never in a loop or a list (off 2026-09-22: the walk's plan is
+    # the read, and after it the model closes steps by its own judgement; on for a model that needs the rail).
+    scaffolding = dict(bootstrap=True, checkins=True, command_tools=True, tick_guards=False) | (config.get('scaffolding') or {})
     scaffolding.pop('small_edits', None)   # retired: whole files for every model
     config['scaffolding'] = scaffolding
     # Whole files at once, for every model: the write/edit caps are at least a whole widget module. Small edits
@@ -1056,8 +1058,8 @@ def open_checklists(snapshot: bytes) -> list[str]:
         if open_steps:
             problems.append('checklist '+name+' has '+str(len(open_steps))+' unticked step(s): '+
                             '; '.join(o[:60] for o in open_steps[:4])+(' …' if len(open_steps) > 4 else '')+
-                            ' — do each against the artifact and `playbook tick '+name+' --done N,M`; a step that does not '
-                            'apply here is `--skip K --because "..."`, one per call, and "already done" is not a reason')
+                            ' — do each against the artifact and `playbook tick '+name+' --done N,M --note "..."`; steps that do not '
+                            'apply here are `--skip K,L --because "..."`, and "already done" is not a reason')
     return problems
 
 
@@ -1735,9 +1737,10 @@ def bindings(config: dict[str, Any], root: Path, map_id: str, checkins: bool | N
 def refused_patterns(config: dict[str, Any]) -> tuple[tuple[str, str], ...]:
     """The standing refusals, minus the install ban for an environment gym: building an environment is exactly
     installing into /work, with the package hosts its config allows."""
+    patterns = REFUSED_PATTERNS + (TICK_PATTERNS if config['mizpah']['scaffolding'].get('tick_guards') else ())
     if config['mizpah'].get('builds_base'):
-        return tuple(p for p in REFUSED_PATTERNS if 'install' not in p[0])
-    return REFUSED_PATTERNS
+        return tuple(p for p in patterns if 'install' not in p[0])
+    return patterns
 
 
 def checkin_settings(config: dict[str, Any]) -> ControllerSettings:
@@ -1868,7 +1871,7 @@ COMMAND_TOOLS: tuple[dict[str, Any], ...] = (
     dict(name='playbook_open', description='Write a whole procedure as a checklist to .playbook/open/<id>--<for>.md '
          'in the workspace; read that file once, follow it in order, tick steps off. One copy per walk: say what '
          'this walk is for; a procedure already open here is handed back with its next step. Use for the bootstrap '
-         'and for any domain procedure a search finds. Every step is done or skipped one at a time with its reason (`playbook tick`, bash).',
+         'and for any domain procedure a search finds. Every step is done or skipped with its reason (`playbook tick`, bash); after the plan, as many at once as belong together.',
          command='playbook open {id} --for {purpose}',
          parameters=dict(type='object', properties=dict(id=string('procedure id from search'),
                                                         purpose=string('what this walk is for: the unknown(s), artifact or source')),
@@ -1920,6 +1923,9 @@ REFUSED_PATTERNS = (
      'provides the toolchain and its packages (see the enablers of your task); a package it lacks is `terra route block` naming '
      'the package, so the person can add it to the environment'),
     (r'\bcurl\b[^|;&]*(/stop\b|/shutdown\b|/slots\b)', 'the model server is not yours to signal'),
+)
+# Scaffolding (`scaffolding.tick_guards`): the shape of a tick, on for a model that needs the rail.
+TICK_PATTERNS = (
     # A tick is a claim like a reading: it comes from the step's own work, in the command that did it. Fifty
     # boxes in one loop is not a walk (attempt 4: `for n in 1..50; do playbook tick --done $n; done`, then route
     # complete).

@@ -727,17 +727,16 @@ def tick_walk(target: str, done: list[int] | None = None, not_needed: list[int] 
     """Mark steps of an open walk in one call: `done` get `[x]`, `not_needed` get `[-]`. A worker ticking by
     hand spent thirteen turns of grep, read and edit on seven boxes.
 
-    A step is skipped one at a time, with its reason written under it: the procedure is the validation of the
-    work, and each step is its own decision. There is no verb that skips a walk whole — three procedures were
-    closed with one reason each ("already covered by the probe") on a piece whose every pedal hold crossed a
-    harmony, which the skipped procedure's fourth step checks."""
+    The walk is read before it closes: its plan (<walk>.plan.md) places every step under an action or under the
+    steps that do not apply, with why. With the plan written, any number of steps close in one call — several
+    skipped under one reason, a stretch done under one note: that is the model's judgement, made after the read
+    (2026-09-22; one at a time trapped a worker that had finished the work behind 53 unticked boxes of a general
+    procedure). Without a plan, a call closes a few steps and skips one."""
     done = list(done or []); not_needed = list(not_needed or [])
     if not done and not not_needed:
         raise ValueError("tick needs --done and/or --skip with step numbers, e.g. --done 1,3 --skip 2 --because ...")
     if set(done) & set(not_needed):
         raise ValueError("a step is done or not needed, not both: " + ", ".join(str(n) for n in sorted(set(done) & set(not_needed))))
-    if len(not_needed) > 1:
-        raise ValueError("skip one step per call, each with its own --because: a step is its own decision")
     because = str(because or "").strip()
     note = str(note or "").strip()
     if not_needed and not because:
@@ -749,23 +748,24 @@ def tick_walk(target: str, done: list[int] | None = None, not_needed: list[int] 
     if done and not note:
         raise ValueError("--done needs --note: what the step found or changed, one line with the value or the file (it goes under "
                          "the step, and the reviewer reads it against the artifact) — a box without what it found is a box")
-    if len(done) > TICK_AT_ONCE:
-        raise ValueError(f"tick at most {TICK_AT_ONCE} steps in one call: a tick is a claim like a reading, made in the command "
-                         "that did the step's work — fifty boxes at once is a list closed after the fact, not a walk")
     # A flat walk is ticked against a plan: before any box closes, the worker has read every step and written
     # <walk>.plan.md — the actions this artifact needs, each naming the steps it covers and what it will do here,
     # and the steps that do not apply with why. The idea "I can do all of this in one go" gets written out and
-    # read (by the reviewer, against the artifact) instead of happening silently in the first ten turns.
+    # read (by the reviewer, against the artifact) instead of happening silently in the first ten turns. The plan
+    # is also the read that lets a call close many steps at once, on any walk.
     path0 = _walk_file(target, target_dir)
     blocks0 = _walk_blocks(path0)
-    if blocks0 and all(b["source"] for b in blocks0):
+    bulk = len(not_needed) > 1 or len(done) > TICK_AT_ONCE
+    if bulk or (blocks0 and all(b["source"] for b in blocks0)):
         plan = _plan_path(path0)
         asked = sorted(set(done) | set(not_needed))
         if not plan.is_file():
             raise ValueError(f"no plan yet: read every step of the walk, then write {plan.name} beside it — a numbered list of the actions "
                              "this artifact needs, each line naming the step numbers it covers (\"steps 12-15: voice each harmony ...\") "
                              "and what it will do here, and a line for the steps that do not apply with why. Then do the actions and tick "
-                             "their steps with what they found. Nothing ticks before the plan.")
+                             "their steps with what they found"
+                             + (f"; with the plan, a call may close any number of steps (without it, at most {TICK_AT_ONCE} done "
+                                "and one skipped)." if bulk else ". Nothing ticks before the plan."))
         covered = _plan_coverage(plan)
         missing = [n for n in asked if n not in covered]
         if missing:
@@ -820,7 +820,7 @@ def tick_walk(target: str, done: list[int] | None = None, not_needed: list[int] 
 _NOT_A_REASON = re.compile(r"\b(already|covered|superseded|redundant|measured (separately|by|earlier|during)|recorded (for|by|separately)|"
                            r"performed (separately|earlier)|handled (by|elsewhere)|probe (already|covers|measured)|done (earlier|already|separately)|"
                            r"inspected (earlier|during|separately)|validated (earlier|separately|during))\b", re.I)
-TICK_AT_ONCE = 6   # steps one tick call may close: several that closed together, never a walk at once
+TICK_AT_ONCE = 6   # steps one tick call may close before the walk's plan is written; after it, any number
 REVEAL = 10**6     # every step's text is open: the worker reads the whole walk and plans from it (see the plan rule in tick)
 FLAT_LIMIT = 50   # steps in one walk: past this the method is several work orders, and the route carries the rest
 # The loop's own procedures: a step that links one runs the framework, and its steps are not part of a domain
@@ -952,8 +952,9 @@ _GUIDANCE = ("This procedure is the validation of your work: each step is a chec
              "with why (\"steps 9-11: that gym's 12/8 probe; this piece is 4/4\"). Every step number lands somewhere; nothing "
              "ticks before the plan exists. Then do the actions, in the order the plan says, and tick their steps in the command "
              "that does them: `playbook tick <this file> --done N,M --note \"...\"` with what the action found or changed (the value, "
-             "the file). A step that does not apply is `--skip N --because \"...\"`, one per call — \"already done\" and \"covered "
-             "by the probe\" are not reasons. There is no way to close a walk whole. The steps are knowledge earned on another "
+             "the file). Steps that do not apply are `--skip N,M --because \"...\"` — one reason may cover the steps it is true of, "
+             "and \"already done\" and \"covered by the probe\" are not reasons (those are --done with what was found). With the "
+             "plan written you may close as many steps in one call as your judgement says belong together. The steps are knowledge earned on another "
              "task: adapt their specifics (names, keys, counts, the probe they mention) to what is in front of you. Improve a step "
              "that fell short where you stand: `playbook edit-step --walk <this file> --step N --do ...` (`add-step --walk ... --after N`, "
              "`remove-step --walk ... --step N`) changes the procedure the step came from.")
@@ -990,7 +991,7 @@ def open_procedure(procedure_id: str, purpose: str, target_dir: str | Path = "."
             return {"ok": True, "id": procedure_id, "already_open": True, "path": walk["path"], "next": walk["next"],
                     "unticked": walk["unticked"],
                     "note": ("this procedure is already open here; continue from its next step, tick `[x]` done or `[-]` "
-                             "not needed (one per call, with --because). `--again` opens a "
+                             "not needed (with --because). `--again` opens a "
                              "second walk for a second thing.")}
     document = read_document(store.procedure_path(procedure_id))
     _require_valid(document, procedure_id)

@@ -321,20 +321,20 @@ def test_open_hands_back_an_unfinished_walk_and_steps_skip_one_at_a_time(tmp_pat
     second = json.loads(capsys.readouterr().out)["path"]
     _plan(second)
     assert second != first and len([p for p in (tmp_path/".playbook"/"open").glob("tune-pedal--*.md") if not p.name.endswith(".plan.md")]) == 2
-    # Two unfinished walks: tick by id is ambiguous, tick by file is not. A step is skipped one at a time, with its
-    # reason written under it; there is no verb that closes a walk whole.
+    # Two unfinished walks: tick by id is ambiguous, tick by file is not. Several steps close in one call only
+    # once the walk has been read (its plan written); then one reason covers the steps it is true of.
     assert main(["tick", "tune-pedal", "--skip", "1", "--because", "not needed", "--dir", str(tmp_path)]) == 1
     assert "2 unfinished walks" in capsys.readouterr().out
+    plan = Path(second[:-3] + ".plan.md"); plan.unlink()
     assert main(["tick", second, "--skip", "1", "2", "--because", "no pedal part", "--dir", str(tmp_path)]) == 1
-    assert "one step per call" in capsys.readouterr().out
+    assert "no plan yet" in capsys.readouterr().out
+    _plan(second)
     assert main(["tick", second, "--skip", "1", "--dir", str(tmp_path)]) == 1
     assert "--because" in capsys.readouterr().out
-    assert main(["tick", second, "--skip", "1", "--because", "the piece has no pedal part", "--dir", str(tmp_path)]) == 0
-    assert json.loads(capsys.readouterr().out)["unticked"] == [2]
-    assert main(["tick", second, "--skip", "2", "--because", "nothing to place", "--dir", str(tmp_path)]) == 0
-    capsys.readouterr()
+    assert main(["tick", second, "--skip", "1", "2", "--because", "the piece has no pedal part", "--dir", str(tmp_path)]) == 0
+    assert json.loads(capsys.readouterr().out)["unticked"] == []
     text = Path(second).read_text()
-    assert "- [-] **1." in text and "not needed here: the piece has no pedal part" in text and "- [-] **2." in text
+    assert "- [-] **1." in text and "- [-] **2." in text and text.count("not needed here: the piece has no pedal part") == 2
     # The first walk is now the only unfinished one: by id works and marks only what is left.
     assert main(["tick", "tune-pedal", "--skip", "2", "--because", "measured another way", "--dir", str(tmp_path)]) == 0
     assert json.loads(capsys.readouterr().out)["unticked"] == []

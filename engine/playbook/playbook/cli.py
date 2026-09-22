@@ -115,10 +115,10 @@ def _build_parser() -> argparse.ArgumentParser:
     upstream.add_argument("id")
     upstream.set_defaults(handler=_cmd_upstream)
 
-    tick = sub.add_parser("tick", help="mark steps of an open walk: --done N,M get [x]; --skip N --because ... gets [-] with the reason under it")
+    tick = sub.add_parser("tick", help="mark steps of an open walk: --done N,M get [x]; --skip N,M --because ... get [-] with the reason under each; with the walk's plan written, any number at once")
     tick.add_argument("target", help="the walk file under .playbook/open/, or the procedure id of its one unfinished walk")
     tick.add_argument("--done", nargs="*", default=[], help="step numbers done: --done 1,3 or --done 1 3")
-    tick.add_argument("--skip", nargs="*", default=[], help="one step that does not apply here, with --because")
+    tick.add_argument("--skip", nargs="*", default=[], help="steps that do not apply here, with --because (several need the walk's plan)")
     tick.add_argument("--because", default="", help="why the skipped step does not apply (written under it)")
     tick.add_argument("--note", default="", help="with --done: what the step found or changed, one line (written under it)")
     tick.add_argument("--dir", default=".", help="working tree the walk is under (default: .)")
