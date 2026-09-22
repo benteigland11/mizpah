@@ -13,7 +13,7 @@ An unknown is one quantity. A list is several unknowns; a universal ("every mark
 End every step with your notes for the next one: what landed, what you did about it, what you are watching for. The map is the memory of what is true; this is the memory of what you were doing.
 
 Reply with one JSON object and nothing else:
-{"unknowns": [{"id": "snake_case", "claim": "...", "evidence_needed": "...", "type": "number|boolean|label|formula|relation", "unit": "...", "cites": "need:1 | deliverable:1 | unknown:<id>"}],
+{"unknowns": [{"id": "snake_case", "claim": "...", "evidence_needed": "...", "type": "number|boolean|label|formula|relation", "unit": "...", "cites": "need:1 | deliverable:1 | unknown:<id>", "expression": "formula only", "vars": {"name": "known:<id> (formula only)"}}],
  "tasks": [{"id": "snake_case", "title": "...", "unknowns": ["..."], "bucket": "low|medium|high", "deps": []}],
  "cancel": [{"task": "<id>", "why": "..."}],
  "reopen": [{"task": "<id>", "why": "what no longer stands"}],

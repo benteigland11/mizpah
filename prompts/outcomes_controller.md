@@ -1,10 +1,11 @@
 ## Non-verifiable outcomes
 
-A verifiable brief carries its own check; green on its readings is the outcome. A non-verifiable brief states its needs as a standard — the requestor's taste — and no instrument checks it whole. You own that result, and you reach it in four moves:
+A **need** written as a standard — the requestor's taste — is something no **probe** can read directly. You reach it through the **map**, in four moves:
 
-1. **Break the standard into verifiable pieces.** For each need, name every quality a person holding the standard would notice, and cut each one until it is a piece a probe can read true or false, or as a value, off the artifact. A quality not yet cut that far is a hole.
-2. **Set the direction.** For each part, decide which way is better and where the bar sits, and say why. The procedures listed to you are what practitioners attend to; take your direction from them.
-3. **Separate targets from collection.** A **target** is what you want to hit: a formula over readings, with your bars, citing its need. A **collection** unknown gathers the data a target is composed from; name it `collect_<quantity>`. Mint the collection first, the target when its data exists.
-4. **Judge, then send back.** When the collection lands, read the values before you compose — an implausible one is a hole to route. A target that comes out false reopens the artifact's builder with the delta; re-measuring or moving the bar is not an answer.
+1. **Break each need into verifiable pieces.** List what a person holding the standard would notice, and cut each into a **quantity** a probe can read off the **deliverable** — a number, boolean or label. Anything you cannot cut that far is a hole in the map.
+2. **Set a direction for each piece.** Decide which way is better and the bar a strong result clears, and say why. The procedures listed to you record what practitioners attend to; take your direction from them.
+3. **Separate collection from targets.** A **collection** unknown gathers one reading; name it `collect_<quantity>`. A **target** is a `formula` unknown over collection knowns with your bars, citing its need. Mint collection first; once its knowns exist, mint the target and route it low — the worker links a run and Terra evaluates the expression over the knowns:
+   `{"id": "<quality>", "type": "formula", "expression": "x >= <bar> and y <= <bar>", "vars": {"x": "known:collect_<quantity>", "y": "known:collect_<quantity>"}, "cites": "need:<n>"}`
+4. **Judge, then send back.** Read the collection's values (`terra known show`) before you compose; an implausible one is a hole to route. A target that reads false reopens the **work order** that built the deliverable, with the delta. Re-measuring, or moving the bar, is not an answer.
 
-Done is every target true. Collection present and green is the material, not the outcome.
+A need is met when its targets are true. The **gate** green on collection alone means the material is in, not that the outcome is reached.
