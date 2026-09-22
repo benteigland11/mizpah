@@ -916,7 +916,9 @@ class SandboxedShell:
                 return ShellResult('interrupted', None, '', '', False, False, self._state(workspace, bound), (), time.monotonic()-start, str(error))
         try:
             if process.returncode != 0:
-                if _unit_result(config.systemctl, unit) == 'oom-kill':
+                # `--collect` removes the unit the moment it exits, so its Result is usually already gone: the
+                # status systemd-run itself returns is the one that survives (128+signal for a kill).
+                if process.returncode in (137, -9, 9) or _unit_result(config.systemctl, unit) == 'oom-kill':
                     # The kernel killed the unit at its memory limit: a known outcome, told to the model as the
                     # failed command it was. It had come back as "uncertain" and blocked the task — an ffmpeg
                     # encode at exactly 3 GB, twice, on follow-the-score (2026-09-22).
@@ -925,7 +927,18 @@ class SandboxedShell:
                                        'killed: the command exceeded the sandbox memory limit ('
                                        +str(limits.memory_bytes//(1024*1024))+' MB); nothing of it was applied. '
                                        'Do the work in smaller pieces or with less in memory at once')
-                raise ValueError('Sandbox service failed: '+stderr.decode(errors='replace')[:limits.visible_output_bytes])
+                detail = stderr.decode(errors='replace')[:limits.visible_output_bytes].strip()
+                if not detail:
+                    # The runner said nothing: the unit died on a limit of its own (memory, tasks, runtime), not
+                    # on anything this harness can name. A failed command the model can act on, never an
+                    # uncertain outcome — that class blocks the task and ends the run.
+                    return ShellResult('error', process.returncode, '', '', False, False,
+                                       self._state(workspace, bound), (), time.monotonic()-start,
+                                       'the command was killed by the sandbox (exit '+str(process.returncode)+
+                                       '): it exceeded a limit — memory ('+str(limits.memory_bytes//(1024*1024))+
+                                       ' MB), processes ('+str(limits.processes)+') or time. Nothing of it was '
+                                       'applied. Do the work in smaller pieces')
+                raise ValueError('Sandbox service failed: '+detail)
             response = json.loads(stdout)
             if response['capture_id'] != payload['capture_id']:
                 raise ValueError('Sandbox output identity mismatch')
