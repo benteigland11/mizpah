@@ -812,7 +812,8 @@ class FocusedSession:
         if '$correction' in prefix:
             from string import Template
             return [dict(role='user', content=Template(prefix).safe_substitute(
-                issued=str(self.progress.last_review_turn), now=str(self.progress.turns), correction=text))]
+                issued=str(self.progress.last_review_turn), now=str(self.progress.turns),
+                ago=str(max(0, self.progress.turns-self.progress.last_review_turn)), correction=text))]
         return [dict(role='user', content=prefix+'\n'+text)]
 
     def _touched_focus_file(self, turn: dict[str, Any]) -> bool:
