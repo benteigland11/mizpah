@@ -238,6 +238,13 @@ def open_task_map(config: dict[str, Any], project: Path, task: dict[str, Any], m
     return map_id
 
 
+def composed(known: dict[str, Any]) -> bool:
+    """A formula known is computed from other knowns, not read by a probe: the re-measure takes its inputs again and
+    skips it. It asked the target's probe for a reading of the target, so every composed target failed the gate
+    ("probe … did not produce a reading for target_…", turn before the music on GPT-6 Sol, 2026-09-22)."""
+    return known.get('type') == 'formula'
+
+
 def formula_args(unknown: dict[str, Any]) -> list[str]:
     """A formula unknown's expression and variables, in the form `terra unknown create` takes them. The copy onto
     a task map carried claim, evidence and type only, so the first target a controller composed (a turn-ahead
@@ -1192,7 +1199,7 @@ def remeasure(config: dict[str, Any], project: Path, root: Path, known_ids: list
             else pack_workspace(project, exclude=scratch_dirs(config))
         for known_id in known_ids:
             known = read_known(project, known_id)
-            if known is None:
+            if known is None or composed(known):
                 continue
             probe_id = (known.get('probe_ids') or [None])[0] or (known.get('primary_run_id') or '').split('_', 1)[-1].rsplit('_', 1)[0]
             if not probe_id:

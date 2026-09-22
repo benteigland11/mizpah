@@ -81,3 +81,8 @@ def test_a_formula_unknown_reaches_the_task_map_with_its_expression_and_vars():
     assert worker.formula_args(u) == ['--expression', 'v >= 0.95 and s >= 10',
                                       '--var', 'v=known:collect_visible_fraction', '--var', 's=staff_px:number']
     assert worker.formula_args(dict(id='x', type='number')) == []
+
+
+def test_the_remeasure_takes_the_inputs_of_a_target_not_the_target():
+    assert worker.composed(dict(id='target_visible', type='formula', expression='v >= 0.95'))
+    assert not worker.composed(dict(id='collect_visible_fraction', type='number'))
