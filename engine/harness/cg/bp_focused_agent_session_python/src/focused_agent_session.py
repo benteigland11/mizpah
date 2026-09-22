@@ -15,7 +15,8 @@ import re
 from types import SimpleNamespace
 import shlex
 import tarfile
-from pathlib import Path
+import time
+from pathlib import Path, PurePosixPath
 from typing import Any, Iterator
 
 from cg.backend_persistent_model_session_python.src.persistent_model_session import (
@@ -27,7 +28,7 @@ from cg.logic_llamaclient_python.src.native import KnownIssues, SyncNativeTransp
 from cg.data_session_event_log_python.src.session_event_log import SessionEventLog
 from cg.infra_revision_store_python.src.revision_store import RevisionStore
 from cg.infra_sandboxed_shell_execution_python.src.sandboxed_shell_execution import (
-    DirectoryWorkspace, NetworkPolicy, SandboxedShell, ServiceLimits, ShellConfig, ShellLimits, ShellResult, WorkspaceEditError, edit_workspace_file,
+    DirectoryWorkspace, NetworkPolicy, SandboxedShell, ServiceLimits, ShellConfig, ShellLimits, ShellResult, WorkspaceEditError, _name, edit_workspace_file,
     read_workspace_file, read_workspace_lines, workspace_files, write_workspace_file,
 )
 from cg.universal_controller_progress_python.src.controller_progress import ControllerProgress, ReviewPolicy
@@ -177,13 +178,18 @@ class SessionSettings:
         tools = tuple(self.worker_tools)
         object.__setattr__(self, 'worker_tools', tools)
         object.__setattr__(self, 'final_tools', tuple(self.final_tools))
-        if not tools or 'bash' not in tools or len(set(tools)) != len(tools) or set(tools) - set(WORKER_TOOLS):
-            raise ValueError('worker_tools must be distinct names from '+', '.join(WORKER_TOOLS)+' and include bash')
+        if len(set(tools)) != len(tools) or set(tools) - set(WORKER_TOOLS):
+            raise ValueError('worker_tools must be distinct names from '+', '.join(WORKER_TOOLS))
+        if tools and 'bash' not in tools:
+            raise ValueError('worker_tools with file tools must include bash (deletes go through it)')
+        if not tools and not self.command_tools:
+            raise ValueError('a session with no worker_tools needs command_tools: a seat of typed verbs only')
         names = [t.get('name') for t in self.command_tools]
         if len(set(names)) != len(names) or set(names) & set(WORKER_TOOLS) or not all(
-                isinstance(t, dict) and isinstance(t.get('name'), str) and t['name'] and isinstance(t.get('command'), str)
+                isinstance(t, dict) and isinstance(t.get('name'), str) and t['name']
+                and (isinstance(t.get('command'), str) or t.get('host') is True)
                 and isinstance(t.get('parameters'), dict) for t in self.command_tools):
-            raise ValueError('command_tools need distinct names (not bash/read/write/edit), a command template and a parameters schema')
+            raise ValueError('command_tools need distinct names (not bash/read/write/edit), a command template (or host: true) and a parameters schema')
         for name in ('maximum_tool_argument_characters', 'maximum_write_characters', 'maximum_edit_characters'):
             value = getattr(self, name)
             if value is not None and (type(value) is not int or value <= 0):
@@ -470,6 +476,10 @@ class FocusedSession:
     def __init__(self, root: str | Path, worker: ModelClient, shell: SandboxedShell,
                  controller: ModelClient | None, shared_workspaces: str | Path | None = None) -> None:
         self.root = Path(root).resolve()
+        # Host-side verbs: a command tool whose spec says `host: true` runs as a Python callable in this process,
+        # bound here at open time (never saved), instead of being rendered to the shell. For a seat whose every
+        # verb is a host operation, the sandbox is never entered.
+        self.handlers: dict[str, Any] = {}
         # Snapshots are content-addressed, so one that several sessions start from (the library seed a
         # loop hands every task, 4.5 MB of procedures and cache) can live once beside them: the seed is
         # written there and read from there; a session's own snapshots stay under its root, where its
@@ -488,10 +498,11 @@ class FocusedSession:
 
     @classmethod
     def create(cls, root: str | Path, settings: SessionSettings, *, worker: ModelClient,
-               shell: SandboxedShell, controller: ModelClient | None = None,
+               shell: SandboxedShell, controller: ModelClient | None = None, handlers: dict[str, Any] | None = None,
                initial_workspace: bytes = b'', initial_project_document: str = '',
                shared_workspaces: str | Path | None = None) -> FocusedSession:
         result = cls(root, worker, shell, controller, shared_workspaces)
+        result.handlers = dict(handlers or {})
         with result._locked():
             if result.store.read()['revision'] or result.journal.read_strict('session'):
                 raise ValueError('Session already exists; open it without overwriting')
@@ -515,8 +526,10 @@ class FocusedSession:
 
     @classmethod
     def open(cls, root: str | Path, *, worker: ModelClient, shell: SandboxedShell,
-             controller: ModelClient | None = None, shared_workspaces: str | Path | None = None) -> FocusedSession:
+             controller: ModelClient | None = None, shared_workspaces: str | Path | None = None,
+             handlers: dict[str, Any] | None = None) -> FocusedSession:
         result = cls(root, worker, shell, controller, shared_workspaces)
+        result.handlers = dict(handlers or {})
         with result._locked():
             if result.journal.drop_torn_tail('session'):
                 result.journal.append(session_id='session', event_type='torn_tail_dropped', payload={})
@@ -676,7 +689,8 @@ class FocusedSession:
     @classmethod
     def rebind(cls, root: str | Path, *, worker: ModelClient, shell: SandboxedShell,
                controller: ModelClient | None = None, generation: dict[str, Any] | None = None,
-               worker_system: str | None = None, discard_pending: bool = False) -> FocusedSession:
+               worker_system: str | None = None, discard_pending: bool = False,
+               handlers: dict[str, Any] | None = None) -> FocusedSession:
         """Open a session under bindings that may have changed: another model, another endpoint, new mounts,
         a revised system text.
 
@@ -692,6 +706,7 @@ class FocusedSession:
         as `discard_pending()` would, and then rebinds.
         """
         result = cls(root, worker, shell, controller)
+        result.handlers = dict(handlers or {})
         with result._locked():
             if result.journal.drop_torn_tail('session'):
                 result.journal.append(session_id='session', event_type='torn_tail_dropped', payload={})
@@ -737,6 +752,29 @@ class FocusedSession:
                                               window=result.session.window_index))
                 result._save()
         return result
+
+    def _read_file(self, path: str, **options: Any) -> bytes:
+        """Read a workspace file, or one under a host-backed scratch directory.
+
+        Scratch is bound from real disk and is deliberately absent from the workspace archive, so the tar the
+        other read paths search does not hold it. `read` still has to reach it: the worker renders a page or a
+        plot into `scratch/` and then looks at it (the follow-the-score rerun rendered `scratch/pdf/page-1.png`
+        and could not read it back, 2026-09-22)."""
+        config = self.shell.config
+        parts = PurePosixPath(path.lstrip('/')).parts
+        if parts and config.scratch_dirs and parts[0] in tuple(_name(d) for d in config.scratch_dirs):
+            if '..' in parts:
+                raise ValueError('a scratch path may not traverse upwards')
+            host = Path(config.scratch_root)/'workspace'/Path(*parts)
+            if not host.is_file() or host.is_symlink():
+                raise FileNotFoundError(path)
+            data = host.read_bytes()
+            limit = options.get('byte_limit')
+            if limit is not None and len(data) > limit:
+                raise ValueError(path+' is larger than the '+str(limit)+'-byte read bound; read a part of it '
+                                 'or measure it with a tool')
+            return data
+        return read_workspace_file(self.workspace(), path, **options)
 
     def workspace(self) -> Any:
         """Return the verified opaque worker workspace, never host controller files.
@@ -1111,7 +1149,7 @@ class FocusedSession:
                         if not (self.state.get('capabilities') or {}).get('vision'):
                             raise ValueError('this model cannot see images (no vision modality is loaded on the server); '
                                              'measure the image with a tool instead of reading it')
-                        data = read_workspace_file(self.workspace(), args['path'], **options)
+                        data = self._read_file(args['path'], **options)
                         if len(data) > self.settings.maximum_image_bytes:
                             raise ValueError('image is larger than '+str(self.settings.maximum_image_bytes)+' bytes; '
                                              'downscale or crop it first')
@@ -1139,7 +1177,7 @@ class FocusedSession:
                                               f'(python, cut -c, jq) instead of by line')
                     # Remember what the worker saw: an edit must anchor on a read of the current content.
                     self.state.setdefault('read_hashes', {})[args['path']] = hashlib.sha256(
-                        read_workspace_file(self.workspace(), args['path'], **options)).hexdigest()
+                        self._read_file(args['path'], **options)).hexdigest()
                     snapshot = None
                 elif name == 'write':
                     if set(args) != {'path', 'content'} or not all(isinstance(args[k], str) for k in args):
@@ -1152,7 +1190,7 @@ class FocusedSession:
                     existing = set(workspace_files(self.workspace(), **options))
                     data = args['content'].encode('utf-8')
                     if (not self.settings.write_existing_files and args['path'] in existing
-                            and read_workspace_file(self.workspace(), args['path'], **options).strip()):
+                            and self._read_file(args['path'], **options).strip()):
                         raise ValueError('write only creates files; '+args['path']+' already has content. Change it with '
                                          'edit one piece at a time, or delete the block with bash first and rebuild it by refinement')
                     snapshot = write_workspace_file(self.workspace(), args['path'], data, **options)
@@ -1164,7 +1202,7 @@ class FocusedSession:
                     self._refuse_protected(args['path'])
                     if self.settings.edit_requires_read:
                         try:
-                            current = hashlib.sha256(read_workspace_file(self.workspace(), args['path'], **options)).hexdigest()
+                            current = hashlib.sha256(self._read_file(args['path'], **options)).hexdigest()
                         except FileNotFoundError:
                             current = None
                         seen = self.state.get('read_hashes', {}).get(args['path'])
@@ -1196,6 +1234,11 @@ class FocusedSession:
                     occurrence_mismatch='Choose a longer or more specific old_text so it matches exactly once, or set '
                                         'expected_occurrences to the count you intend.')
                 output = dict(status='error', code=error.code, error=str(error)+(' '+hints[error.code] if error.code in hints else ''))
+            except FileNotFoundError as error:
+                # A path that is not there is the model's to fix, not the host's to die on: an image read of a
+                # file a command had not produced yet ended three work orders as a driver error on the
+                # follow-the-score rerun (2026-09-22).
+                output = dict(status='error', error='no such file in the workspace: '+str(error))
             except (ValueError, TypeError) as error:
                 output = dict(status='error', error=str(error))
             else:
@@ -1205,9 +1248,38 @@ class FocusedSession:
                     self.state.get('oversized_by_path', {}).pop(args['path'], None)
                     # The worker authored this content; count it as read.
                     self.state.setdefault('read_hashes', {})[args['path']] = hashlib.sha256(
-                        read_workspace_file(self.workspace(), args['path'], **options)).hexdigest()
+                        self._read_file(args['path'], **options)).hexdigest()
                 output = dict(status='ok', tool=name, **report)
             self._event('tool_outcome', dict(call_id=call['id'], **{key:value for key,value in output.items() if key != 'tool'}, tool=name))
+        elif name in self.handlers:
+            # A host verb: no shell, no sandbox, the callable runs here. Journaled like a command — the call
+            # with its arguments, then the outcome in the shape a shell result has — so a reader of the journal
+            # sees one kind of step. Pending while it runs, so a kill mid-verb is recoverable like a torn command.
+            try:
+                args = json.loads(arguments) if isinstance(arguments, str) else arguments
+                if not isinstance(args, dict):
+                    raise ValueError(name+' requires an object of arguments')
+            except (ValueError, TypeError) as error:
+                output = dict(status='error', error=str(error))
+            else:
+                shown = name+' '+json.dumps(args, ensure_ascii=False)
+                self._event('command_tool', dict(call_id=call['id'], name=name, command=shown, host=True))
+                self.state['pending_io'] = dict(kind='tool', call_id=call['id'], command=shown)
+                self._save()
+                started = time.monotonic()
+                try:
+                    result = self.handlers[name](args)
+                    if not isinstance(result, dict):
+                        result = dict(status='ok', result=result)
+                except Exception as error:  # noqa: BLE001 — the verb's failure is the model's to read, not the host's to die on
+                    result = dict(status='error', error=str(error)[:2000])
+                self.state['pending_io'] = None
+                ok = result.get('status', 'ok') == 'ok'
+                output = dict(status='ok' if ok else 'error', exit_code=0 if ok else 1,
+                              stdout=json.dumps(result, ensure_ascii=False), stderr='',
+                              elapsed_seconds=round(time.monotonic()-started, 3), timed_out=False,
+                              **({} if ok else dict(error=str(result.get('error') or 'the verb failed'))))
+            self._event('tool_outcome', dict(call_id=call['id'], **output, tool=name))
         else:
             try:
                 args = json.loads(arguments) if isinstance(arguments, str) else arguments
@@ -2007,7 +2079,7 @@ class FocusedSession:
                 names = workspace_files(self.workspace(), byte_limit=limits.workspace_bytes, file_limit=limits.max_files)
                 output = self._page(json.dumps([path for path in names if path.startswith(args['prefix'])]), args['offset'])
             elif name == 'workspace_read':
-                data = read_workspace_file(self.workspace(), args['path'], byte_limit=limits.workspace_bytes, file_limit=limits.max_files)
+                data = self._read_file(args['path'], byte_limit=limits.workspace_bytes, file_limit=limits.max_files)
                 output = self._page(data.decode('utf-8', errors='replace'), args['offset'])
             elif name == 'history_read':
                 if not args['start_turn'] <= args['end_turn'] <= self.progress.turns:
