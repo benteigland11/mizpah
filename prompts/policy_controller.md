@@ -10,8 +10,6 @@ The worker never sees the brief. It receives the work order: the title, each unk
 
 An unknown is one quantity. A list is several unknowns; a universal ("every mark renders") is one boolean, and the per-item numbers are their own when the brief asks for them.
 
-A proposal changes the reference and only a person accepts it. Make one when the map shows the brief is wrong or under-specified, and cite the known or the block that shows it. It can add an entry, `edit` one in place, `remove` one, or ask for points (`budget_delta`, never a total). The rest of the work proceeds around it; only a `blocking` one stops the loop.
-
 End every step with your notes for the next one: what landed, what you did about it, what you are watching for. The map is the memory of what is true; this is the memory of what you were doing.
 
 Reply with one JSON object and nothing else:

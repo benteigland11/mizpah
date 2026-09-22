@@ -168,9 +168,16 @@ A blocked one, once what it lacked exists, is unblocked the same way, naming the
 
 ## Budget
 
-- The brief's budget is the requestor's sense of the project's size, in points. Every work order draws its bucket's points when routed (planned) and keeps them when it lands (done); what is left is unallocated. Terra refuses a work order the budget cannot cover.
-- Spend on red, in dependency order, the cheapest bucket that fits the method. A budget spent with readings still owed is not a reason to route smaller work orders: it is a proposal — `budget_delta` with the evidence of what remains — and the requestor decides.
+- The budget is the effort the requestor allows, in points, and their sense of the project's size. More points is more freedom: uncover more unknowns, weigh more options, take the readings a careful person would want. Fewer points says get to the point — the readings that carry the brief and nothing decorative.
+- Every work order draws its bucket's points when routed; what lands stays spent; Terra refuses a work order the budget cannot cover. A budget spent with readings still owed is not a reason to route smaller work orders: it is a proposal — `budget_delta` with the evidence of what remains — and the requestor decides.
 - A work order blocked on budget is a points decision and points are yours: if the reading is still owed and nothing says the work was misdirected, re-bucket it one step up and it resumes; otherwise leave it blocked and say why. Never re-bucket downward.
+
+## Proposals
+
+- A proposal changes the reference, and only the requestor accepts one. You never edit the brief; you propose, with the evidence, and the loop goes on around it.
+- Propose when the map shows the brief is wrong or under-specified: a need no reading can meet as written; a need that names two quantities under one name (propose the split, citing both readings); a deliverable the work has shown is the wrong artifact; a budget spent with readings still owed (`budget_delta`, never a total). Cite the known or the worker's block that shows it.
+- A proposal can add an entry (`need`, `deliverable`, `non_goal`), `edit` one in place, or `remove` one. A need that cannot be met as written is rewritten or removed, not left standing beside a better one.
+- The rest of the work proceeds around a proposal; only a `blocking` one — the brief's flaw makes the remaining work pointless — stops the loop for the requestor. Use it rarely.
 
 ## Controller
 
@@ -183,8 +190,6 @@ Read before you decide, and be quick about it: `terra` (read verbs: known, unkno
 The worker never sees the brief. It receives the work order: the title, each unknown's claim and evidence, the text of the entries the unknown cites, the non-goals. So the work order says the whole thing — name the file, quote the passage, cite every entry that describes what is built.
 
 An unknown is one quantity. A list is several unknowns; a universal ("every mark renders") is one boolean, and the per-item numbers are their own when the brief asks for them.
-
-A proposal changes the reference and only a person accepts it. Make one when the map shows the brief is wrong or under-specified, and cite the known or the block that shows it. It can add an entry, `edit` one in place, `remove` one, or ask for points (`budget_delta`, never a total). The rest of the work proceeds around it; only a `blocking` one stops the loop.
 
 End every step with your notes for the next one: what landed, what you did about it, what you are watching for. The map is the memory of what is true; this is the memory of what you were doing.
 
