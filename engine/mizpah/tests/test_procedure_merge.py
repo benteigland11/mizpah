@@ -137,3 +137,22 @@ def test_a_procedure_linking_one_created_in_the_same_task_is_installed(tmp_path:
     out = worker._harvest_playbook(buffer.getvalue(), store, {'mizpah': {'playbook': 'playbook'}}, allowed=('compose-romantic-piano-midi',))
     assert out['installed'] == [] and len(out['rejected']) == 1 and 'does not exist' in out['rejected'][0]
     assert json.loads((store/'compose-romantic-piano-midi.json').read_text()) == general
+
+
+def test_a_procedure_edited_by_name_is_harvested_even_when_the_task_never_opened_it(tmp_path: Path):
+    """Linking a new method up from its general procedure is an add-step on a procedure the task did not open;
+    the harvest must take it (Block C, 2026-09-22: two methods landed orphans)."""
+    root = tmp_path/'task'
+    (root/'events').mkdir(parents=True)
+    def call(i, name, args, code=0):
+        return dict(id=f'c{i}', function=dict(name=name, arguments=json.dumps(args))), dict(call_id=f'c{i}', result=dict(exit_code=code))
+    calls = [call(1, 'bash', dict(command='playbook open compose-romantic-piano-midi --for piece')),
+             call(2, 'bash', dict(command='playbook validate x && playbook add-step compose-a-character-piece --title T --do D --procedure shape-a-returning-rhythmic-cell')),
+             call(3, 'playbook_add_step', dict(id='corroborate-a-midi-reading', title='T', do='D')),
+             call(4, 'playbook_edit_step', dict(walk='.playbook/open/w.md', step=2, do='D')),   # walk-scoped: the opened one
+             call(5, 'bash', dict(command='playbook edit-step measure-count-from-file --title T --do D'), code=1),   # failed
+             call(6, 'bash', dict(command='playbook add-step mizpah-resolve-unknown --title T --do D'))]   # bootstrap
+    lines = [json.dumps(dict(event_type='worker_turn', payload=dict(response=dict(tool_calls=[c]), tool_results=[r]))) for c, r in calls]
+    (root/'events'/'session.jsonl').write_text('\n'.join(lines)+'\n')
+    assert worker.procedures_edited(root) == ['compose-a-character-piece', 'corroborate-a-midi-reading']
+    assert worker.procedures_used(root) == ['compose-romantic-piano-midi']

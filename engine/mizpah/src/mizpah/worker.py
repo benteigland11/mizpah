@@ -1588,6 +1588,30 @@ def procedures_created(root: Path) -> list[str]:
     return created
 
 
+EDIT_VERBS = ('add-step', 'add-steps', 'edit-step', 'remove-step', 'move-step', 'edit')
+
+
+def procedures_edited(root: Path) -> list[str]:
+    """Procedure ids the worker changed by name (`playbook add-step <id>` and the other edit verbs, at bash or as a
+    typed tool) in a call that succeeded, the bootstrap excluded. Linking a new method up from the general one is an
+    add-step on a procedure the task never opened, and the harvest took only opened or created ids: the step
+    that linked shape-a-returning-rhythmic-cell from compose-a-character-piece was ignored, and so was
+    read-ternary-return-from-intervals' (Block C, 2026-09-22). A walk-scoped edit (`--walk`) is the opened one."""
+    edited: list[str] = []
+    for name, args, result in session_calls(root):
+        ids = []
+        if name.startswith('playbook_') and name[9:].replace('_', '-') in EDIT_VERBS:
+            if result.get('exit_code') == 0 and args.get('id') and not args.get('walk'):
+                ids = [str(args['id'])]
+        elif name == 'bash' and result.get('exit_code') == 0:
+            ids = re.findall(r'(?:^|[;&|]\s*)playbook\s+(?:'+'|'.join(re.escape(v) for v in EDIT_VERBS)+r')\s+([a-z0-9][a-z0-9_-]*)',
+                             args.get('command') or '', re.MULTILINE)
+        for pid in ids:
+            if pid not in edited and pid not in BOOTSTRAP_PROCEDURES:
+                edited.append(pid)
+    return edited
+
+
 def effort_message(task: dict[str, Any], estimate: int, turns: int, overruns: int) -> str:
     """The estimate is spent; the worker reports whether the bucket was wrong and judges whether to continue."""
     from . import prompts as _prompts
@@ -2442,7 +2466,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             session.prune_workspaces()
         widgets = harvest_widgets(evidence(session), root, config, project)
         playbook = harvest_playbook(evidence(session), store, config,
-                                    allowed=tuple(procedures_used(root)+procedures_created(root)),
+                                    allowed=tuple(procedures_used(root)+procedures_created(root)+procedures_edited(root)),
                                     base=root/PLAYBOOK_BASE, workspace_store=workspace_procedures(config, project))
         deps = declare_artifact_deps(config, project, unknowns)
         rounds.append(dict(turns=turns(status), session=status['status'], gate='playbook',
@@ -2478,7 +2502,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             session.prune_workspaces()
             again_w = harvest_widgets(evidence(session), root, config, project)
             again_p = harvest_playbook(evidence(session), store, config,
-                                       allowed=tuple(procedures_used(root)+procedures_created(root)),
+                                       allowed=tuple(procedures_used(root)+procedures_created(root)+procedures_edited(root)),
                                        base=root/PLAYBOOK_BASE, workspace_store=workspace_procedures(config, project))
             for key in ('checked_in', 'unchanged', 'merged'):
                 widgets[key] = sorted(set(widgets.get(key) or []) | set(again_w.get(key) or []))
