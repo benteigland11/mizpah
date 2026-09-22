@@ -2231,11 +2231,16 @@ def cmd_cohort_link_run(args: argparse.Namespace) -> int:
 
 
 def cmd_known_depend(args: argparse.Namespace) -> int:
-    from .knowns import add_dependency
+    from .knowns import add_dependency, remove_dependency
 
     try:
         root = require_project_root()
-        rec = add_dependency(root, args.id, args.on or [])
+        if not (args.on or args.off):
+            raise ValueError("depend needs --on <spec> to declare or --off <spec> to withdraw")
+        if args.off:
+            rec = remove_dependency(root, args.id, args.off)
+        if args.on:
+            rec = add_dependency(root, args.id, args.on)
     except (ValueError, FileNotFoundError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
@@ -4630,9 +4635,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_kd.add_argument(
         "--on",
         action="append",
-        required=True,
         metavar="known:<id>|file:<relpath>",
-        help="Dependency spec (repeatable)",
+        help="Dependency spec to declare (repeatable)",
+    )
+    p_kd.add_argument(
+        "--off",
+        action="append",
+        metavar="known:<id>|file:<relpath>",
+        help="Dependency spec to withdraw (repeatable); a dep declared by mistake",
     )
     p_kd.set_defaults(func=cmd_known_depend)
 

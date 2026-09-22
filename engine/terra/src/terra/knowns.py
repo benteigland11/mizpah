@@ -957,6 +957,26 @@ def add_dependency(
     return load_known(project_root, known_id)
 
 
+def remove_dependency(project_root: Path, known_id: str, dep_specs: list[str]) -> dict[str, Any]:
+    """Withdraw deps declared by mistake: ``known:<id>`` / ``file:<relpath>``. A list that could only grow left a
+    known stale on a scratch path forever (2026-09-22); the record is the tool's to change, so this is the verb."""
+    from .staleness import DEP_KIND_KNOWN, parse_dep, stamp_deps
+
+    rec = load_known(project_root, known_id)
+    deps = rec.setdefault("deps", {})
+    for spec in dep_specs:
+        kind, target = parse_dep(spec)
+        key, field = ("knowns", "id") if kind == DEP_KIND_KNOWN else ("files", "path")
+        rows = deps.get(key) or []
+        kept = [r for r in rows if r.get(field) != target]
+        if len(kept) == len(rows):
+            raise ValueError(f"known {known_id} does not depend on {spec}")
+        deps[key] = kept
+    stamp_deps(project_root, rec)
+    save_known(project_root, rec)
+    return load_known(project_root, known_id)
+
+
 def set_tolerance(
     project_root: Path, known_id: str, *, within: Any
 ) -> dict[str, Any]:
