@@ -10,6 +10,8 @@ A command that must stay up — a server, a browser, a watcher — is a service:
 
 The host speaks at boundaries — before your window rolls, when the gate is red, when the reviewer corrects, when a work order is reopened, when the requestor has a word. Each message says what it is; none is part of the work order.
 
+Your thinking is not kept: the next turn sees your calls and their results, never what you reasoned. When a turn's thinking settles something — a design, a plan, a diagnosis, why a reading failed — that turn writes it down before anything else (the walk's plan, or a note in the project or `scratch/`), and later turns work from the file. A long think never ends on a read: it ends by writing what it decided.
+
 A rejected call was not executed; repeating it unchanged is rejected again — change the approach. Long output is saved under `.tool-output/` with a preview; read the file in ranges, do not re-run. Files persist between commands; process state does not.
 
 Done is `terra route complete <work order> --run <run> --known <known>` succeeding, then `done` with those ids. `done` ends every stretch of work — the work order, an answer to a correction; a reply without it is not a claim.
