@@ -2000,8 +2000,25 @@ def run_through_outages(session: FocusedSession, config: dict[str, Any], root: P
             raise
         except ModelTransportError as error:
             # The wait starts at the outage, not at entry: one call to run() spans a whole burst of turns.
-            outages += 1
             from . import ops
+            if not ops.network_reachable(ops.provider_host(config['worker'], config)):
+                # No route to the model's host: not the model's outage and not counted as one. Wait for the
+                # network, discard the torn call, ask again.
+                checker = health or ops.Health(config, root)
+                ops.record_outage(root, 'worker', config['worker'], error, outages, task=root.name,
+                                  action='the network is down; waiting for it, not counted')
+                if not checker.wait_for_network(ops.provider_host(config['worker'], config)):
+                    raise
+                discarded = session.discard_pending()
+                if discarded:
+                    (root/'discarded.jsonl').open('a').write(json.dumps(discarded)+'\n')
+                if burst is not None:
+                    try:
+                        maximum_worker_turns = max(1, burst-(session.status()['completed_worker_turns']-burst_start))
+                    except Exception:  # noqa: BLE001
+                        pass
+                continue
+            outages += 1
             too_big = 'exceeded the configured byte limit' in str(error)
             try:
                 turn = session.status()['completed_worker_turns']

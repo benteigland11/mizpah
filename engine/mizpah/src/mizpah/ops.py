@@ -18,9 +18,11 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import socket
 import time
 from typing import Any
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from . import layout
@@ -28,7 +30,7 @@ from . import layout
 
 def settings(config: dict[str, Any]) -> dict[str, Any]:
     return dict(model_unit=None, restart_after_seconds=60, restart_cooldown_seconds=600, disk_high_percent=92,
-                notify_command=None) | dict(config['mizpah'].get('ops') or {})
+                notify_command=None, network_patience_seconds=3600) | dict(config['mizpah'].get('ops') or {})
 
 
 # ---------------------------------------------------------------- health
@@ -105,6 +107,30 @@ def model_up(base_url: str | None, timeout: float = 5.0) -> bool:
         return False
 
 
+def provider_host(spec: dict[str, Any], config: dict[str, Any] | None = None) -> str | None:
+    """The host a subscription seat's calls cross the network to (its profile's API host); None for a local
+    endpoint, whose being down is the server's matter (`wait_for_model` restarts its unit), not the network's."""
+    if (spec.get('endpoint') or {}).get('base_url') or spec.get('provider') != 'subscription' or not spec.get('subscription'):
+        return None
+    try:
+        from . import providers
+        base = providers.registry(config, only=spec['subscription']).get(spec['subscription']).api_base_url
+    except Exception:  # noqa: BLE001 — no profile, no host to probe
+        return None
+    return urllib.parse.urlsplit(base).hostname
+
+
+def network_reachable(host: str | None, timeout: float = 5.0) -> bool:
+    """A TCP connect to the host's HTTPS port: the network is there, whatever the service says."""
+    if not host:
+        return True
+    try:
+        socket.create_connection((host, 443), timeout=timeout).close()
+        return True
+    except OSError:
+        return False
+
+
 class Health:
     """One per run. `wait_for_model` is what the outage loops call instead of sleeping on /health alone."""
 
@@ -150,6 +176,25 @@ class Health:
             time.sleep(5)
         self._record(event='model_down', base_url=base_url, waited=wait_seconds)
         notify(self.config, self.root, 'model server down', base_url+' did not answer for '+str(int(wait_seconds))+' s')
+        return False
+
+    def wait_for_network(self, host: str | None, *, patience_seconds: float | None = None) -> bool:
+        """True at once when the host answers a connect; otherwise wait for the network to come back, up to
+        `network_patience_seconds` (an hour by default), and say so once. A dropped network is not an outage of
+        the model: on 2026-09-22 a few minutes without a route cost the loop five counted outages and the task."""
+        if network_reachable(host):
+            return True
+        patience = self.ops['network_patience_seconds'] if patience_seconds is None else patience_seconds
+        down_since = time.time()
+        self._record(event='network_down', host=host)
+        notify(self.config, self.root, 'network down', 'no route to '+str(host)+'; waiting up to '+str(int(patience))+' s')
+        while time.time()-down_since <= patience:
+            time.sleep(15)
+            if network_reachable(host):
+                self._record(event='network_back', host=host, after=round(time.time()-down_since))
+                notify(self.config, self.root, 'network back', str(host)+' answers after '+str(int(time.time()-down_since))+' s')
+                return True
+        self._record(event='network_still_down', host=host, waited=patience)
         return False
 
     def disk_ok(self, *paths: Path) -> bool:

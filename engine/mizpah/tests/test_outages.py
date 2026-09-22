@@ -12,6 +12,9 @@ class _Health:
     def wait_for_model(self, base_url, *, wait_seconds, attempt=1):
         return self.answers.pop(0)
 
+    def wait_for_network(self, host, *, patience_seconds=None):
+        return True
+
 
 def test_record_outage_names_role_and_endpoint(tmp_path: Path) -> None:
     ops.record_outage(tmp_path, 'controller', {'endpoint': {'base_url': 'http://127.0.0.1:58081'}}, ConnectionError('refused'), 1)
@@ -78,3 +81,42 @@ def test_worker_outage_resumes_the_rest_of_the_burst(tmp_path: Path) -> None:
     session = Session()
     status = worker.run_through_outages(session, {'worker': {}}, root, maximum_worker_turns=100, health=_Health([True]))
     assert session.asked == [100, 60] and status['completed_worker_turns'] == 100
+
+
+def test_worker_outage_with_the_network_down_is_waited_for_not_counted(tmp_path: Path, monkeypatch) -> None:
+    """No route to the host: the torn call is discarded and asked again once the network is back; the count
+    of outages (six in a row fail the task) does not move."""
+    from cg.backend_persistent_model_session_python.src.persistent_model_session import ModelTransportError
+    from mizpah import worker, ops
+
+    probes = iter([False, True])   # the first tear: no route; the second: the network is up
+    monkeypatch.setattr(ops, 'network_reachable', lambda host, timeout=5.0: next(probes, True))
+    monkeypatch.setattr(ops.time, 'sleep', lambda s: None)
+    monkeypatch.setattr(ops, 'provider_host', lambda spec, config=None: 'api.example')
+
+    class Session:
+        def __init__(self):
+            self.turns = 0
+            self.torn = 0
+
+        def status(self):
+            return dict(completed_worker_turns=self.turns, status='paused', phase='worker', pending_io=None)
+
+        def run(self, *, maximum_worker_turns, stop_when=None):
+            if self.torn < 2:
+                self.torn += 1
+                self.turns += 5
+                raise ModelTransportError('connection reset')
+            self.turns += maximum_worker_turns
+            return self.status()
+
+        def discard_pending(self):
+            return dict(kind='tool')
+
+    root = tmp_path/'tasks'/'t1'; root.mkdir(parents=True)
+    session = Session()
+    status = worker.run_through_outages(session, {'worker': {}, 'mizpah': {}}, root, maximum_worker_turns=50, health=_Health([True]))
+    rows = [json.loads(l) for l in (root/'outages.jsonl').read_text().splitlines()]
+    assert status['completed_worker_turns'] == 50
+    assert rows[0]['action'].startswith('the network is down') and rows[0]['outage'] == 0
+    assert rows[1]['outage'] == 1   # the second tear, with the network up, is a real outage: counted

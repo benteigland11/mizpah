@@ -1783,8 +1783,16 @@ def decide_through_outages(client: Any, config: dict[str, Any], system: str, use
         except RejectedGeneration:
             raise
         except ModelTransportError as error:
-            outages += 1
             run_root = Path(config['mizpah'].get('run_root') or '.')
+            host = ops.provider_host(config['controller'], config)
+            if not ops.network_reachable(host):
+                # No route to the host: the network's outage, not the model's; waited for, not counted.
+                ops.record_outage(run_root, 'controller', config['controller'], error, outages, task='briefing',
+                                  action='the network is down; waiting for it, not counted')
+                if not (health or ops.Health(config, run_root)).wait_for_network(host):
+                    raise
+                continue
+            outages += 1
             delay = ops.backoff_seconds(outages, cap=wait_seconds)
             ops.record_outage(run_root, 'controller', config['controller'], error, outages, task='briefing', waited_seconds=delay,
                               action='the briefing is asked for again after '+str(int(delay))+' s' if outages <= 5 else 'the sixth in a row: the step fails')
