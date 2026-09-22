@@ -229,6 +229,9 @@ def operator_notes(root: Path | None, *, unread_only: bool = True) -> list[dict[
             continue
         if unread_only and note.get('read'):
             continue
+        # A memo addressed to a worker (`to: worker:<task>`) is on the same record but is not the controller's.
+        if str(note.get('to') or 'controller').startswith('worker:'):
+            continue
         out.append(note)
     return out
 

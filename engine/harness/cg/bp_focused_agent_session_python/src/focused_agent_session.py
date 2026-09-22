@@ -806,11 +806,14 @@ class FocusedSession:
             return []
         # Dated, and its standing said: a correction is what the reviewer saw at one turn, held until it
         # looks again — a worker read an undated one as a fresh finding every turn after it had fixed it.
-        issued = self.progress.last_review_turn
-        note = (' (from the reviewer\'s look at turn '+str(issued)+', now turn '+str(self.progress.turns)
-                +'; it stands until the reviewer reads the files again, which it does when you change a file '
-                'it names or claim completion — if the files no longer show this, say what changed and claim)')
-        return [dict(role='user', content=self.settings.guidance_prefix+note+'\n'+text)]
+        # The prefix is a template when it carries `$issued`/`$now`/`$correction` (the host's message piece); a
+        # plain prefix is put before the text as before.
+        prefix = self.settings.guidance_prefix
+        if '$correction' in prefix:
+            from string import Template
+            return [dict(role='user', content=Template(prefix).safe_substitute(
+                issued=str(self.progress.last_review_turn), now=str(self.progress.turns), correction=text))]
+        return [dict(role='user', content=prefix+'\n'+text)]
 
     def _touched_focus_file(self, turn: dict[str, Any]) -> bool:
         """Whether one of the turn's applied write/edit calls named a file the review focuses on."""

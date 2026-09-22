@@ -212,16 +212,20 @@ def shell_for(config: dict[str, Any], root: Path) -> SandboxedShell:
     return SandboxedShell(shell)
 
 
-PROMPT_DIR = Path(__file__).parent/'deputy_prompt'
+PROMPT_DIR = Path(__file__).parents[4]/'prompts'/'deputy'   # the repo's prompts/ when no config names one
 
 
 def policy_text(config: dict[str, Any] | None = None) -> str:
-    """The system prompt, composed from `deputy_prompt/*.md` in name order (README.md aside), one blank line
+    """The system prompt, composed from `prompts/deputy/*.md` in name order (README.md aside), one blank line
     between files. One file per subject — the role, what a brief becomes, each part of the brief, the tools — so
-    an edit is one subject. `deputy_prompt_dir` in the engine config points elsewhere for an experiment."""
+    an edit is one subject. The folder is `deputy/` under the config's `prompts_dir`, where the other seats'
+    pieces live; `deputy_prompt_dir` in the engine config points elsewhere for an experiment."""
     folder = PROMPT_DIR
-    if config is not None and (config['mizpah'].get('deputy_prompt_dir')):
-        folder = Path(config['mizpah_config_path']).parent/config['mizpah']['deputy_prompt_dir']
+    if config is not None:
+        if config['mizpah'].get('deputy_prompt_dir'):
+            folder = Path(config['mizpah_config_path']).parent/config['mizpah']['deputy_prompt_dir']
+        elif config.get('prompts_dir'):
+            folder = Path(config['prompts_dir'])/'deputy'
     parts = [p.read_text().strip() for p in sorted(folder.glob('*.md')) if p.name.lower() != 'readme.md']
     parts = [p for p in parts if p]
     if not parts:

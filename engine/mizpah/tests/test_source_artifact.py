@@ -132,8 +132,10 @@ def test_a_note_from_the_person_is_put_first_and_read_once(gym: Path, tmp_path: 
     'From the person', and the one after does not."""
     root = tmp_path/'sess'
     root.mkdir()
-    (root/controller.OPERATOR_NOTES).write_text(json.dumps(dict(at=1.0, text='The pedal must not hold through a harmony change.'))+'\n')
+    (root/controller.OPERATOR_NOTES).write_text(json.dumps(dict(at=1.0, text='The pedal must not hold through a harmony change.'))+'\n'
+                                                +json.dumps(dict(at=2.0, text='Use the softer voicing.', to='worker:build_piece'))+'\n')
     notes = controller.operator_notes(root)
+    # A memo to a worker is on the same record but is not the controller's.
     assert [n['text'] for n in notes] == ['The pedal must not hold through a harmony change.']
     observation = controller.observe(CONFIG, gym)
     observation['operator_notes'] = notes

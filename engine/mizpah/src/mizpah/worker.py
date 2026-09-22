@@ -98,7 +98,13 @@ def load_config(path: str | Path) -> dict[str, Any]:
     from . import prompts as _prompts
     prompts_dir = (path.parent/config.get('prompts_dir', '../../prompts')).resolve()
     config['prompts_dir'] = str(prompts_dir)
+    _prompts.set_messages_dir(prompts_dir)
     config['worker_policy'] = _prompts.compose('worker', prompts_dir)
+    # The window's messages are pieces too: the config's handoff_prompt / resume_prefix give way to them.
+    sp = harness.setdefault('session_policy', {})
+    sp['handoff_prompt'] = _prompts.message('reflect_worker')+'\n'+_prompts.message('handoff_worker')
+    sp['resume_prefix'] = _prompts.message('resume_worker')
+    harness['guidance_prefix'] = (prompts_dir/'messages'/'correction_worker.md').read_text()   # a template; the harness fills it
     # Scaffolding is method the host imposes; each piece is a toggle so a model that can orchestrate
     # can be run without it and compared. Verification guards are not toggles.
     scaffolding = dict(bootstrap=True, small_edits=True, checkins=True, command_tools=True) | (config.get('scaffolding') or {})
@@ -1576,10 +1582,9 @@ def red_message(gate: dict[str, Any], project: Path, map_id: str, unknown_ids: l
             continue
         if unknown.get('probe_ids') or unknown.get('probe_id'):
             keep.append('probe '+', '.join(unknown.get('probe_ids') or [unknown['probe_id']]))
-    lines = ['Gate red. Missing:']+['- '+p for p in gate['problems']]
-    if keep:
-        lines.append('Keep: '+'; '.join(dict.fromkeys(keep))+'. Add what is missing; do not start over.')
-    return '\n'.join(lines)+'\n'
+    from . import prompts as _prompts
+    return _prompts.message('gate_red_worker', problems='\n'.join('- '+p for p in gate['problems']),
+                            keep=('Keep: '+'; '.join(dict.fromkeys(keep))+'. Add what is missing; do not start over.') if keep else '')
 
 
 def session_calls(root: Path) -> list[tuple[str, dict[str, Any], dict[str, Any]]]:
@@ -1633,13 +1638,10 @@ def procedures_created(root: Path) -> list[str]:
 
 
 def effort_message(task: dict[str, Any], estimate: int, turns: int, overruns: int) -> str:
-    """The estimate is spent; the worker, not the host, judges whether to continue."""
-    return ('Effort check: this task was bucketed '+task['bucket']+' ('+BUCKET_MODES.get(task['bucket'], '')+') and you have used '+str(turns)+' turns, '
-            +('past' if overruns == 1 else str(overruns)+'× past')+' that estimate. Nothing has been decided for you. '
-            'Judge your own effort honestly: if the readings are within reach with the approach you are on, continue; '
-            'if the approach is not working, change it; if the source cannot be read as the unknown asks, or what you '
-            'need is a decision that is not yours, `terra route block '+task['id']+' --reason "..."` with the reason or '
-            'the question and stop — the controller answers by routing onto this workspace. Do not pad or fake. Reply by acting.\n')
+    """The estimate is spent; the worker reports whether the bucket was wrong and judges whether to continue."""
+    from . import prompts as _prompts
+    return _prompts.message('effort_worker', bucket=task['bucket'], mode=BUCKET_MODES.get(task['bucket'], ''), turns=turns,
+                            past=('past' if overruns == 1 else str(overruns)+'× past'), task=task['id'])
 
 
 def library_parts(config: dict[str, Any], project: Path, unknowns: list[dict[str, Any]]) -> list[str]:
@@ -1726,14 +1728,8 @@ STOP = {'with', 'from', 'that', 'this', 'into', 'every', 'each', 'must', 'their'
 
 def refusal_message(refused: list[tuple[str, str]]) -> str:
     """The library's reasons for refusing what the worker built, and the one chance to fix them."""
-    lines = ['The gate is green and your work is done; one thing remains. The library refused what you built, for these '
-             'reasons — fix them and it is checked in; leave them and the work stays only in this project:']
-    for kind, reason in refused:
-        lines.append('- '+kind+' '+reason)
-    lines.append('A widget must validate (`cartograph validate cg/<dir>`): tests under tests/ that pass, no project names or '
-                 'paths in src/, every dependency declared. A procedure must validate (`playbook validate <id>`). '
-                 'Fix, validate, then call `done`; do not start other work.')
-    return '\n'.join(lines)
+    from . import prompts as _prompts
+    return _prompts.message('library_repair_worker', reasons='\n'.join('- '+kind+' '+reason for kind, reason in refused))
 
 
 def green_message(gate: dict[str, Any], unknown_id: str | list[str], used: list[str] = (), cost: dict[str, Any] | None = None,
@@ -1756,13 +1752,9 @@ def green_message(gate: dict[str, Any], unknown_id: str | list[str], used: list[
     if not widgets:
         asks.append('the instrument — did a probe here compute a reading that another project would want from a call? '
                     'If so, make it a widget under `cg/` (validated; it is checked in after this round)')
-    return ('Gate green: known '+unknown_id+' '+('are' if ',' in unknown_id else 'is')+' on the project map'
-            +(' and you made '+', '.join('`'+m+'`' for m in made) if made else '')+'. The library holds, from this task: '
-            +held+'. One question before the task closes, and one short round to answer it: '+'; and '.join(asks)
-            +'. If there is nothing general here, say so in one line and call `done`; that is a fine answer. '
-            'No searching beyond the one `playbook search` a create requires.\n')
-
-
+    from . import prompts as _prompts
+    return _prompts.message('library_asks_worker', known=unknown_id, made=(' and you made '+', '.join('`'+m+'`' for m in made) if made else ''),
+                            held=held, asks='; and '.join(asks))
 
 
 def client_for(spec: dict[str, Any], observer: Any, config: dict[str, Any] | None = None) -> ModelClient:
@@ -2081,7 +2073,8 @@ def run_through_outages(session: FocusedSession, config: dict[str, Any], root: P
                 text = nudge.read_text().strip()
                 nudge.rename(root/'nudge.delivered.md')
                 if text and status['phase'] == 'worker' and status['pending_io'] is None:
-                    session.interject('From the person running this loop:\n'+text+'\n', label='the person')
+                    from . import prompts as _prompts
+                    session.interject(_prompts.message('nudge_worker', text=text), label='the person')
                 if burst is not None:   # the rest of the burst, not a fresh one
                     maximum_worker_turns = max(1, burst-(status['completed_worker_turns']-burst_start))
                 continue
@@ -2326,8 +2319,8 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         reopen = root/'reopen.md'
         if reopen.exists() and reopen.read_text().strip():
             status_now = session.status()
-            text = ('This work order is reopened: '+reopen.read_text().strip()+'\nYour earlier reading no longer stands; '
-                    'take it again from the artifact as it is now, adopt, and `terra route complete` again.\n')
+            from . import prompts as _prompts
+            text = _prompts.message('reopened_worker', why=reopen.read_text().strip())
             if status_now['phase'] == 'complete':
                 session.continue_with(text, label='reopened')
             elif status_now['phase'] == 'worker' and status_now['pending_io'] is None:
@@ -2336,7 +2329,8 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         nudge = root/'nudge.md'
         if nudge.exists() and nudge.read_text().strip():
             status_now = session.status()
-            text = 'From the person running this loop:\n'+nudge.read_text().strip()+'\n'
+            from . import prompts as _prompts
+            text = _prompts.message('nudge_worker', text=nudge.read_text().strip())
             if status_now['phase'] == 'complete':
                 session.continue_with(text, label='the person')
             elif status_now['phase'] == 'worker' and status_now['pending_io'] is None:

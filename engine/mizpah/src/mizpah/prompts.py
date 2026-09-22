@@ -8,6 +8,8 @@ and is taken from there with a note, so the loop runs while the pieces are writt
 from __future__ import annotations
 
 from pathlib import Path
+from string import Template
+from typing import Any
 
 SEATS = ('worker', 'controller', 'reviewer')
 
@@ -59,3 +61,19 @@ def pieces_of(seat: str, folder: str | Path) -> list[tuple[str, bool]]:
             if text is not None:
                 out.append((candidate, from_wip))
     return out
+
+
+_MESSAGES_DIR: list[Path | None] = [None]
+
+
+def set_messages_dir(folder: str | Path) -> None:
+    _MESSAGES_DIR[0] = Path(folder)/'messages'
+
+
+def message(name: str, **fields: Any) -> str:
+    """A boundary message by name from prompts/messages/, its `$field`s filled. The folder is set at config load."""
+    folder = _MESSAGES_DIR[0]
+    if folder is None:
+        raise RuntimeError('prompts.set_messages_dir was not called (load_config sets it)')
+    text = (folder/(name+'.md')).read_text()
+    return Template(text).safe_substitute({k: str(v) for k, v in fields.items()})

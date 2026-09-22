@@ -1,0 +1,1 @@
+Gate green: known $known is on the project map$made. The library holds, from this work order: $held. One question before it closes, and one short round to answer it: $asks. If there is nothing general here, say so in one line and call `done`; that is a fine answer. No searching beyond the one `playbook search` a create requires.

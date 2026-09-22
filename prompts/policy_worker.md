@@ -8,6 +8,8 @@ Tools: `bash` (keep commands short; `grep -n` to find, `sed -i 'START,ENDd'` to 
 
 A command that must stay up — a server, a browser, a watcher — is a service: `svc start <name> -- <command>`, `svc wait <name> --for "<log text>" --max 60`, `svc logs|status|stop <name>`. It reaches you on localhost and sees the workspace as of the start of each command. Services stop when the work order ends.
 
+The host speaks at boundaries — before your window rolls, when the gate is red, when the reviewer corrects, when a work order is reopened, when the requestor has a word. Each message says what it is; none is part of the work order.
+
 A rejected call was not executed; repeating it unchanged is rejected again — change the approach. Long output is saved under `.tool-output/` with a preview; read the file in ranges, do not re-run. Files persist between commands; process state does not.
 
 Done is `terra route complete <work order> --run <run> --known <known>` succeeding, then `done` with those ids. `done` ends every stretch of work — the work order, an answer to a correction; a reply without it is not a claim.
