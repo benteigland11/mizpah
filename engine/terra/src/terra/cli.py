@@ -2680,6 +2680,108 @@ def cmd_known_adopt(args: argparse.Namespace) -> int:
     return 0
 
 
+CONFIDENCE_ORDER = ("low", "med", "high")
+
+
+def _land(root: Path, unknown_or_known: str, runs: list[str], on: list[str], confidence: str,
+          adopt: bool) -> tuple[list[str], dict[str, Any] | None, str | None]:
+    """Close a reading in one call: link its runs, graduate, declare what it read, promote, adopt.
+
+    Each step is the same library call its own verb makes; the first refusal stops the walk and is returned with
+    the command that would get past it. Workers spent a median of nine terra --help lookups and failures per work
+    order re-deriving this sequence (35 work orders, 2026-09-22)."""
+    from .knowns import add_dependency, adopt_known, graduate_unknown, link_run_known, load_known, promote_known
+    from .paths import get_active_map_id
+    from .unknowns import link_run, load_unknown
+
+    steps: list[str] = []
+    known_id = None
+    try:
+        unknown = load_unknown(root, unknown_or_known)
+    except (FileNotFoundError, ValueError):
+        unknown = None
+    if unknown is not None and str(unknown.get("resolved_by") or "").startswith("known:"):
+        known_id = str(unknown["resolved_by"]).removeprefix("known:")
+    elif unknown is None:
+        known_id = unknown_or_known
+    for run in runs:
+        try:
+            if known_id is None:
+                link_run(root, unknown_or_known, run)
+                steps.append(f"linked run {run} to unknown {unknown_or_known}")
+            else:
+                link_run_known(root, known_id, run)
+                steps.append(f"linked run {run} to known {known_id}")
+        except (ValueError, FileNotFoundError, OSError) as e:
+            return steps, None, f"link-run {run}: {e}"
+    if known_id is None:
+        try:
+            rec = graduate_unknown(root, unknown_or_known)
+            known_id = rec["id"]
+            steps.append(f"graduated unknown {unknown_or_known} into known {known_id}")
+        except (ValueError, FileNotFoundError, OSError) as e:
+            return steps, None, (f"graduate: {e} — link the run that reads it: "
+                                 f"terra known land {unknown_or_known} --run <run_id>")
+    if on:
+        try:
+            add_dependency(root, known_id, on)
+            steps.append(f"declared {known_id} depends on {', '.join(on)}")
+        except (ValueError, FileNotFoundError, OSError) as e:
+            return steps, load_known(root, known_id), f"depend: {e}"
+    rec = load_known(root, known_id)
+    have = str(rec.get("confidence") or "low")
+    if CONFIDENCE_ORDER.index(have) < CONFIDENCE_ORDER.index(confidence) if have in CONFIDENCE_ORDER else True:
+        try:
+            rec = promote_known(root, known_id, confidence)
+            steps.append(f"promoted {known_id} to {confidence}")
+        except (ValueError, FileNotFoundError, OSError) as e:
+            return steps, rec, (f"promote: {e} — a variable reading needs more samples "
+                                f"(terra known ladder {unknown_or_known}); a determined one a second method "
+                                f"(another probe's run, then terra known land {known_id} --run <run_id>)")
+    if adopt:
+        source = get_active_map_id(root)
+        if source and source != "global":
+            try:
+                rec = adopt_known(root, known_id, from_map=source)
+                steps.append(f"adopted {known_id} from {source}")
+            except FileExistsError:
+                rec = adopt_known(root, known_id, from_map=source, update=True)
+                steps.append(f"re-adopted {known_id} from {source} (updated)")
+            except (ValueError, FileNotFoundError, OSError) as e:
+                return steps, rec, f"adopt: {e}"
+    return steps, rec, None
+
+
+def cmd_known_land(args: argparse.Namespace) -> int:
+    try:
+        root = require_project_root()
+    except (ValueError, FileNotFoundError, OSError) as e:
+        return emit(error(str(e), code="known_land"))
+    steps, rec, blocked = _land(root, args.id, list(args.run or []), list(args.on or []), args.confidence,
+                                not args.no_adopt)
+    data = {"steps": steps, "known": rec}
+    if blocked:
+        return emit(error("stopped at " + blocked, code="known_land", meta=data))
+    return emit(success(data, meta={"surface": "terra.known.land",
+                                    "note": "landed: next, terra route complete <work order> --run <run> --known "
+                                            + str((rec or {}).get("id"))}))
+
+
+def cmd_known_replace_run(args: argparse.Namespace) -> int:
+    """Swap a run a known was built on for a corrected one, keeping the known and its history."""
+    from .knowns import link_run_known, unlink_run_known
+
+    try:
+        root = require_project_root()
+        unlink_run_known(root, args.id, args.old_run)
+        rec = link_run_known(root, args.id, args.new_run)
+    except (ValueError, FileNotFoundError, OSError) as e:
+        return emit(error(str(e), code="known_replace_run"))
+    return emit(success(rec, meta={"surface": "terra.known.replace_run",
+                                   "note": f"replaced {args.old_run} with {args.new_run}; stats recomputed. "
+                                           f"If its confidence dropped: terra known land {args.id}"}))
+
+
 def cmd_cohort_adopt(args: argparse.Namespace) -> int:
     from .cohorts import adopt_cohort
     from .paths import map_parent
@@ -4824,6 +4926,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional status (default: active when med/high from provisional)",
     )
     p_kp.set_defaults(func=cmd_known_promote)
+
+    p_kland = kn_sub.add_parser(
+        "land",
+        help="Close a reading in one call: link its runs, graduate, declare deps, promote, adopt to the parent map; "
+        "stops at the first refusal and names the command that gets past it",
+    )
+    p_kland.add_argument("id", help="the unknown (or its known) to land")
+    p_kland.add_argument("--run", action="append", default=[], help="a run that reads it (repeatable)")
+    p_kland.add_argument("--on", action="append", default=[], help="file:<path> or known:<id> it depends on (repeatable)")
+    p_kland.add_argument("--confidence", default="med", choices=["med", "high"])
+    p_kland.add_argument("--no-adopt", action="store_true", help="stay on the task map")
+    p_kland.set_defaults(func=cmd_known_land)
+
+    p_krr = kn_sub.add_parser("replace-run", help="Swap a run a known was built on for a corrected one")
+    p_krr.add_argument("id")
+    p_krr.add_argument("old_run")
+    p_krr.add_argument("new_run")
+    p_krr.set_defaults(func=cmd_known_replace_run)
 
     p_kad = kn_sub.add_parser(
         "adopt",

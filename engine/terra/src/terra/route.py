@@ -1066,13 +1066,14 @@ def complete_task(
             if confidence_rank(str(rec_k.get("confidence") or "low")) < confidence_rank("med"):
                 raise ValueError(
                     f"known {kid} is {rec_k.get('confidence') or 'low'}: med is the floor of belief — "
-                    "ladder it (more runs for a variable quantity; a second method for a determined one)"
+                    f"`terra known land {kid}` promotes and adopts it, or says what it still needs "
+                    "(more runs for a variable quantity; a second method for a determined one)"
                 )
             if parent is not None:
                 adopted_to = (rec_k.get("adopted_to") or {}).get("map")
                 if not adopted_to:
                     raise ValueError(
-                        f"known {kid} is on {active} and not adopted: `terra known adopt {kid} --from {active}` — "
+                        f"known {kid} is on {active} and not adopted: `terra known land {kid}` — "
                         "what is not adopted did not happen"
                     )
 

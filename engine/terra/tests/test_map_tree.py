@@ -300,3 +300,58 @@ def test_map_list_carries_parent(tmp_path: Path, monkeypatch):
     assert rows["trial"]["parent"] == "exp"
     assert rows["exp"]["parent"] == "global"
     assert "parent" not in rows["global"]
+
+
+def _sampled_unknown(root: Path, kid: str, *, map_id: str, samples: int) -> list[str]:
+    probe_id = f"p_{map_id}_{kid}"
+    init_probe(root, probe_id, purpose="p")
+    _write_measure_probe(root, probe_id, quantity="q", value=4)
+    with scoped_map(map_id):
+        rids = [run_probe(root, probe_id, to={"kind": "region", "i": i}).get("id") for i in range(samples)]
+        create_unknown(root, kid, claim="how big is q?", evidence_needed="a reading", map_type="number", quantity="q")
+    return rids
+
+
+def test_land_closes_a_reading_in_one_call(tmp_path: Path, monkeypatch):
+    """link → graduate → depend → promote → adopt: the sequence workers re-derived from --help nine times a work
+    order (2026-09-22)."""
+    from terra.cli import _land
+
+    monkeypatch.chdir(tmp_path)
+    create_session_map(tmp_path, "exp")
+    (tmp_path / "piece.mid").write_bytes(b"MThd")
+    rids = _sampled_unknown(tmp_path, "span", map_id="exp", samples=3)
+    set_active_map_id("exp")
+    steps, rec, blocked = _land(tmp_path, "span", rids, ["file:piece.mid"], "med", True)
+    assert blocked is None, blocked
+    assert [s.split()[0] for s in steps] == ["linked", "linked", "linked", "graduated", "declared", "promoted", "adopted"]
+    with scoped_map("global"):
+        landed = load_known(tmp_path, "span")
+        assert landed["confidence"] == "med" and landed["adopted_from"]["map"] == "exp"
+        assert [d["path"] for d in landed["deps"]["files"]] == ["piece.mid"]
+
+
+def test_land_stops_at_the_first_refusal_and_names_the_way_past(tmp_path: Path, monkeypatch):
+    from terra.cli import _land
+
+    monkeypatch.chdir(tmp_path)
+    create_session_map(tmp_path, "exp")
+    rids = _sampled_unknown(tmp_path, "thin", map_id="exp", samples=1)
+    set_active_map_id("exp")
+    steps, rec, blocked = _land(tmp_path, "thin", rids, [], "med", True)
+    assert steps[-1].startswith("graduated") and blocked.startswith("promote:") and "terra known ladder thin" in blocked
+    with scoped_map("global"):
+        assert not known_path(tmp_path, "thin").is_file()   # nothing adopted past the refusal
+
+
+def test_replace_run_swaps_the_evidence_and_keeps_the_known(tmp_path: Path, monkeypatch):
+    from terra.knowns import link_run_known, unlink_run_known
+
+    monkeypatch.chdir(tmp_path)
+    rids = _sampled_unknown(tmp_path, "size", map_id="global", samples=3)
+    for rid in rids[:2]:
+        link_run(tmp_path, "size", rid)
+    graduate_unknown(tmp_path, "size")
+    unlink_run_known(tmp_path, "size", rids[0])
+    rec = link_run_known(tmp_path, "size", rids[2])
+    assert rids[0] not in rec["run_ids"] and rids[2] in rec["run_ids"] and rec["stats"]["n"] == 2
