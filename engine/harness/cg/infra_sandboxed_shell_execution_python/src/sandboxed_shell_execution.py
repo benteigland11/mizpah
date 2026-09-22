@@ -312,6 +312,12 @@ class DirectoryWorkspace:
 
     def _excluded(self, relative: PurePosixPath) -> bool:
         parts = relative.parts
+        # A hidden tree at the root is not evidence: the state directories are carried separately (they are
+        # packed, not walked), and everything else hidden there is the worker's own scratch — a build tree, a
+        # cache, a repository's internals. Seven hundred megabytes of video frames under one (follow-the-score,
+        # 2026-09-22) put every harvest past the evidence cap and ended the task as a driver error.
+        if parts and parts[0].startswith('.') and not self._in_state(str(relative)):
+            return True
         return any(part in self.snapshot_ignore for part in parts) or any(
             parts[:len(PurePosixPath(c).parts)] == PurePosixPath(c).parts for c in self.cache_dirs) \
             or self._in_state(str(relative))
