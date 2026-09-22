@@ -103,15 +103,15 @@ def load_config(path: str | Path) -> dict[str, Any]:
     # can be run without it and compared. Verification guards are not toggles.
     scaffolding = dict(bootstrap=True, small_edits=True, checkins=True, command_tools=True) | (config.get('scaffolding') or {})
     config['scaffolding'] = scaffolding
-    if not scaffolding['bootstrap']:
-        config['worker_policy'] = config['worker_policy'].replace(BOOTSTRAP_WALK, FREE_METHOD, 1)
-        assert FREE_METHOD in config['worker_policy'], 'worker policy no longer carries the bootstrap walk sentence'
-    if not scaffolding['small_edits']:
-        # Whole files at once: the policy paragraph goes, and the write/edit caps rise to a whole widget module.
-        # Small edits were a 60K-window rule (a truncated payload lost the model its place); a model with the room
-        # writes a coherent forty lines in one call where the rule took fourteen (pedal gym, 2026-09-20).
-        assert SMALL_EDITS in config['worker_policy'], 'worker policy no longer carries the small-edits paragraph'
-        config['worker_policy'] = config['worker_policy'].replace(SMALL_EDITS, WHOLE_FILES, 1)
+    # Scaffolds are pieces the composer adds when their toggle is on, not sentences edited in the policy text.
+    if scaffolding['small_edits']:
+        piece = prompts_dir/'small_edits_worker.md'
+        if piece.exists():
+            config['worker_policy'] += '\n'+piece.read_text().strip()+'\n'
+    else:
+        # Whole files at once: the write/edit caps rise to a whole widget module. Small edits were a 60K-window
+        # rule (a truncated payload lost the model its place); a model with the room writes a coherent forty
+        # lines in one call where the rule took fourteen (pedal gym, 2026-09-20).
         for key, limit in WHOLE_FILE_BOUNDS:
             harness[key] = max(int(harness.get(key) or 0), limit)
     config['controller_policy'] = _prompts.compose('controller', prompts_dir)   # one controller, one loop: no route/eval modes
