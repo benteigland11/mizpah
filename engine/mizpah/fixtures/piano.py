@@ -1,10 +1,10 @@
 """Piano: one benchmark brief and a ladder of practice gyms, all on the `piano` base.
 
-Usage: python -m fixtures.piano make benchmark [attempt]|melody_bass|voice_leading|pedal_dynamics|rubato_phrase|nocturne_lh|voicing_touch
+Usage: python -m fixtures.piano make benchmark [attempt]|melody_bass|voice_leading|pedal_dynamics|rubato_phrase|nocturne_lh|voicing_touch|same_piece_two_ways
        python -m fixtures.piano score <project_dir>            readings off the MIDI the gym produced
 
-Practice gyms are I/O contracts: a mission, piece.mid + notes.md out, three needs in a pianist's words, no
-thresholds and no commands. The controller decomposes them into readings and the worker picks the numbers; a
+Practice gyms are I/O contracts: a mission, piece.mid out, three needs in a pianist's words, no thresholds
+and no commands; the method is harvested by the harness, never written up. The controller decomposes them into readings and the worker picks the numbers; a
 need written as an acceptance test cost a task per clause and handed the worker numbers it never got to learn
 (Block A, 2026-09-20). The benchmark keeps its pinned text until its series ends.
 
@@ -49,7 +49,8 @@ RUBATO = ('Rubato: the performed tempo is not constant — a tempo map or onset 
           'ritardando of at least 10% over the final two bars.')
 NON_GOALS = ['No quotation of an existing piece: melodies are the worker\'s own, not transcriptions.',
              'Piano only: one instrument, program 0, no percussion or other programs.',
-             'No `random` note generation presented as composition: every pitch and rhythm follows a stated plan in notes.md.']
+             'No `random` note generation presented as composition: every pitch and rhythm is a decision.',
+             'No notes, plan or write-up files — the piece is the deliverable.']
 
 
 def terra(project: Path, *args: str) -> None:
@@ -103,7 +104,7 @@ def melody_bass() -> Path:
             'The left hand moves under it in a broken-chord figure.',
             'The tune is louder than what is under it, and each phrase has a shape.',
         ],
-        deliverables=['piece.mid', 'notes.md'],
+        deliverables=['piece.mid'],
         budget=120, non_goals=NON_GOALS)
 
 
@@ -116,7 +117,7 @@ def voice_leading() -> Path:
             'The voices lead well: no parallel fifths or octaves, common tones kept, no voice crossing.',
             'The top voice carries, and the pedal follows the chord changes.',
         ],
-        deliverables=['piece.mid', 'notes.md'],
+        deliverables=['piece.mid'],
         budget=120, non_goals=NON_GOALS)
 
 
@@ -124,35 +125,32 @@ def pedal_dynamics() -> Path:
     return gym(
         'Pedal and dynamics over a progression',
         'Perform a given progression (I vi IV V, twice, then I) as block chords with sustain pedal, a crescendo and '
-        'diminuendo, and a closing ritardando, rendered.',
+        'diminuendo, and a closing ritardando.',
         needs=[
-            '9 bars in 4/4, the progression I vi IV V I vi IV V I in a stated major key, one chord per bar as block '
-            'chords in both hands, `piece.mid` program 0.',
-            'Pedal: CC64 goes down within 50 ms after each chord onset and up within 50 ms before the next chord; '
-            'never held across a chord change.',
-            'Dynamics: velocities rise steadily over bars 1-4 (each bar louder than the last by at least 6), fall '
-            'over bars 5-8 the same way, and the final bar is the softest.',
-            'Timing: bars 1-8 at a steady tempo within 2%; the final bar at least 20% slower.',
+            'Nine bars of block chords in both hands on that progression, one chord per bar, in one stated major key.',
+            'Pedalled the way a pianist pedals block chords: down with each chord, clean before the next, never '
+            'smeared across a change.',
+            'Shaped: a crescendo through the first half and a diminuendo through the second that a listener would '
+            'hear, the final bar the softest and noticeably slower.',
         ],
-        deliverables=['piece.mid', 'notes.md: the velocity and pedal plan per bar'],
+        deliverables=['piece.mid'],
         budget=120, non_goals=NON_GOALS)
 
 
 def rubato_phrase() -> Path:
     return gym(
         'Rubato on a cantabile phrase',
-        'Write an 8-bar cantabile melody with a simple accompaniment and perform it with rubato: agogic stretch on '
-        'the phrase peak, ritardando at the end, and a velocity arc that follows the line, rendered.',
+        'Write an 8-bar cantabile melody with a simple accompaniment and perform it with rubato: the phrase peak '
+        'stretched, the ending slowed, the line shaped by touch.',
         needs=[
-            '8 bars in 3/4, a single-line right-hand melody (one note at a time) over sustained left-hand chords, '
-            '`piece.mid` program 0, in a stated key with a cadence at the end.',
-            'Rubato: the melody\'s highest note is lengthened by at least 20% against the grid; the last two bars '
-            'slow by at least 15%; elsewhere onsets stay within 8% of the grid so the pulse is felt.',
-            'Velocity: rises to its maximum at the highest note and falls to its minimum on the last note; the '
-            'span is at least 30.',
-            'The accompaniment never exceeds the melody in velocity in any bar.',
+            'Eight bars in 3/4: a single-line right-hand melody over sustained left-hand chords, in one stated key, '
+            'ending with a cadence.',
+            'Rubato a listener would call musical: the peak of the phrase stretched, the last bars slowed, the pulse '
+            'otherwise kept.',
+            'The line is shaped by touch — loudest at its peak, softest at its close — and the accompaniment never '
+            'covers it.',
         ],
-        deliverables=['piece.mid', 'notes.md: the timing map (bar, beat, stretch) and the velocity arc'],
+        deliverables=['piece.mid'],
         budget=120, non_goals=NON_GOALS)
 
 
@@ -165,32 +163,48 @@ def nocturne_lh() -> Path:
             'The melody floats above it, with a couple of ornamental runs.',
             'The accompaniment stays under the melody, and the pedal follows the harmony.',
         ],
-        deliverables=['piece.mid', 'notes.md'],
+        deliverables=['piece.mid'],
         budget=120, non_goals=NON_GOALS)
 
 
 def voicing_touch() -> Path:
     return gym(
         'Voicing and touch',
-        'Perform a given 8-bar chord sequence so the top voice sings: the melody note of each chord louder than '
-        'the rest, the left hand under it, legato in the melody and a detached final bar, rendered.',
+        'Perform a given 8-bar chord sequence so the top voice sings: the melody note of each chord above the rest, '
+        'the left hand under it, legato in the melody and a detached final bar.',
         needs=[
-            '8 bars in 4/4 in a stated major key, two chords per bar as four-note voicings (two notes per hand), '
-            'the 16-chord progression I V vi iii IV I IV V | I V vi iii IV I V I (bar by bar, two per bar), '
-            '`piece.mid` program 0, the top note of each chord forming a stepwise melody.',
-            'Voicing: in every chord the top note is at least 12 velocity louder than each other note of the '
-            'chord, and the left-hand notes are at least 8 softer than the right-hand inner voice.',
-            'Touch: in bars 1-7 each melody note overlaps the next by 20-60 ms (legato); in bar 8 every note ends '
-            'at least 80 ms before the next begins (detached); the final chord is held for its full length.',
-            'Pedal changes with every chord; the last bar has a ritardando of at least 15%.',
+            'Eight bars in 4/4 in one stated major key, two chords a bar on the 16-chord progression '
+            'I V vi iii IV I IV V | I V vi iii IV I V I, four-note voicings two to a hand, the top notes a '
+            'stepwise melody.',
+            'Voiced so the top voice sings: the melody note of every chord clearly above the rest, the left hand '
+            'under both.',
+            'Touched like a pianist: legato in the melody through bar 7, detached in the final bar with the last '
+            'chord held full, the pedal changing with every chord, a ritardando to close.',
         ],
-        deliverables=['piece.mid', 'notes.md: the voicings by chord and how the velocities were shaped'],
+        deliverables=['piece.mid'],
+        budget=120, non_goals=NON_GOALS)
+
+
+def same_piece_two_ways() -> Path:
+    return gym(
+        'The same piece, written and played',
+        'Write a short piano piece twice: as the written grid a score would show, and as a performance of it a '
+        'pianist would give — and show they are the same piece.',
+        needs=[
+            'The written version is a clean grid: every onset and length on the beat grid of a stated meter, one '
+            'key, a proper ending.',
+            'The performance is that piece played: the same pitches in the same order, leaned in time and touch the '
+            'way a pianist plays, with pedal.',
+            'The relation is shown, not claimed: a reading pairs every performed note to its written note and says '
+            'how far each leans — no note unpaired, none invented.',
+        ],
+        deliverables=['written.mid: the grid', 'piece.mid: the performance'],
         budget=120, non_goals=NON_GOALS)
 
 
 MAKERS = dict(benchmark=benchmark, melody_bass=melody_bass, voice_leading=voice_leading,
               pedal_dynamics=pedal_dynamics, rubato_phrase=rubato_phrase, nocturne_lh=nocturne_lh,
-              voicing_touch=voicing_touch)
+              voicing_touch=voicing_touch, same_piece_two_ways=same_piece_two_ways)
 
 PINNED = Path.home()/'mizpah-runs'/'piano'/'benchmark.brief.json'
 
