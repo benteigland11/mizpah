@@ -20,7 +20,6 @@ def searched_tree(tmp_path: Path, monkeypatch) -> None:
 @pytest.fixture(autouse=True)
 def _no_cooldown(monkeypatch):
     from playbook import ops
-    monkeypatch.setattr(ops, "TICK_COOLDOWN", 0)
 
 
 def _plan(walk: str, n: int = 60) -> None:
