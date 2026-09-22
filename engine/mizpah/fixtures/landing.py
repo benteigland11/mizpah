@@ -2,12 +2,11 @@
 
 Usage: python -m fixtures.landing <target_dir>   (from engine/mizpah; makes <target_dir>/landing)
 
-Nothing here has a planted answer. Every need is a property of the page the worker builds, read off
-the rendered page by headless chromium (a probe injects a measuring script and reads the DOM back) or
-off the files; the report states those readings and whether each meets the target in
-content/targets.json. The scorer checks targets, traceability and that the evidence section states
-only numbers content/evidence.json holds. Run with config.landing.json (chromium needs /sys, 3 GB,
-256 processes in the sandbox).
+Nothing here has a planted answer. The needs are levels the page has to reach; what to read off the
+rendered page (headless chromium through the page CLI) or the files to show it is the loop's to work
+out. The key keeps the first curve's targets and the evidence numbers for a scorer that wants them;
+the y of a run is the map, the page as rendered, and what the library gained. Run with
+config.landing.json (chromium needs /sys, 3 GB, 256 processes in the sandbox).
 """
 from __future__ import annotations
 
@@ -35,20 +34,17 @@ PITCH = textwrap.dedent('''\
     hand; a number without a run behind it does not exist.
 
     ## How it works (the loop)
-    1. Brief — needs and deliverables, held by the person; agents can only propose changes to it.
+    1. Brief — needs, deliverables and non-goals, held by the requestor; agents can only propose changes.
     2. Unknown — the controller mints one typed question per thing the map still owes the brief.
-    3. Route — one task per group of unknowns; a task says what, never how.
-    4. Procedure — the worker opens a method from the playbook and follows it step by step.
-    5. Probe and run — a small script reads the source; the run is stamped and linked.
-    6. Known — three agreeing runs graduate the reading to a known with a confidence.
-    7. Gate — pass/fail over brief and map, no arguing. Green is the only time a worker may improve
-       the playbook.
-    8. Project eval — the controller judges map against brief: new unknowns, or a proposal that the
-       brief itself is wrong.
+    3. Work order — one task per group of unknowns, with a bucket for effort; it says what, never how.
+    4. Procedure — the worker opens a method from the playbook and walks it one step at a time.
+    5. Probe and run — an instrument reads the source; the run is stamped and linked to what it measured.
+    6. Known — enough agreeing runs graduate a reading to a known with a confidence.
+    7. Gate — a mechanical check over the whole map, no arguing. Green is when the library takes the method.
 
     ## The three tools
     - Terra — the map: unknowns, probes, runs, typed knowns, staleness, the gate.
-    - Playbook — the methods: procedures a worker opens as a checklist and improves after green.
+    - Playbook — the methods: procedures a worker walks and improves when the gate is green.
     - Cartograph — the instruments: widgets a probe calls; found by search before anything is built.
 
     ## Why it matters
@@ -75,7 +71,7 @@ BRAND = textwrap.dedent('''\
     - Type: system font stack only (no webfonts, no external requests of any kind).
     - Layout: single column, max width around 70 characters for prose, generous vertical rhythm.
     - Sections, in order: hero (tagline, one sentence, one primary call to action), how it works
-      (the eight steps), the three tools, evidence (the numbers in evidence.json, each with what it
+      (the seven steps), the three tools, evidence (the numbers in evidence.json, each with what it
       means), get started.
     - The evidence section states only numbers that appear in content/evidence.json. Nothing else.
     ''')
@@ -100,7 +96,7 @@ TARGETS = {
 }
 
 RENDER_NOTE = (
-    'The probe environment has headless chromium; a browser must outlive one command, so start it as a service: '
+    'Headless chromium is in the sandbox; a browser must outlive one command, so it runs as a service: '
     '`svc start browser -- chromium-browser --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage '
     '--user-data-dir=/work/.chrome --remote-debugging-port=9222 --remote-allow-origins=* about:blank`. The widget '
     'library has a page CLI over its DevTools port (search it) that opens a URL such as file:///work/site/index.html, '
@@ -114,52 +110,40 @@ def landing(project: Path, *, enablers: bool = False) -> None:
     (content/'pitch.md').write_text(PITCH)
     (content/'brand.md').write_text(BRAND)
     (content/'evidence.json').write_text(json.dumps(EVIDENCE, indent=2)+'\n')
-    (content/'targets.json').write_text(json.dumps({'need:'+k: v for k, v in TARGETS.items()}, indent=2)+'\n')
     (content/'README.md').write_text(textwrap.dedent('''\
         content/ is the source for the page: pitch.md (the words), brand.md (the constraints),
-        evidence.json (the only numbers the evidence section may state), targets.json (what each
-        measured property should meet, by brief need). The page lives in site/; screenshots in
-        site/shots/; the design report in report/design.md.
+        evidence.json (the only numbers the evidence section may state). The page lives in site/;
+        screenshots in site/shots/.
         '''))
     needs = [
-        'Know the number of <section> elements site/index.html has',                                              # 1
-        'Know whether every section of the page opens with a heading (an h1 in the hero, an h2 elsewhere)',       # 2
-        'Know the contrast ratio of body paragraph text against its background as rendered at 1280 px (page_readings)',  # 3
-        "Know the contrast ratio of the primary call to action's text against its button background",             # 4
-        'Know whether the page overflows horizontally when rendered 375 px wide (page_readings)',                 # 5
-        'Know whether the page overflows horizontally when rendered 1280 px wide',                                # 6
-        'Know the page weight in kilobytes: site/index.html plus every file it references',                       # 7
-        'Know the number of distinct font families the rendered page uses',                                       # 8
-        'Know the number of distinct margin and padding values site/style.css uses (its spacing scale)',          # 9
-        'Know whether the primary call to action is visible above the fold at 1280 by 800 (page_readings)',       # 10
-        'Know the number of <img> elements without alt text',                                                     # 11
-        'Know the body paragraph text size in pixels as rendered',                                                # 12
-        'Know the mean paragraph line length in characters as rendered at 1280 px (page_readings)',              # 13
-        'Know the number of distinct colors site/style.css declares',                                             # 14
-        'Know whether every number the evidence section states appears as a value in content/evidence.json',     # 15
-        'Know the number of requests the page makes to any URL outside site/ (external fonts, scripts, images)',  # 16
+        'The page is at the level of a well-set editorial page: a designer looking at it rendered at 1280 and at 375 px '
+        'wide finds the type, spacing, colour and hierarchy deliberate and nothing to fix — prose at a readable measure, '
+        'one accent, a spacing scale, a call to action that is seen first.',
+        'The page is honest: every word carries the meaning of content/pitch.md, every constraint in content/brand.md '
+        'holds, and the evidence section states only numbers content/evidence.json holds.',
+        'The page is lean and accessible: it loads with nothing from outside site/, reads the same with scripts off, '
+        'and passes what a publisher checks before shipping — text contrast, alt text, no horizontal overflow at phone '
+        'width, the call to action above the fold.',
     ]
     deliverables = [
-        'site/index.html with site/style.css: one landing page written by hand in HTML and CSS, no framework, no '
-        'external requests, with the sections hero, how it works, the three tools, evidence and get started in that '
-        'order, its words from content/pitch.md and its constraints from content/brand.md',
-        'site/shots/desktop-1280.png and site/shots/mobile-375.png: screenshots of the final page rendered by '
-        'headless chromium at 1280 and 375 px wide (page_readings)',
-        'report/design.md: one row per measured property (brief needs 1 to 16) stating the reading on the map and '
-        'whether it meets the target in content/targets.json, with a closing line counting the targets met',
+        'site/index.html with site/style.css: the landing page, HTML and CSS written by hand, sections hero, how it '
+        'works, the three tools, evidence, get started, in that order',
+        'site/shots/desktop-1280.png and site/shots/mobile-375.png: the final page rendered by headless chromium at '
+        '1280 and 375 px wide',
     ]
-    brief(project, 'Mizpah landing page', 'Build a single landing page for Mizpah from the words in content/, and '
-          'prove its design properties the way the loop proves anything: by measuring the rendered page.',
-          needs, deliverables, budget=400,
-          notes='Build the page first, then measure it; a reading is taken off the rendered page or the files, never '
-                'estimated. '+RENDER_NOTE,
-          non_goals=['No `framework`, `bundler` or `build step`: the page is HTML and CSS written by hand',
-                     'No `external request`: no fonts, scripts or images from outside site/',
-                     'No `javascript` for layout or content: the page reads the same with scripts off'],
+    brief(project, 'Mizpah landing page',
+          'Build the landing page for Mizpah from the words in content/ and make it a page a person would read and '
+          'trust. In: content/ (pitch.md, brand.md, evidence.json), headless chromium and the page CLI in the library. '
+          'Out: site/index.html, site/style.css, site/shots/desktop-1280.png, site/shots/mobile-375.png.',
+          needs, deliverables, budget=120,
+          notes=RENDER_NOTE,
+          non_goals=['No `framework`, `bundler` or `build step`: the page is HTML and CSS written by hand.',
+                     'No `external request`: no fonts, scripts or images from outside site/.',
+                     'No `javascript` for layout or content: the page reads the same with scripts off.',
+                     'No notes, plan, report or write-up files — the page is the deliverable.'],
           enablers=[('page_readings', 'Headless page readings', 'cg/frontend_headless_page_cli_python',
                      'A command-line instrument over headless chromium: serve or open a page, read its text, element boxes, '
-                     'computed styles and requests, take a screenshot at a viewport width. The readings that name it are '
-                     'taken through it.')] if enablers else ())
+                     'computed styles and requests, take a screenshot at a viewport width.')] if enablers else ())
     key_path(project).write_text(json.dumps(dict(fixture='landing', key=dict(
         by_need={}, targets=TARGETS, evidence_numbers=[v for v in EVIDENCE.values() if isinstance(v, (int, float))],
         evidence_section='evidence')), indent=1)+'\n')
