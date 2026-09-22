@@ -8,4 +8,4 @@ Organize it around:
 - **Continuation point:** what the last completed action established and the next action with its prerequisites.
 - **Where things are:** the files, the walk, the probes, the archive.
 
-Keep observed results, prior claims, assumptions and proposed actions distinct. Record a thing as done only when the evidence says so. Reconcile earlier memory with newer evidence into one current account; drop what is resolved. Plain Markdown, nothing performed, no copied envelopes.
+Keep observed results, prior claims, assumptions and proposed actions distinct. Record a thing as done only when the evidence says so. Reconcile earlier memory with newer evidence into one current account; drop what is resolved. Plain Markdown, nothing performed, no copied envelopes. No tool runs in this reply: write the handoff itself, from what this window holds, not a plan to write it.

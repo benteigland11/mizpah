@@ -36,6 +36,15 @@ from cg.universal_context_payload_projection_python.src.context_payload_projecti
 )
 
 
+
+def _looks_like_handoff(text: str) -> bool:
+    """A handoff has structure: a heading or a list item somewhere, and more than a sentence or two.
+    A reply without either is the worker narrating what it would do, not the working memory."""
+    lines=[line.strip() for line in text.strip().splitlines() if line.strip()]
+    structured=any(line.startswith(('#','-','*')) or line[:2].rstrip('.').isdigit() for line in lines)
+    return structured and len(lines) >= 3
+
+
 @dataclass(frozen=True)
 class ControllerSettings:
     system_prompt: str
@@ -1306,6 +1315,22 @@ class FocusedSession:
         turn = parse_turn(response)
         if turn.finish_reason != 'stop' or turn.message.get('tool_calls') or not (turn.message.get('content') or '').strip():
             raise ValueError('The worker did not produce a complete tool-free handoff')
+        if not _looks_like_handoff(turn.message['content']):
+            # "I'll read the notes on disk, then write the handoff": a plan to act where no tool can run. Once
+            # accepted (engrave, 2026-09-22) the next window opened on two lines of intent and had to find the
+            # worker's own notes on disk. Ask once more, with the reply in view.
+            payload['messages'].append(dict(role='assistant', content=turn.message['content']))
+            payload['messages'].append(dict(role='user', content=
+                'That is a plan to write the handoff, not the handoff. No tool runs in this reply; write it now, '
+                'from what this window holds, organized as asked.'))
+            self._event('handoff_retry', dict(window=self.session.window_index, reply=turn.message['content'][:500]))
+            response = self._complete(self.worker, payload, 'handoff', policy.context_capacity,
+                                      client.count(payload, 'handoff')['tokens'], policy.output_headroom_tokens)
+            if response is None:
+                return
+            turn = parse_turn(response)
+            if turn.finish_reason != 'stop' or turn.message.get('tool_calls') or not (turn.message.get('content') or '').strip():
+                raise ValueError('The worker did not produce a complete tool-free handoff')
         transition = self.session.rollover(turn.message['content'], source_archive=source_archive)
         self._event('worker_handoff', transition)
         self.state.update(phase='worker', pending_io=None, input_cursor=0, handoffs=self.state['handoffs']+1)
