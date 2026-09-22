@@ -1,0 +1,165 @@
+{
+  "worker": {
+    "endpoint": {
+      "base_url": "http://127.0.0.1:58080",
+      "timeout_seconds": 900,
+      "maximum_response_bytes": 16000000,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "completion_path": "/v1/chat/completions",
+      "template_path": "/apply-template",
+      "tokenize_path": "/tokenize",
+      "tokenizer_add_special": true,
+      "tokenizer_parse_special": true
+    },
+    "generation": {
+      "model": "bonsai-2-27b",
+      "reasoning_format": "deepseek",
+      "reasoning_budget_tokens": 4096,
+      "chat_template_kwargs": {
+        "enable_thinking": true
+      },
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "min_p": 0.0,
+      "seed": 731,
+      "top_k": 20
+    },
+    "provider": "llama_client",
+    "known_issues": {
+      "repetition": {
+        "identical_tool_calls": 8
+      }
+    }
+  },
+  "controller": {
+    "endpoint": {
+      "base_url": "http://127.0.0.1:58080",
+      "timeout_seconds": 900,
+      "maximum_response_bytes": 16000000,
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "completion_path": "/v1/chat/completions",
+      "template_path": "/apply-template",
+      "tokenize_path": "/tokenize",
+      "tokenizer_add_special": true,
+      "tokenizer_parse_special": true
+    },
+    "generation": {
+      "model": "bonsai-2-27b",
+      "reasoning_format": "deepseek",
+      "reasoning_budget_tokens": 4096,
+      "chat_template_kwargs": {
+        "enable_thinking": true
+      },
+      "temperature": 1.0,
+      "top_p": 0.95,
+      "min_p": 0.0,
+      "seed": 731,
+      "top_k": 20
+    },
+    "policy_file": "controller.md",
+    "context_capacity": 131072,
+    "output_tokens": -1,
+    "output_headroom_tokens": 12000,
+    "maximum_model_calls": null,
+    "maximum_tool_calls": null,
+    "maximum_tool_output_characters": 24000,
+    "input_target_tokens": 48000,
+    "recent_review_exchanges": 2,
+    "provider": "llama_client",
+    "known_issues": {
+      "repetition": {
+        "identical_tool_calls": 8
+      }
+    },
+    "investigation_budgets": {
+      "bootstrap": 0,
+      "periodic": 2,
+      "completion": 6
+    },
+    "maximum_document_edits_per_review": 2
+  },
+  "session_policy": {
+    "context_capacity": 102400,
+    "rollover_threshold": 61440,
+    "worker_output_tokens": -1,
+    "handoff_output_tokens": -1,
+    "output_headroom_tokens": 10000,
+    "overflow_excerpt_characters": 16000,
+    "reasoning_retention": "none",
+    "recent_result_count": 3,
+    "recent_result_characters": 12000,
+    "handoff_prompt": "Write the working memory for the next context window to continue this task accurately.\n\nThe next context receives the original assignment, this memory, retained recent tool results, and access to the existing workspace and history archive. Preserve the additional information it needs to understand the current situation and choose its next action.\n\nOrganize the memory around:\n\n- **Current objective and constraints:** the user\u2019s current intent, later corrections, decisions, and boundaries that still apply.\n- **Established state:** relevant findings, changes actually made, and verification actually completed. Keep exact identifiers and values where precision matters.\n- **Unfinished work:** obligations, unresolved questions, blockers, and any action whose outcome remains uncertain.\n- **Continuation point:** what the last completed action established, what remains to be done with its result, and the next intended action with its prerequisites.\n- **Essential references:** where supporting material lives and what to retrieve there.\n\nDistinguish observed results, prior claims, assumptions, and proposed actions. Record completion only when the available evidence supports it. Preserve the reasons behind decisions when forgetting them would invite repeated mistakes.\n\nReconcile earlier memory with newer evidence into one current account. Correct superseded claims and remove resolved or irrelevant material.\n\nCondense repeated discussion and bulky outputs. Preserve information whose loss could cause incorrect work, violated constraints, or expensive reconstruction.\n\nOutput only the memory in plain Markdown. Describe pending work without performing it. Omit copied message envelopes, nested handoffs, and tool-call markup.",
+    "resume_prefix": "Continue your work from your own handoff and the retained tool results. Resolve unfinished follow-up from the last completed action before moving past it. Read existing accumulated notes before updating them and preserve their established findings; retrieve the archived history when a needed detail is missing.",
+    "handoff_generation_overrides": {
+      "reasoning_budget_tokens": 2048
+    },
+    "argument_excerpt_characters": 2001,
+    "reflect_turns": 8
+  },
+  "review_policy": {
+    "update_interval": 20,
+    "observation_window": 10,
+    "bootstrap_after_turns": 1,
+    "maximum_document_characters": 256000,
+    "maximum_guidance_characters": 8000,
+    "maximum_request_characters": 250000,
+    "execution_terms": [
+      "bash",
+      "sed",
+      "cat <<",
+      "heredoc",
+      "echo",
+      "chunk",
+      "chunks",
+      "smaller commands",
+      "multiple commands",
+      "size limit",
+      "character limit",
+      "arguments_too_large",
+      "tool call",
+      "tool calls",
+      "run_check",
+      "split the change",
+      "`read`",
+      "`write`",
+      "`edit`",
+      "read tool",
+      "write tool",
+      "edit tool"
+    ]
+  },
+  "review_on_completion": true,
+  "guidance_prefix": "Controller guidance:",
+  "shell": {
+    "bwrap": "/usr/bin/bwrap",
+    "systemd_run": "/usr/bin/systemd-run",
+    "systemctl": "/usr/bin/systemctl",
+    "runtime_root": "/usr",
+    "limits": {
+      "memory_bytes": 3221225472,
+      "workspace_bytes": 268435456,
+      "temporary_bytes": 268435456,
+      "output_bytes": 1048576,
+      "visible_output_bytes": 8192,
+      "processes": 256,
+      "cpu_percent": 200,
+      "command_seconds": 90,
+      "shutdown_seconds": 5,
+      "max_files": 10000
+    }
+  },
+  "maximum_generation_retries": 8,
+  "worker_tools": [
+    "bash",
+    "read",
+    "write",
+    "edit"
+  ],
+  "maximum_tool_argument_characters": 24000,
+  "maximum_write_characters": 20000,
+  "maximum_edit_characters": 12000
+}
