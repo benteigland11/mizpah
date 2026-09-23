@@ -42,3 +42,12 @@ def test_a_task_keeps_the_crew_it_first_ran_with(tmp_path):
     init.main(['pin', '--config', str(engine), str(project)])   # a later default does not move it
     models = json.loads((project/'.mizpah'/'config.json').read_text())['models']
     assert models['worker']['generation']['model'] == 'chosen' and models['controller']['generation']['model'] == 'a'
+
+
+def test_a_reopened_work_order_moves_its_last_report_aside(tmp_path):
+    from mizpah import worker
+    (tmp_path/'result.json').write_text('{"verdict": "blocked_by_worker"}')
+    assert worker.archive_report(tmp_path).name == 'result.1.json'
+    (tmp_path/'result.json').write_text('{"verdict": "incomplete"}')
+    assert worker.archive_report(tmp_path).name == 'result.2.json'
+    assert not (tmp_path/'result.json').exists() and worker.archive_report(tmp_path) is None

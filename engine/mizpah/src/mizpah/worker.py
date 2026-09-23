@@ -2049,14 +2049,14 @@ def model_up(config: dict[str, Any]) -> bool:
 
 def run_through_outages(session: FocusedSession, config: dict[str, Any], root: Path, *, maximum_worker_turns: int,
                         wait_seconds: int = 300, health: Any = None) -> dict[str, Any]:
-    """`session.run`, but a model server that goes away mid-call is waited for, not counted as a failure.
+    """`session.run`, but a model that goes away mid-call is waited for, not counted as a failure.
 
-    A supervised server restarts in seconds; the session discards the torn call and continues. Only a server
-    that stays down past `wait_seconds` surfaces as the transport error it is. Rejected generations are not
-    outages and pass straight through.
+    The torn call is discarded and asked again under the seat's patience streak (`ops.ride_out`): a good turn
+    resets it, and only a streak that outlasts the patience, or a failure asking again cannot fix, surfaces as
+    the transport error it is. Rejected generations are not outages and pass straight through.
     """
-    import time
-    outages = 0
+    from . import ops
+    failures, failed_at = ops.streak(config), None
     stop_files = (root/'STOP', root.parent/'STOP', root.parent.parent/'STOP')
 
     nudge = root/'nudge.md'
@@ -2083,45 +2083,17 @@ def run_through_outages(session: FocusedSession, config: dict[str, Any], root: P
         except RejectedGeneration:
             raise
         except ModelTransportError as error:
-            # The wait starts at the outage, not at entry: one call to run() spans a whole burst of turns.
-            from . import ops
-            if not ops.network_reachable(ops.provider_host(config['worker'], config)):
-                # No route to the model's host: not the model's outage and not counted as one. Wait for the
-                # network, discard the torn call, ask again.
-                checker = health or ops.Health(config, root)
-                ops.record_outage(root, 'worker', config['worker'], error, outages, task=root.name,
-                                  action='the network is down; waiting for it, not counted')
-                if not checker.wait_for_network(ops.provider_host(config['worker'], config)):
-                    raise
-                discarded = session.discard_pending()
-                if discarded:
-                    (root/'discarded.jsonl').open('a').write(json.dumps(discarded)+'\n')
-                if burst is not None:
-                    try:
-                        maximum_worker_turns = max(1, burst-(session.status()['completed_worker_turns']-burst_start))
-                    except Exception:  # noqa: BLE001
-                        pass
-                continue
-            outages += 1
-            too_big = 'exceeded the configured byte limit' in str(error)
             try:
                 turn = session.status()['completed_worker_turns']
             except Exception:  # noqa: BLE001
                 turn = None
-            delay = ops.backoff_seconds(outages, cap=wait_seconds)
-            ops.record_outage(root, 'worker', config['worker'], error, outages, task=root.name, turn=turn,
-                              waited_seconds=None if too_big else delay,
-                              action=('the reply is discarded and the worker is asked again with a warning' if too_big
-                                      else 'the torn call is discarded; the worker asks again after '+str(int(delay))+' s' if outages <= 5
-                                      else 'the sixth in a row: the task fails'))
-            if outages > 5:
+            if failed_at is not None and turn is not None and turn > failed_at:
+                failures.succeeded()   # a good turn since the last drop: this one starts a fresh streak
+            failed_at = turn
+            too_big = 'exceeded the configured byte limit' in str(error)
+            if not ops.ride_out(failures, error, role='worker', spec=config['worker'], config=config, root=root,
+                                health=health or ops.Health(config, root), task=root.name, turn=turn, wait_seconds=wait_seconds):
                 raise
-            if not too_big:
-                # A server that went away is waited for, with backoff; a reply that was too big is the worker's own
-                # doing and the server is fine.
-                checker = health or ops.Health(config, root)
-                if not checker.wait_for_model((config['worker'].get('endpoint') or {}).get('base_url'), wait_seconds=wait_seconds, attempt=outages):
-                    raise
             discarded = session.discard_pending()
             if discarded:
                 (root/'discarded.jsonl').open('a').write(json.dumps(discarded)+'\n')
@@ -2194,6 +2166,19 @@ def install_widgets(config: dict[str, Any], project: Path, wanted: list[str]) ->
     return present
 
 
+def archive_report(root: Path) -> Path | None:
+    """A reopened work order's last report becomes history (result.<n>.json): result.json is the report of the
+    round that is landing, so its absence says the work order is live. Left in place, the app read a released
+    block as the end of the session and showed nothing of the worker that went on (follow the score, 2026-09-22)."""
+    report = root/'result.json'
+    if not report.exists():
+        return None
+    n = 1 + sum(1 for _ in root.glob('result.*.json'))
+    target = root/f'result.{n}.json'
+    report.rename(target)
+    return target
+
+
 def assigned_widgets(task: dict[str, Any]) -> list[str]:
     """The widgets the controller named for this task (`widget:<id>` in its acceptance)."""
     return [e[len('widget:'):].strip() for e in task.get('acceptance') or [] if isinstance(e, str) and e.startswith('widget:')]
@@ -2226,6 +2211,7 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         # another's window (continue_from is retired, 2026-09-21: what is on disk is the continuity).
         saved = json.loads((root/'task.json').read_text())
         task, unknowns, map_id = saved['task'], saved['unknowns'], saved['map']
+        archive_report(root)
         probes_before = tuple(saved.get('probes_before') or ())
         task = pick_task(config, project, task['id']) | dict(bucket=next(
             t['bucket'] for t in terra(config, project, 'route', 'status')['tasks'] if t['id'] == task['id']))
