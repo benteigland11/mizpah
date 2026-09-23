@@ -340,7 +340,7 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
             init_module.pin_crew(project, Path(config['mizpah_config_path']))
         except (OSError, ValueError, KeyError):
             pass
-    init_module.apply_project_config(config, project)   # the project's own sandbox settings, if it has any
+    init_module.apply_project_config(config, project, freeze=True)   # the project's own sandbox settings, its environment frozen
     journal = root/'controller.jsonl'
     log = root/'errors.jsonl'
     ensure_brief_map(config, project, log)
@@ -457,6 +457,12 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                         handle.write(json.dumps(dict(at=time.time(), where='task:'+task['id'], error=str(error)[:500],
                                                      trace=traceback.format_exc()[-2000:]))+'\n')
                     record['tasks'].append(dict(task=task['id'], verdict='error', error=str(error)[:300]))
+                    # A report, so the work order reads as closed: with none, the app showed the session live for good.
+                    # A later resume moves it aside (worker.archive_report) like any other round's report.
+                    report_path = root/'tasks'/task['id']/'result.json'
+                    if report_path.parent.is_dir() and not report_path.exists():
+                        report_path.write_text(json.dumps(dict(task=task['id'], verdict='error', error=str(error)[:500],
+                                                               blocked_reason=None, knowns=[], runs=[]), indent=1))
                     try:
                         terra(config, project, 'route', 'block', task['id'], '--reason', 'driver error: '+str(error)[:300])
                     except RuntimeError:
