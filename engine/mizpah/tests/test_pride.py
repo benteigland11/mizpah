@@ -45,7 +45,8 @@ def test_the_verdict_is_asked_of_the_assets_alone_and_kept_by_content(tmp_path):
     first = pride.review(client, config, tmp_path, root, brief)
     assert first['proud'] is False and first['files'] == ['piece.mid'] and first['fresh']
     sent = client.calls[0]['messages']
-    assert len(sent) == 1 and 'Are you proud of this work?' in sent[0]['content'] and 'moving' not in sent[0]['content']
+    assert len(sent) == 1 and 'Are you proud of this work?' in sent[0]['content'] and '- moving' in sent[0]['content']
+    assert 'gate' not in sent[0]['content'].split('Are you proud')[1].lower()
     again = pride.review(client, config, tmp_path, root, brief)
     assert not again['fresh'] and len(client.calls) == 1
     (tmp_path/'piece.mid').write_bytes(midi([(0, 65, 96, 70)]))

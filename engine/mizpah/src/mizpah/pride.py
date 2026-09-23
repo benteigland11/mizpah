@@ -5,8 +5,9 @@ the safest thing that passes, and the pieces came out bland, careful and timid. 
 the same model names exactly what is wrong with its own green work (2026-09-23: proud of 2 of 42 deliverables,
 each "no" specific — a sequencer grid, parallel fifths, a waltz with no waltz accompaniment).
 
-So at a landing the controller opens a fresh conversation holding nothing but the delivered assets: not the brief,
-not the map, not the harness's framing. Its verdict goes into the step's message; not proud means route the work
+So at a landing the controller opens a fresh conversation holding the brief and the delivered assets: not the map, the
+readings or the work orders. (The brief was held back at first; a judge that did not know a video was meant as a quiet
+frame for its music pushed it toward spectacle, 2026-09-23.) Its verdict goes into the step's message; not proud means route the work
 that would make it proud. A verdict is kept by the assets' content hash, so an unchanged asset is judged once."""
 
 from __future__ import annotations
@@ -145,12 +146,30 @@ def history_text(earlier: list[dict[str, Any]]) -> str:
     return '\n'.join(lines)+'\n\n'
 
 
-def judge(client: Any, config: dict[str, Any], files: list[Path], earlier: list[dict[str, Any]] = ()) -> dict[str, Any]:
-    """The fresh conversation: the assets, the question and the last few looks at earlier versions, nothing else."""
+def brief_text(brief: dict[str, Any]) -> str:
+    """The brief as the judge reads it: what the work is for. Without it, a judge that cannot hear a soundtrack pushed a
+    video meant as a quiet frame for the music toward more and more visual event (the social video, 2026-09-23)."""
+    if not brief:
+        return ''
+    lines = ['# The brief']
+    for key, label in (('title', 'Title'), ('mission', 'Mission')):
+        if brief.get(key):
+            lines.append(f'{label}: {brief[key]}')
+    for key, label in (('needs', 'Needs'), ('non_goals', 'Non-goals'), ('deliverables', 'Deliverables')):
+        items = [n if isinstance(n, str) else str(n.get('text') or n) for n in brief.get(key) or []]
+        if items:
+            lines.append(label+':')
+            lines += ['- '+i for i in items]
+    return '\n'.join(lines)+'\n\n'
+
+
+def judge(client: Any, config: dict[str, Any], files: list[Path], earlier: list[dict[str, Any]] = (),
+          brief: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The fresh conversation: the brief, the assets, the question and the last few looks at earlier versions."""
     from cg.backend_persistent_model_session_python.src.persistent_model_session import parse_turn
     with tempfile.TemporaryDirectory() as scratch:
         parts = [render(p, Path(scratch)) for p in files]
-        text = prompts.message('pride_controller', assets='\n\n'.join(t for t, _ in parts), history=history_text(list(earlier)))
+        text = prompts.message('pride_controller', assets='\n\n'.join(t for t, _ in parts), history=history_text(list(earlier)), brief=brief_text(brief or {}))
         images = [image for _, imgs in parts for image in imgs]
         content: Any = [dict(type='text', text=text)]+images if images else text
         payload = dict(config['controller']['generation'], messages=[dict(role='user', content=content)],
@@ -182,7 +201,7 @@ def review(client: Any, config: dict[str, Any], project: Path, root: Path | None
             kept = {}
     if key in kept:
         return dict(kept[key], files=[p.name for p in files], fresh=False)
-    verdict = judge(client, config, files, list(kept.values()))
+    verdict = judge(client, config, files, list(kept.values()), brief)
     if kept_path is not None and verdict.get('proud') is not None:
         kept[key] = verdict
         kept_path.write_text(json.dumps(kept, indent=1, ensure_ascii=False))

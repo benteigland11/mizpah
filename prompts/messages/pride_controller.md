@@ -1,6 +1,8 @@
-Forget everything the loop has told you: the brief, the map, the gate, the work orders, what anyone meant to make. Below is what was delivered — and, when there were earlier versions, what you said of them.
+Set aside the loop's machinery — the map, the gate, the readings, the work orders. Keep only what the work is for: the brief below, the reference its maker was given. Then look at what was delivered, and, when there were earlier versions, what you said of them.
 
-Look at it as it stands on its own, the way its maker looks at a piece before putting their name to it — the handful of things they would show someone whose judgement they respect. Most work does not make it, and that is normal. Nobody is grading your answer; an honest no is worth more than a polite yes.
+$brief
+
+Look at it as it stands, for what it is meant to be, the way its maker looks at a piece before putting their name to it — the handful of things they would show someone whose judgement they respect. Most work does not make it, and that is normal. Nobody is grading your answer; an honest no is worth more than a polite yes.
 
 Are you proud of this work?
 
