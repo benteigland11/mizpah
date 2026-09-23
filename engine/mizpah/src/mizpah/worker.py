@@ -2606,8 +2606,21 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             refused, conflicts, merges, unrecorded = still, still_conflicts, still_merges, still_unrecorded
     verdict = ('complete' if gate['ok'] else 'blocked_by_worker' if blocked_reason is not None
                else 'stopped' if status['status'] == 'stopped' else 'incomplete')
+    # Why an incomplete one ended, and what stopped a stopped one, for the trace's closing line (trace notes,
+    # 2026-09-22): the turn cap and three red rounds without progress read the same without it.
+    ended_by = None
+    if verdict == 'incomplete':
+        ended_by = 'turn_cap' if turns(status) >= cap else 'gate_rounds' if stalled >= settings['gate_rounds'] else None
+    stop_note = None
+    if verdict == 'stopped':
+        for place in (root.parent.parent, root.parent.parent.parent, root.parent.parent.parent.parent):
+            try:
+                stop_note = (place/'STOP').read_text().strip()[:300] or 'STOP'
+                break
+            except OSError:
+                continue
     result = dict(task=task['id'], unknown=task['map_id'], unknowns=task_unknown_ids(task), map=map_id, resumed=resuming,
-                  verdict=verdict,
+                  verdict=verdict, ended_by=ended_by, turn_cap=cap, gate_rounds=settings['gate_rounds'], stop_note=stop_note,
                   blocked_reason=blocked_reason, problems=gate['problems'], knowns=gate['knowns'],
                   runs=gate['runs'],
                   turns=turns(status), turn_budget=budget, turn_estimate=estimate, overruns=overruns,
