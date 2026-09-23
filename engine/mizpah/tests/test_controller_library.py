@@ -94,3 +94,17 @@ def test_the_controller_sets_the_order_work_is_taken_in(tmp_path, monkeypatch):
                                                            dict(task='nowhere', priority='p0', why='x')]), observation)
     assert accepted['prioritize'] == [dict(task='render', priority='p3', why='wait for the revision')]
     assert any('nowhere' in r for r in refusals)
+
+
+def test_a_work_order_carries_the_controllers_ask_to_the_worker(tmp_path):
+    observation = dict(brief=dict(needs=['n'], deliverables=['d'], non_goals=[]), knowns=[], tasks=[],
+                       unknowns=[dict(id='anchor', status='open', type='boolean', claim='c', notes='cites need:1')],
+                       widget_library='', methods=[], playbook_store='')
+    ask = 'A quiet shape the eye can rest on for the whole piece; the gradient alone reads as a placeholder.'
+    accepted, _ = controller.guard(dict(tasks=[dict(id='revise', title='Revise', unknowns=['anchor'], bucket='medium',
+                                                   deps=[], ask=ask)]), observation)
+    assert accepted['tasks'][0]['ask'] == ask
+    text = worker.render_assignment(dict(id='revise', bucket='medium', title='Revise'),
+                                    [dict(id='anchor', type='boolean', claim='c', evidence_needed='e', quantity='anchor')], 'm', ask=ask)
+    lines = text.splitlines()
+    assert lines[1] == 'What the controller wants, in its words:' and ask in lines[2] and 'the floor' in lines[3]

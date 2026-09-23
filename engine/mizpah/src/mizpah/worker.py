@@ -315,7 +315,8 @@ def prior_readings(project: Path, unknowns: list[dict[str, Any]]) -> dict[str, d
 
 def render_assignment(task: dict[str, Any], unknowns: list[dict[str, Any]], map_id: str,
                       inputs: dict[str, list[str]] | None = None, state_dirname: str = layout.STATE_DIRNAME,
-                      prior: dict[str, dict[str, Any]] | None = None, brief: dict[str, Any] | None = None) -> str:
+                      prior: dict[str, dict[str, Any]] | None = None, brief: dict[str, Any] | None = None,
+                      ask: str = '') -> str:
     """The task, its unknowns and the map: nothing about method, and of the brief only the entries each unknown
     cites. `inputs` maps an unknown id to the knowns its probe declares; the worker reads them from ctx["inputs"].
     `prior` maps an unknown id to what it last read, when this task is a repair or a re-measure: the delta is
@@ -325,6 +326,12 @@ def render_assignment(task: dict[str, Any], unknowns: list[dict[str, Any]], map_
     in the need the unknown cites, and the worker gets that line, not the brief."""
     lines = ['Route task `'+task['id']+'` (bucket '+task['bucket']+': '+BUCKET_MODES.get(task['bucket'], '')+'): '+task['title'],
              'It resolves '+('one unknown' if len(unknowns) == 1 else str(len(unknowns))+' unknowns')+':']
+    if ask.strip():
+        # The controller's words for what it wants. The unknowns alone were read as the spec: a revision asked for a
+        # visual anchor was "resolved" by sharpening the instrument, and a check for visible text put a word on screen
+        # (social video, 2026-09-23).
+        lines[1:1] = ['What the controller wants, in its words:', *('  '+l for l in ask.strip().splitlines()),
+                      'The unknowns below are how this will be read: the floor the work must clear, not the whole of what is asked.']
     for unknown in unknowns:
         lines += describe_unknown(unknown)
         cited = cited_entries(brief, unknown) if brief else []
@@ -2425,7 +2432,8 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         for u in unknowns:
             u['_measure_exists'] = (project/layout.dirname(project)/'map'/'probes'/(u['id']+'_probe')/'measure.py').exists()
         assignment = render_assignment(task, unknowns, map_id, probe_inputs(project, task), layout.dirname(project),
-                                       prior=prior_readings(project, unknowns), brief=brief)
+                                       prior=prior_readings(project, unknowns), brief=brief,
+                                       ask=(root/'ask.md').read_text() if (root/'ask.md').exists() else '')
         parts = library_parts(config, project, unknowns)
         if parts:
             assignment += ('The library already has parts near this work; install and extend one where it nearly fits '

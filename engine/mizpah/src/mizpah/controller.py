@@ -552,8 +552,8 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
     pride_verdict = observation.get('pride') if mode == 'eval' else None
     if pride_verdict and pride_verdict.get('proud') is False:
         lines.append('  You are not proud of what was delivered. Go down the path that would make you proud: route a new work '
-                     'order that revises it — say what to change, as the music or the image would be changed, and cite the '
-                     'needs it falls short of — building on the artifact and the code that made it. Reopening is for a reading '
+                     'order that revises it — its `ask` says in your words what holds the work back and what would make you '
+                     'proud, and its unknowns cite the needs it falls short of — building on the artifact and the code that made it. Reopening is for a reading '
                      'that no longer stands, not for a new version. A green gate is not done while you are not proud of the work.')
     if delivered and untargeted:
         lines.append('  Judge what has been delivered against the brief. Look at it and at the map\'s readings of it, then for '
@@ -715,6 +715,8 @@ DECIDE_TOOL = dict(type='function', function=dict(name='decide', description=(
             required=['id', 'claim', 'type', 'cites'])),
         tasks=dict(type='array', items=dict(type='object', properties=dict(
             id=_STR, title=_STR, unknowns=dict(type='array', items=_STR),
+            ask=dict(type='string', description='what you want from this work order, in your own words: the result you '
+                     'are after and why; the unknowns say how it will be read, not the whole of it'),
             bucket=dict(type='string', enum=['low', 'medium', 'high']), deps=dict(type='array', items=_STR),
             walk=dict(type='string', description='procedure id, optional'),
             widgets=dict(type='array', items=_STR, description='widget ids, optional')),
@@ -1553,7 +1555,8 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
                             +' not in the widget library (`cartograph search` finds what is); dropped from the work order')
             widgets = [w for w in widgets if w not in unknown_widgets]
         tasks.append(dict(id=tid, title=title, unknowns=ids, unknown=ids[0], bucket=item['bucket'], deps=deps,
-                          enabler=next(iter(carried), ''), walk=walk, walk_from=walk_from, widgets=widgets))
+                          enabler=next(iter(carried), ''), walk=walk, walk_from=walk_from, widgets=widgets,
+                          ask=str(item.get('ask') or '').strip()))
     accepted_ids = existing_tasks | {t['id'] for t in tasks}
     for t in tasks:
         gone = [d for d in t['deps'] if d not in accepted_ids]
@@ -1881,6 +1884,10 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any], root:
             done.setdefault('refused', []).append(t['id']+': '+terra_refusal(error)[:300])
             continue
         done['tasks'].append(t['id'])
+        if t.get('ask') and root is not None:
+            # The controller's own words for what it wants: the worker reads them first (worker.render_assignment).
+            (root/'tasks'/t['id']).mkdir(parents=True, exist_ok=True)
+            (root/'tasks'/t['id']/'ask.md').write_text(t['ask'])
         if t.get('enabler'):
             terra(config, project, 'brief', 'enabler', t['enabler'], 'building')
     for p in accepted['proposals']:

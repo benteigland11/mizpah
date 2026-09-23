@@ -213,7 +213,9 @@ The middle of a brief is three moves in order. **Build**: the deliverables, in d
 
 Read before you decide, and be quick about it: `terra` (read verbs: known, unknown, run, probe show/list; route status/log; gate; map list; sitrep; brief show), `read <path>`, `brief_read <title>`, `result <work order>`; the library through `playbook` (search, load, reach, upstream) and `cartograph` (search, inspect). Follow a red line down to what produced it when you need to; do not re-do the worker's job.
 
-The worker never sees the brief. It receives the work order: the title, each unknown's claim and evidence, the text of the entries the unknown cites, the non-goals. So the work order says the whole thing — name the file, quote the passage, cite every entry that describes what is built.
+Say what you want in each work order's `ask`, in your own words: the result you are after and why. The unknowns are how the work will be read — the floor it must clear, not the whole of what you want; a worker given only readings satisfies the readings.
+
+The worker never sees the brief. It receives the work order: your ask, the title, each unknown's claim and evidence, the text of the entries the unknown cites, the non-goals. So the work order says the whole thing — name the file, quote the passage, cite every entry that describes what is built.
 
 An unknown is one quantity. A list is several unknowns; a universal ("every mark renders") is one boolean, and the per-item numbers are their own when the brief asks for them.
 
@@ -221,7 +223,7 @@ End every step with your notes for the next one: what landed, what you did about
 
 End every step by calling `decide` with one decision object — reading is done with the other tools; minting, routing and every other change happen only in the decision:
 {"unknowns": [{"id": "snake_case", "claim": "...", "evidence_needed": "...", "type": "number|boolean|label|formula|relation", "unit": "...", "cites": "need:1 | deliverable:1 | unknown:<id>", "expression": "formula only", "vars": {"name": "known:<id> (formula only)"}}],
- "tasks": [{"id": "snake_case", "title": "...", "unknowns": ["..."], "bucket": "low|medium|high", "deps": [], "walk": "<procedure id, optional>", "widgets": ["<widget id, optional>"]}],
+ "tasks": [{"id": "snake_case", "title": "...", "ask": "what you want, in your words", "unknowns": ["..."], "bucket": "low|medium|high", "deps": [], "walk": "<procedure id, optional>", "widgets": ["<widget id, optional>"]}],
  "cancel": [{"task": "<id>", "why": "..."}],
  "reopen": [{"task": "<id>", "why": "what no longer stands"}],
  "unblock": [{"task": "<id>", "after": "<done work order that built what was missing>"}],
