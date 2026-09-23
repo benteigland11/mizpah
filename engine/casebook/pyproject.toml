@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "casebook"
+version = "0.1.0"
+description = "Cases as JSON: a problem as it presented, what it turned out to be, what fixed it, and the instances it happened in. Search by the problem."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+casebook = "casebook.cli:main"
+
+[tool.setuptools]
+packages = ["casebook", "casebook.app_paths", "casebook.atomic_write", "casebook.bm25_ngram"]
+
+[tool.setuptools.package-dir]
+"casebook.app_paths" = "cg/infra_app_paths_python/src"
+"casebook.atomic_write" = "cg/infra_atomic_file_write_python/src"
+"casebook.bm25_ngram" = "cg/universal_bm25_ngram_python/src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

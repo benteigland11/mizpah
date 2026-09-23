@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 [manifest]
 members = [
     "cartograph-cli",
+    "casebook",
     "mizpah",
     "mizpah-engine",
     "mizpah-harness",
@@ -147,6 +148,11 @@ wheels = [
 name = "cartograph-cli"
 version = "0.7.24"
 source = { editable = "engine/cartograph" }
+
+[[package]]
+name = "casebook"
+version = "0.1.0"
+source = { editable = "engine/casebook" }
 
 [[package]]
 name = "colorama"
@@ -369,6 +375,7 @@ version = "0.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "cartograph-cli" },
+    { name = "casebook" },
     { name = "mizpah-harness" },
     { name = "playbook" },
     { name = "terra-map" },
@@ -385,6 +392,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "cartograph-cli", editable = "engine/cartograph" },
+    { name = "casebook", editable = "engine/casebook" },
     { name = "mizpah-harness", editable = "engine/harness" },
     { name = "playbook", editable = "engine/playbook" },
     { name = "terra-map", editable = "engine/terra" },
