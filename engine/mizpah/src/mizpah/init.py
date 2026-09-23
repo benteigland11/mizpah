@@ -162,7 +162,10 @@ def init(repo: Path, *, title: str, mission: str, terra: str, require_git: bool 
         if proc.returncode != 0:
             raise SystemExit('terra '+' '.join(args)+' failed: '+(proc.stderr or proc.stdout)[-400:])
     run('init')
-    run('brief', 'init', '--title', title, '--mission', mission)
+    # A mission on `brief init` issues the brief (status active) with nobody's signature: a new task is a draft
+    # until the person signs it (KiCad bench sat in Drafts signed by no one and could not be signed, 2026-09-22).
+    run('brief', 'init', '--title', title)
+    run('brief', 'set', '--mission', mission)
     run('route', 'init')
     out = furnish(repo, title)
     if base is not None:
