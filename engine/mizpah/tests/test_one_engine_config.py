@@ -26,3 +26,19 @@ def test_a_project_carries_its_scaffolding_and_its_seat_its_server_unit(tmp_path
     assert config['mizpah']['scaffolding'] == dict(checkins=False, bootstrap=True)
     assert ops.settings(config)['model_unit'] == 'bonsai2-gpu0.service'
     assert config['session_policy']['context_capacity'] == 65536
+
+
+def test_a_task_keeps_the_crew_it_first_ran_with(tmp_path):
+    engine = tmp_path/'engine.json'
+    harness = tmp_path/'harness.json'
+    harness.write_text(json.dumps(dict(worker=dict(provider='subscription', generation=dict(model='a')),
+                                       controller=dict(provider='subscription', generation=dict(model='a')))))
+    engine.write_text(json.dumps(dict(harness_config='harness.json')))
+    project = tmp_path/'p'
+    (project/'.mizpah').mkdir(parents=True)
+    (project/'.mizpah'/'config.json').write_text(json.dumps(dict(models=dict(worker=dict(generation=dict(model='chosen'))))))
+    init.pin_crew(project, engine)
+    harness.write_text(json.dumps(dict(worker=dict(generation=dict(model='b')), controller=dict(generation=dict(model='b')))))
+    init.main(['pin', '--config', str(engine), str(project)])   # a later default does not move it
+    models = json.loads((project/'.mizpah'/'config.json').read_text())['models']
+    assert models['worker']['generation']['model'] == 'chosen' and models['controller']['generation']['model'] == 'a'

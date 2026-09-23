@@ -332,6 +332,14 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
     project, root = project.resolve(), root.resolve()
     root.mkdir(parents=True, exist_ok=True)
     layout.bind(project)                       # this process's terra calls find the project's tree and brief map
+    # A task keeps the crew it first ran with: a seat the project has not chosen is pinned from this config now,
+    # so a later change of the defaults never swaps the model under a task (a resume on another model cannot
+    # reopen its sessions, and its readings would not be one crew's). A seat already pinned stays.
+    if config.get('mizpah_config_path'):
+        try:
+            init_module.pin_crew(project, Path(config['mizpah_config_path']))
+        except (OSError, ValueError, KeyError):
+            pass
     init_module.apply_project_config(config, project)   # the project's own sandbox settings, if it has any
     journal = root/'controller.jsonl'
     log = root/'errors.jsonl'

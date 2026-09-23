@@ -200,6 +200,16 @@ def project_config(project: Path) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> None:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ['pin']:
+        # `mizpah.init pin --config <engine config> <project>`: lock the crew in before a first start (the app
+        # records it on the brief with the signature). Seats already pinned stay.
+        pin = argparse.ArgumentParser(prog='mizpah.init pin')
+        pin.add_argument('project', type=Path)
+        pin.add_argument('--config', type=Path, required=True)
+        a = pin.parse_args(argv[1:])
+        print(json.dumps(dict(crew=pin_crew(a.project, a.config)), indent=1))
+        return
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     parser.add_argument('repo', nargs='?', default='.')
     parser.add_argument('--gym', action='store_true', help='house the project under the gyms root instead of a repository of yours')
