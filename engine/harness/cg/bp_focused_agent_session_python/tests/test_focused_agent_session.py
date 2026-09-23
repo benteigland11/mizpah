@@ -1836,6 +1836,22 @@ def test_reopen_accepts_another_scratch_root_and_other_refusal_wording(tmp_path)
         FocusedSession.open(root, worker=worker, shell=rebound)
 
 
+def test_reopen_accepts_another_frozen_copy_of_the_same_base(tmp_path):
+    # Each run freezes its base under a name of its own and mounts it at the base's path: the binding is the path.
+    from dataclasses import replace as dc_replace
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, enabled=False, rollover=False)
+    shell.config = dc_replace(shell.config, read_only_binds=('/bases/.snapshots/piano@1-11:/bases/piano',))
+    root = tmp_path/'session'
+    FocusedSession.create(root, settings, worker=worker, shell=shell)
+    later = FixtureShell(tmp_path/'scratch')
+    later.config = dc_replace(later.config, read_only_binds=('/bases/.snapshots/piano@2-22:/bases/piano',))
+    assert FocusedSession.open(root, worker=worker, shell=later).status()['status'] != 'blocked'
+    other = FixtureShell(tmp_path/'scratch')
+    other.config = dc_replace(other.config, read_only_binds=('/bases/.snapshots/sketch@2-22:/bases/sketch',))
+    with pytest.raises(ValueError, match='Reopen requires'):
+        FocusedSession.open(root, worker=worker, shell=other)
+
+
 def test_a_continuation_and_an_interjection_journal_their_text(tmp_path):
     settings, worker, shell, controller, wt, ct = setup(tmp_path, total=1, enabled=False, rollover=False)
     root = tmp_path/'session'

@@ -474,7 +474,19 @@ EVENT_TEXT = 4000   # a continuation's or interjection's text rides in its journ
 
 
 def _shell_binding(saved: dict[str, Any] | None) -> dict[str, Any]:
-    return {k: v for k, v in (saved or {}).items() if k not in HOST_SHELL_KEYS}
+    binding = {k: v for k, v in (saved or {}).items() if k not in HOST_SHELL_KEYS}
+    if isinstance(binding.get('read_only_binds'), list):
+        binding['read_only_binds'] = [_mount_point(b) for b in binding['read_only_binds']]
+    return binding
+
+
+def _mount_point(bind: Any) -> Any:
+    # A frozen copy mounted at its original's path ("<copy>:<path>") is that path to the session: a run freezes its
+    # base under a name of its own (`.snapshots/piano@<stamp>-<pid>`), so every restart named a new copy of the
+    # same base and no saved session reopened after a hold (2026-09-23).
+    if isinstance(bind, str) and ':' in bind and '/.snapshots/' in bind.split(':', 1)[0]:
+        return bind.split(':', 1)[1]
+    return bind
 
 
 def _shell_identity(shell: SandboxedShell) -> dict[str, Any]:
