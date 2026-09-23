@@ -314,11 +314,36 @@ def close_phase(config: dict[str, Any], project: Path, record: dict[str, Any], l
     return bool(outcome.get('closed'))
 
 
+HOST_LIVE = 'host.live.json'
+
+
+def host_step(root: Path, text: str | None) -> None:
+    """What the loop itself is doing between seats, for the app: a step list in `host.live.json`, the last one
+    current; None clears it when a seat takes over. Library ticks, commits, re-taken readings and settled blocks
+    ran for minutes with nothing on any seat (loop handoffs review, 2026-09-22)."""
+    path = root/HOST_LIVE
+    try:
+        if text is None:
+            path.unlink(missing_ok=True)
+            return
+        try:
+            live = json.loads(path.read_text())
+        except (OSError, ValueError):
+            live = dict(started_at=time.time(), steps=[])
+        live['steps'].append(dict(at=time.time(), text=text))
+        live['at'] = time.time()
+        atomic_write_text(path, json.dumps(live))
+    except OSError:
+        pass
+
+
 def failing_step(config: dict[str, Any], project: Path, journal: Path, mode: str, log: Path) -> dict[str, Any]:
     """A controller step that records its own failure instead of ending the run."""
+    host_step(Path(journal).parent, None)   # the controller's seat has it now (controller.live.json)
     try:
         return controller.step(config, project, journal, mode)
     except Exception as error:  # noqa: BLE001 — the run must outlive one bad step
+        (Path(journal).parent/'controller.live.json').unlink(missing_ok=True)   # a failed step is not a live one
         with log.open('a') as handle:
             handle.write(json.dumps(dict(at=time.time(), where='controller:'+mode, error=str(error)[:500],
                                          trace=traceback.format_exc()[-2000:]))+'\n')
@@ -441,13 +466,17 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                 tasks_run += 1
                 try:
                     # One session root per task, so a re-bucketed task resumes its own session.
+                    host_step(root, None)   # a seat has it now
                     result = worker.run_task(config, project, root/'tasks'/task['id'], task['id'])
+                    host_step(root, 'closing work order '+task['id']+' ('+str(result.get('verdict', '?'))+')')
                     if result.get('verdict') == 'complete':
+                        host_step(root, 'ticking the library')
                         ticked = library_tick(config, Path(config['mizpah']['playbook_store']).expanduser())
                         if ticked.get('retired'):
                             result['playbook'] = dict(result.get('playbook') or {}, retired=ticked['retired'])
                             (root/'tasks'/task['id']/'result.json').write_text(json.dumps(result, indent=1))
                     # Whatever the worker filed or improved in the playbook lands as one commit in its name.
+                    host_step(root, 'committing the procedures it filed')
                     commit_procedures(Path(config['mizpah']['playbook_store']).expanduser(),
                                       'work order '+task['id']+' · '+project.name+' ('+result.get('verdict', '?')+')',
                                       author='worker '+str(run_record['crew']['worker'].get('model') or 'model')+' <worker@mizpah>')
@@ -481,7 +510,8 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                 # A task that rewrote a file the map depends on left knowns stale: the host re-takes them now,
                 # before the eval sees a red gate it would otherwise spend a worker session clearing.
                 try:
-                    refreshed = worker.refresh_stale(config, project, root)
+                    host_step(root, 'checking the map for stale readings')
+                    refreshed = worker.refresh_stale(config, project, root, progress=lambda text: host_step(root, text))
                 except Exception as error:  # noqa: BLE001 — a refresh never ends the run
                     refreshed = dict(refreshed=[], changed=[], failed=['refresh: '+str(error)[:200]])
                     with log.open('a') as handle:
@@ -492,8 +522,10 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                     stop = 'stopped_by_operator'
                     break
                 if task.get('enabler_id') and result['verdict'] == 'complete':
+                    host_step(root, 'advancing the enabler')
                     record.setdefault('enablers', []).append(advance_enabler(config, project, task, result, log))
                 if result['verdict'] == 'incomplete':
+                    host_step(root, 'blocking the work order on the route')
                     reason = ('worker budget exhausted' if result['session'] != 'complete' else 'gate rounds exhausted'
                               )+' at '+str(result['turns'])+' turns (safety cap; the worker never blocked itself); gate: '+'; '.join(result['problems'])[:400]
                     current = next((t for t in terra(config, project, 'route', 'status')['tasks'] if t['id'] == task['id']), {})
@@ -511,6 +543,7 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                 elif result['verdict'] == 'blocked_by_worker':
                     # A worker block that resolved some unknowns is settled (task done citing them, the rest marked
                     # blocked with the reason) so dependents can run; a block that resolved nothing stays blocked.
+                    host_step(root, 'settling the block on the route')
                     try:
                         settled = settle_partial_block(config, project, task['id'], str(result['blocked_reason'] or ''))
                     except RuntimeError as error:
@@ -571,6 +604,7 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
         # run_task's finally; the report says so.
         stop = 'interrupted'
     reap('end')
+    host_step(root, None)
     report(stop)
     try:
         if not priorart.benchmark(project):   # a benchmark run is measured, not remembered

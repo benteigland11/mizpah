@@ -1232,7 +1232,7 @@ def remeasure(config: dict[str, Any], project: Path, root: Path, known_ids: list
     return problems
 
 
-def refresh_stale(config: dict[str, Any], project: Path, root: Path) -> dict[str, list[str]]:
+def refresh_stale(config: dict[str, Any], project: Path, root: Path, progress: Any = None) -> dict[str, list[str]]:
     """The host re-takes every global known that went stale because its inputs moved — a file it depends on
     was rewritten, a known its probe declared changed — and, when the fresh reading reproduces the value,
     links the run so the known is live again with its dependencies restamped. A reading that no longer
@@ -1269,8 +1269,10 @@ def refresh_stale(config: dict[str, Any], project: Path, root: Path) -> dict[str
     try:
         workspace = pack_workspace(project, exclude=cache_dirs(config)+scratch_dirs(config)) if bind_mode(config) \
             else pack_workspace(project, exclude=scratch_dirs(config))
-        for row in stale:
+        for i, row in enumerate(stale, start=1):
             known_id = str(row.get('id'))
+            if progress:
+                progress(f're-taking stale reading {i} of {len(stale)}: {known_id}')
             record = row.get('record') or {}
             probe_id = (record.get('probe_ids') or [None])[0]
             if not probe_id:

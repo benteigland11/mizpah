@@ -1857,10 +1857,10 @@ def close_ready_phase(config: dict[str, Any], project: Path) -> dict[str, Any] |
 
 def decide_through_outages(client: Any, config: dict[str, Any], system: str, user: str, wait_seconds: int = 300, project: Path | None = None, root: Path | None = None,
                            health: Any = None):
-    """A model server that is restarting is waited for (its supervisor brings it back in seconds), not a failed step."""
+    """A model that drops the call is waited for under the controller's patience streak, not a failed step."""
     from cg.backend_persistent_model_session_python.src.persistent_model_session import ModelTransportError, RejectedGeneration
     from . import ops
-    outages = 0
+    failures = ops.streak(config, role='controller')
     while True:
         try:
             return decide(client, config, system, user, project=project, root=root)
@@ -1868,22 +1868,8 @@ def decide_through_outages(client: Any, config: dict[str, Any], system: str, use
             raise
         except ModelTransportError as error:
             run_root = Path(config['mizpah'].get('run_root') or '.')
-            host = ops.provider_host(config['controller'], config)
-            if not ops.network_reachable(host):
-                # No route to the host: the network's outage, not the model's; waited for, not counted.
-                ops.record_outage(run_root, 'controller', config['controller'], error, outages, task='briefing',
-                                  action='the network is down; waiting for it, not counted')
-                if not (health or ops.Health(config, run_root)).wait_for_network(host):
-                    raise
-                continue
-            outages += 1
-            delay = ops.backoff_seconds(outages, cap=wait_seconds)
-            ops.record_outage(run_root, 'controller', config['controller'], error, outages, task='briefing', waited_seconds=delay,
-                              action='the briefing is asked for again after '+str(int(delay))+' s' if outages <= 5 else 'the sixth in a row: the step fails')
-            if outages > 5:
-                raise
-            checker = health or ops.Health(config, run_root)
-            if not checker.wait_for_model((config['controller'].get('endpoint') or {}).get('base_url'), wait_seconds=wait_seconds, attempt=outages):
+            if not ops.ride_out(failures, error, role='controller', spec=config['controller'], config=config, root=run_root,
+                                health=health or ops.Health(config, run_root), task='briefing'):
                 raise
 
 
@@ -1929,6 +1915,13 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
                               cost_ticks=u.get('cost_in_usd_ticks')))
     previous_observer = getattr(client, 'observer', None)
     client.observer = (lambda k, p: (observe_usage(k, p), previous_observer(k, p) if previous_observer else None)[0])
+    # Live from its first moment: reading the brief, the map and the route (the library too) took minutes with
+    # nothing on the seat until the first model call wrote the live file.
+    try:
+        (Path(journal).parent/'controller.live.json').write_text(json.dumps(dict(
+            phase='reading the map', started_at=time.time(), at=time.time(), model_calls=0, user='', tools=[])))
+    except OSError:
+        pass
     observation = observe(config, project)
     record_decisions(Path(journal).parent, (observation.get('brief') or {}).get('decided') or [])
     notes = operator_notes(Path(journal).parent)

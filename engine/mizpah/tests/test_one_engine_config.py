@@ -66,3 +66,13 @@ def test_a_restarted_work_order_says_why(tmp_path):
     assert worker.restart_reason(root, task, 'high', None, {'call': 1})[0] == 'resumed'
     (root/'reopen.md').write_text('the reading no longer stands')
     assert worker.restart_reason(root, task, 'high', None, None) is None
+
+
+def test_the_host_says_what_it_is_doing_between_seats(tmp_path):
+    from mizpah import loop
+    loop.host_step(tmp_path, 'closing work order w (complete)')
+    loop.host_step(tmp_path, 're-taking stale reading 1 of 2: grid_lock')
+    live = json.loads((tmp_path/'host.live.json').read_text())
+    assert [s['text'] for s in live['steps']] == ['closing work order w (complete)', 're-taking stale reading 1 of 2: grid_lock']
+    loop.host_step(tmp_path, None)
+    assert not (tmp_path/'host.live.json').exists()
