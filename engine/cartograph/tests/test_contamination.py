@@ -3147,3 +3147,20 @@ class TestFlutterSpecific:
                       "void pause(Duration d) { sleep(d); }\n")
         assert any("sleep" in w.lower() for w in result["warnings"]), \
             f"non-literal sleep in tests must warn (unknown duration): {result}"
+
+
+def test_a_declared_package_is_honoured_without_being_installed(tmp_path):
+    """Any pip package may be a dependency once declared: the validator's own interpreter need not have it.
+    Pillow provides PIL; an import a declared-but-absent package might provide is a warning, not a block."""
+    from cartograph.languages.python import PythonEngine
+    src = tmp_path/"src"
+    src.mkdir()
+    (src/"frame.py").write_text("from PIL import Image\nimport some_unknown_module\n")
+    lang = PythonEngine()
+    pillow = lang.scan_contamination(str(tmp_path), {"dependencies": ["Pillow>=9.0"]})
+    assert not any("'pil'" in f for f in pillow["blocks"] + pillow["warnings"])
+    bare = lang.scan_contamination(str(tmp_path), {"dependencies": []})
+    assert any("'pil'" in b for b in bare["blocks"]) and any("'some_unknown_module'" in b for b in bare["blocks"])
+    absent = lang.scan_contamination(str(tmp_path), {"dependencies": ["not-installed-anywhere-pkg"]})
+    assert not any("some_unknown_module" in b for b in absent["blocks"])
+    assert any("some_unknown_module" in w and "not-installed-anywhere-pkg" in w for w in absent["warnings"])

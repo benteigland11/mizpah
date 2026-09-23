@@ -180,6 +180,18 @@ class PythonEngine(LanguageEngine):
         return lines
 
     _STDLIB = sys.stdlib_module_names
+    # Import names a pip package provides when they differ from its name (lower case), known without installing it.
+    _KNOWN_MODULES = {
+        "pillow": {"pil"}, "opencv-python": {"cv2"}, "opencv-python-headless": {"cv2"},
+        "opencv-contrib-python": {"cv2"}, "pyyaml": {"yaml"}, "scikit-learn": {"sklearn"},
+        "scikit-image": {"skimage"}, "beautifulsoup4": {"bs4"}, "python-dateutil": {"dateutil"},
+        "python-docx": {"docx"}, "python-pptx": {"pptx"}, "pymupdf": {"fitz", "pymupdf"},
+        "pycryptodome": {"crypto"}, "protobuf": {"google"}, "attrs": {"attr", "attrs"}, "pyserial": {"serial"},
+        "pyzmq": {"zmq"}, "pyjwt": {"jwt"}, "python-magic": {"magic"}, "pycairo": {"cairo"}, "pygobject": {"gi"},
+        "msgpack-python": {"msgpack"}, "python-multipart": {"multipart"}, "google-cloud-storage": {"google"},
+        "faiss-cpu": {"faiss"}, "tensorflow-cpu": {"tensorflow"}, "psycopg2-binary": {"psycopg2"},
+        "mysqlclient": {"mysqldb"}, "pyopengl": {"opengl"}, "pywin32": {"win32api", "win32con", "pywintypes"},
+    }
     _TEST_FRAMEWORKS = {"pytest", "hypothesis", "faker", "mock", "unittest"}
     _ENVVAR_RE = re.compile(r'os\.getenv\(|os\.environ')
     _SLEEP_MODULES = {"time", "asyncio"}
@@ -204,16 +216,28 @@ class PythonEngine(LanguageEngine):
 
         # Map declared pip packages → top-level import names they provide.
         # Handles python-docx → docx, Pillow → PIL, beautifulsoup4 → bs4, etc.
-        # Falls back to raw dep name when metadata isn't available (dep not installed).
-        provided_modules = set(dep_names)
+        # Any pip package may be a dependency; the rule is only that it is declared. The metadata lookup knows
+        # only what is installed in the interpreter running the validator, so the same widget passed in a
+        # sandbox that had Pillow and was blocked on a host that did not ("Unlisted import 'pil'", 2026-09-23).
+        # The well-known aliases are known without installing anything, and a declared package that is not
+        # installed here cannot be ruled out: an import it might provide is a warning, not a block.
+        provided_modules = set(dep_names) | {d.replace("-", "_") for d in dep_names}
+        for dep in dep_names:
+            provided_modules |= self._KNOWN_MODULES.get(dep.replace("_", "-"), set())
+        unverified: set[str] = set()
         try:
-            from importlib.metadata import packages_distributions
+            from importlib.metadata import PackageNotFoundError, distribution, packages_distributions
             mod_to_pkgs = packages_distributions()
             for mod, pkgs in mod_to_pkgs.items():
                 if any(p.lower() in dep_names for p in pkgs):
                     provided_modules.add(mod.lower())
+            for dep in dep_names:
+                try:
+                    distribution(dep)
+                except PackageNotFoundError:
+                    unverified.add(dep)
         except Exception:
-            pass
+            unverified = set(dep_names)
 
         own_modules = {"src"}
         src_dir = os.path.join(path, "src")
@@ -329,20 +353,23 @@ class PythonEngine(LanguageEngine):
             # a local src module, or a test framework will fail to install for
             # users. Not overridable - fix is always trivial (add to deps or
             # remove).
-            unlisted_sink = blocks if is_src else warnings
+            unlisted_sink = blocks if is_src and not unverified else warnings
+            unlisted_hint = ("add to dependencies or remove" if not unverified else
+                             "add to dependencies or remove, unless a declared dependency not installed here provides it ("
+                             + ", ".join(sorted(unverified)) + ")")
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
                     for alias in node.names:
                         top = alias.name.split(".")[0].lower()
                         if top and top not in self._STDLIB and top not in provided_modules and top not in own_modules and top not in self._TEST_FRAMEWORKS:
                             unlisted_sink.append(
-                                f"Unlisted import '{top}' in {rel}:{node.lineno} - add to dependencies or remove"
+                                f"Unlisted import '{top}' in {rel}:{node.lineno} - {unlisted_hint}"
                             )
                 elif isinstance(node, ast.ImportFrom) and node.module:
                     top = node.module.split(".")[0].lower()
                     if top and top not in self._STDLIB and top not in provided_modules and top not in own_modules and top not in self._TEST_FRAMEWORKS:
                         unlisted_sink.append(
-                            f"Unlisted import '{top}' in {rel}:{node.lineno} - add to dependencies or remove"
+                            f"Unlisted import '{top}' in {rel}:{node.lineno} - {unlisted_hint}"
                         )
 
             # Remaining AST checks are src/ only
