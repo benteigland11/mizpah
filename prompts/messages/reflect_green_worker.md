@@ -1,4 +1,4 @@
-The gate is green. The work order is done and what it produced stands — this is the moment to encode what you learned, while the work is still in front of you and before the library takes it.
+$reopenThe gate is green. The work order is done and what it produced stands — this is the moment to encode what you learned, while the work is still in front of you and before the library takes it.
 
 - The procedure you walked: edit it. Add the step it was missing, rewrite a step that turned out to be a command as the thing it was checking (`playbook add-step` / `edit-step`). You walked it; nobody is better placed to say where it was wrong.
 - Finish any extraction you started. A stretch of a procedure that turned out to be its own kind of work comes out: `playbook create` it as its own procedure, `remove-step` it from the one you opened, `add-step` the link where it was, then close your walk by skipping what is left with the name of what you made. A procedure that keeps every lesson every work order learned is one nobody after you can walk.

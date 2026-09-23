@@ -1,7 +1,7 @@
 """One engine config for every model: the project's pinned seat carries what used to need a file per model."""
 import json
 
-from mizpah import init, ops
+from mizpah import init, ops, worker
 
 
 def test_a_seat_with_a_smaller_window_fits_the_session_to_it():
@@ -76,3 +76,49 @@ def test_the_host_says_what_it_is_doing_between_seats(tmp_path):
     assert [s['text'] for s in live['steps']] == ['closing work order w (complete)', 're-taking stale reading 1 of 2: grid_lock']
     loop.host_step(tmp_path, None)
     assert not (tmp_path/'host.live.json').exists()
+
+
+def test_a_resumed_landing_takes_the_projects_state_directory(tmp_path):
+    """After a landing the controller reopened the route entry on the project; the session's saved copy still said
+    done. The resume takes the project's state directory; the worker's own state directories are not touched."""
+    from mizpah import layout
+    project = tmp_path/'p'
+    state = project/layout.dirname(project)
+    (state/'map').mkdir(parents=True)
+    (state/'route.json').write_text('{"tasks": [{"id": "compose", "status": "in_progress"}]}')
+    (state/'map'/'map.json').write_text('{}')
+    (project/'piece.mid').write_bytes(b'x')
+
+    class Session:
+        def replace_state(self, prefix, members):
+            self.called = (prefix, members)
+            return dict(prefix=prefix, replaced=len(members))
+    session = Session()
+    out = worker.refresh_project_state(session, project)
+    prefix, members = session.called
+    assert prefix == layout.dirname(project) and out['replaced'] == 2
+    assert b'in_progress' in members[prefix+'/route.json'] and 'piece.mid' not in members
+
+
+def test_the_green_after_a_reopen_reflects_on_what_the_reopen_asked(tmp_path):
+    root = tmp_path/'task'
+    root.mkdir()
+    assert worker.reopen_lesson(root) == ''
+    (root/'reopen.delivered.md').write_text('the left hand never changes job')
+    lesson = worker.reopen_lesson(root)
+    assert lesson.startswith('This work order was reopened') and '> the left hand never changes job' in lesson
+
+
+def test_a_hold_after_route_complete_is_resumed_not_skipped(tmp_path, monkeypatch):
+    from mizpah import loop
+    root = tmp_path/'sess'
+    for task, verdict in (('held', 'stopped'), ('landed', 'complete'), ('killed', None)):
+        (root/'tasks'/task).mkdir(parents=True)
+        (root/'tasks'/task/'state.sqlite3').write_text('')
+        if verdict:
+            (root/'tasks'/task/'result.json').write_text(json.dumps(dict(verdict=verdict)))
+    route = [dict(id=t, status='done') for t in ('held', 'landed', 'killed')]
+    monkeypatch.setattr(loop, 'terra', lambda config, project, *args: dict(tasks=route if 'status' in args else []))
+    monkeypatch.setattr(loop.controller, 'ready_order', lambda project, tasks: [])
+    picked = [t['id'] for t in loop.pickable(dict(mizpah=dict(agent='a')), tmp_path, root)]
+    assert picked == ['held', 'killed']

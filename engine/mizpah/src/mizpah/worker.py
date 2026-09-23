@@ -2215,6 +2215,30 @@ def mark_restart(session: Any, root: Path, task: dict[str, Any], bucket_before: 
         session.mark(*reason)
 
 
+def refresh_project_state(session: Any, project: Path) -> dict[str, Any]:
+    """After a landing, the project's state directory is newer than the session's saved copy of it: the round's
+    writeback put the worker's own work there, and the controller then reopened the route entry and the unknowns.
+    A resumed session re-seeds the sandbox from its saved copy, so the worker saw its task still `done` and had to
+    `terra route reopen` it itself before it could complete (romantic piano, both reopens, 2026-09-23). Take the
+    project's state directory as it is now; the worker's own state directories (.playbook, .svc, history) stay."""
+    prefix = layout.dirname(project)
+    members = {name: data for name, data in _members(pack_workspace(project, only=(prefix,))).items()
+               if name.startswith(prefix+'/')}
+    return session.replace_state(prefix, members)
+
+
+def reopen_lesson(root: Path) -> str:
+    """The opening of the green reflection when this round answered a reopen: the controller's reason, which is the
+    lesson most worth recording — the reflection used to come before the controller had looked at all."""
+    delivered = root/'reopen.delivered.md'
+    why = delivered.read_text().strip() if delivered.exists() else ''
+    if not why:
+        return ''
+    return ('This work order was reopened, and you have now answered it. The reason it was reopened:\n\n> '
+            + why.replace('\n', '\n> ') + '\n\nWhat you changed to answer that, and why it worked, is the most valuable '
+            'thing to record: it is what the first round did not know.\n\n')
+
+
 def archive_report(root: Path) -> Path | None:
     """A reopened work order's last report becomes history (result.<n>.json): result.json is the report of the
     round that is landing, so its absence says the work order is live. Left in place, the app read a released
@@ -2276,6 +2300,8 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             session = FocusedSession.open(root, worker=worker_client, shell=shell, controller=checkin,
                                           shared_workspaces=shared_workspaces(root))
         discarded = session.discard_pending()  # a killed run leaves an uncommitted call; nothing is replayed
+        if archived is not None and bind_mode(config):
+            refresh_project_state(session, project)
         mark_restart(session, root, task, bucket_before, archived, discarded)
         if bucket_before != task.get('bucket'):
             saved['task'] = dict(saved['task'], bucket=task.get('bucket'))
@@ -2351,6 +2377,10 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             elif status_now['phase'] == 'worker' and status_now['pending_io'] is None:
                 session.interject(text, label='reopened')
             reopen.rename(root/'reopen.delivered.md')
+            # A reopen is a new round with its own lesson: the green after it reflects again (the mark kept every
+            # rewrite of the romantic piano from recording what the controller's critique taught, 2026-09-23).
+            (root/REFLECTED_MARK).unlink(missing_ok=True)
+            (root/WRITEUP_MARK).unlink(missing_ok=True)
         nudge = root/'nudge.md'
         if nudge.exists() and nudge.read_text().strip():
             status_now = session.status()
@@ -2545,7 +2575,8 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         if not (root/REFLECTED_MARK).exists():
             from . import prompts as _prompts
             (root/REFLECTED_MARK).write_text(str(turns(status)))
-            session.continue_with(_prompts.message('reflect_green_worker'), label='gate green: record the method')
+            session.continue_with(_prompts.message('reflect_green_worker', reopen=reopen_lesson(root)),
+                                  label='gate green: record the method')
             status = run_through_outages(session, config, root, maximum_worker_turns=max(1, budget-turns(status)))
             session.prune_workspaces()
         widgets = harvest_widgets(evidence(session), root, config, project)

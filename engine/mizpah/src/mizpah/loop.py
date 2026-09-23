@@ -53,11 +53,21 @@ def pickable(config: dict[str, Any], project: Path, root: Path | None = None) ->
         # Done on the route with a session that never reported (killed after `route complete`, in the review or
         # the write-up): resumed first, so the write-up lands instead of being skipped for the next task.
         # (Terra clears owner_agent on completion; the session under this root is the proof it was ours.)
+        # A hold writes a `stopped` report; that is a pause, not a landing (a hold after the worker's `route complete`
+        # skipped the romantic piano's fourth version straight to render, never reviewed, 2026-09-23).
         unreported = [t for t in terra(config, project, 'route', 'status')['tasks'] if t.get('status') == 'done'
                       and (root/'tasks'/t['id']/'state.sqlite3').exists()
-                      and not (root/'tasks'/t['id']/'result.json').exists()]
+                      and _report_verdict(root/'tasks'/t['id']) in (None, 'stopped')]
         resumable = unreported+resumable
     return resumable+controller.ready_order(project, tasks)
+
+
+def _report_verdict(task_root: Path) -> str | None:
+    """The verdict of a work order's report, or None when it has not reported."""
+    try:
+        return json.loads((task_root/'result.json').read_text()).get('verdict')
+    except (OSError, ValueError):
+        return None
 
 
 def blocked(config: dict[str, Any], project: Path) -> list[dict[str, Any]]:
