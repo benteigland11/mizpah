@@ -689,6 +689,45 @@ CONTROLLER_TOOLS = [
          parameters=dict(type='object', properties=dict(args=dict(type='string', description='the words after `cartograph`')), required=['args']))),
 ]
 LIBRARY_READ_VERBS = dict(playbook={'search', 'load', 'reach', 'upstream'}, cartograph={'search', 'inspect'})
+# Terra verbs that change the map or the route: a local controller tried `terra unknown mint …` a dozen times in one step
+# (Bonsai, design, 2026-09-22); the refusal says where minting happens.
+WRITE_WORDS = {'mint', 'create', 'add', 'set', 'complete', 'adopt', 'graduate', 'status', 'delete', 'cancel', 'reopen', 'block',
+               'unblock', 'link-run', 'link-probe', 'promote', 'land', 'ladder', 'supersede', 'retire', 'retype', 'start'}
+
+_STR = dict(type='string')
+_WHY_ITEMS = lambda key: dict(type='array', items=dict(type='object', properties={key: _STR, 'why': _STR}, required=[key, 'why']))
+# The step's decision as a tool call. A decision written as JSON in the reply was the one protocol a local model could
+# not keep: Bonsai answered in prose ("Decided. The map is empty…") or a Python dict and lost the step, while its
+# reading of the map was right (landing, design, 2026-09-22). As a tool the call has a schema the server can hold the
+# model to; hosted models, which never failed the JSON, lose nothing, and a JSON reply is still read.
+DECIDE_TOOL = dict(type='function', function=dict(name='decide', description=(
+    'End the step with your decision: the unknowns and work orders you route, what you cancel, reopen, unblock, rebucket '
+    'or retire, your proposals, your notes for the next step (memory) and one sentence why. Leave out what you do not '
+    'use; an empty decision is right when the route already covers everything red names. Minting happens here, never '
+    'through `terra`.'),
+    parameters=dict(type='object', properties=dict(
+        unknowns=dict(type='array', items=dict(type='object', properties=dict(
+            id=_STR, claim=_STR, evidence_needed=_STR,
+            type=dict(type='string', enum=['number', 'boolean', 'label', 'formula', 'relation']),
+            unit=_STR, cites=dict(type='string', description='need:N, deliverable:N or unknown:<id>'),
+            expression=dict(type='string', description='formula only'),
+            vars=dict(type='object', description='formula only: name -> known:<id>')),
+            required=['id', 'claim', 'type', 'cites'])),
+        tasks=dict(type='array', items=dict(type='object', properties=dict(
+            id=_STR, title=_STR, unknowns=dict(type='array', items=_STR),
+            bucket=dict(type='string', enum=['low', 'medium', 'high']), deps=dict(type='array', items=_STR),
+            walk=dict(type='string', description='procedure id, optional'),
+            widgets=dict(type='array', items=_STR, description='widget ids, optional')),
+            required=['id', 'title', 'unknowns', 'bucket'])),
+        cancel=_WHY_ITEMS('task'), reopen=_WHY_ITEMS('task'), retire=_WHY_ITEMS('unknown'),
+        unblock=dict(type='array', items=dict(type='object', properties=dict(task=_STR, after=_STR), required=['task', 'after'])),
+        rebucket=dict(type='array', items=dict(type='object', properties=dict(
+            task=_STR, bucket=dict(type='string', enum=['medium', 'high']), why=_STR), required=['task', 'bucket', 'why'])),
+        proposals=dict(type='array', items=dict(type='object')),
+        done=dict(type='boolean', description='true only when nothing is owed to the brief'),
+        memory=dict(type='string', description='your notes for the next step: what landed, what you did, what you watch for'),
+        why=dict(type='string', description='one sentence')),
+        required=['memory', 'why'])))
 
 
 def run_tool(config: dict[str, Any], project: Path, root: Path | None, name: str, args: dict[str, Any]) -> str:
@@ -698,7 +737,9 @@ def run_tool(config: dict[str, Any], project: Path, root: Path | None, name: str
             words = [w for w in str(args.get('args') or '').split() if w]
             head = tuple(words[:2]) if len(words) >= 2 and (words[0], words[1]) in TERRA_READ_VERBS else tuple(words[:1])
             if head not in TERRA_READ_VERBS or any(w in ('--force', '>', '|', ';', '&&') for w in words):
-                return 'refused: `terra '+' '.join(words)[:80]+'` is not a read verb of the controller (known/unknown/run/probe show|list, route status|log, gate, map list|status, sitrep, brief show)'
+                hint = (' — the controller changes nothing through `terra`: put new unknowns and work orders in your `decide` call'
+                        if set(words[:2]) & WRITE_WORDS else '')
+                return 'refused: `terra '+' '.join(words)[:80]+'` is not a read verb of the controller (known/unknown/run/probe show|list, route status|log, gate, map list|status, sitrep, brief show)'+hint
             text = json.dumps(terra(config, project, *words), indent=1)
         elif name == 'read':
             rel = str(args.get('path') or '').strip()
@@ -744,6 +785,35 @@ def run_tool(config: dict[str, Any], project: Path, root: Path | None, name: str
 _last_tools: list[list[dict[str, Any]]] = [[]]
 
 
+def decision_call(calls: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The decision, when one of the model's tool calls is `decide`: its arguments, parsed."""
+    for call in calls:
+        fn = call.get('function') or {}
+        if fn.get('name') != 'decide':
+            continue
+        args = fn.get('arguments')
+        if isinstance(args, dict):
+            return args
+        try:
+            value = json.loads(args or '{}')
+        except ValueError:
+            start, end = str(args).find('{'), str(args).rfind('}')
+            value = json.loads(str(args)[start:end+1]) if 0 <= start < end else {}
+        return value if isinstance(value, dict) else {}
+    return None
+
+
+def has_json_object(text: str) -> bool:
+    start, end = text.find('{'), text.rfind('}')
+    if start < 0 or end < start:
+        return False
+    try:
+        json.JSONDecoder().raw_decode(text[start:])
+        return True
+    except ValueError:
+        return False
+
+
 def decide(client: ModelClient, config: dict[str, Any], system: str, user: str,
            project: Path | None = None, root: Path | None = None) -> tuple[dict[str, Any], str]:
     """The controller's step: read what it needs with its verbs, then one JSON decision. Every call is kept for
@@ -759,6 +829,7 @@ def decide(client: ModelClient, config: dict[str, Any], system: str, user: str,
     # five minutes on an empty map (landing, 2026-09-22): seven refused shell pipes and invented ids, `probe list`
     # three times. A model that reads like a person never trips it.
     empty_run = 0
+    nudged = False
 
     def live(phase: str) -> None:
         # The step as it stands, for a watcher: the journal gets the record when the step ends, and a first step on
@@ -775,11 +846,22 @@ def decide(client: ModelClient, config: dict[str, Any], system: str, user: str,
         payload = dict(config['controller']['generation'], messages=messages,
                        max_tokens=config['mizpah'].get('controller_output_tokens', 8192))
         if project is not None:
-            payload['tools'] = CONTROLLER_TOOLS
+            payload['tools'] = CONTROLLER_TOOLS+[DECIDE_TOOL]
         live('model')
         response = client.complete(payload, 'controller')
         message = parse_turn(response).message
         wanted = message.get('tool_calls') or []
+        decided = decision_call(wanted)
+        if decided is not None:
+            _last_reasoning[0] = (message.get('reasoning_content') or '').strip()
+            return decided, json.dumps(decided, ensure_ascii=False)
+        if not wanted and project is not None and not nudged and not has_json_object(message.get('content') or ''):
+            # A reply with neither a read nor a decision (a local model's prose "Decided. …"): asked once, in the same
+            # step, before it costs the step a refused attempt.
+            nudged = True
+            messages.append(dict(role='assistant', content=message.get('content') or ''))
+            messages.append(dict(role='user', content='End the step by calling `decide` with your decision.'))
+            continue
         if not wanted or project is None:
             break
         messages.append(dict(role='assistant', content=message.get('content') or '', tool_calls=wanted))
@@ -806,8 +888,13 @@ def decide(client: ModelClient, config: dict[str, Any], system: str, user: str,
         if len(calls) >= ceiling or empty_run >= 3:
             messages.append(dict(role='user', content=('That is '+str(ceiling)+' reads' if len(calls) >= ceiling else
                                  'The last three reads brought nothing new')+'; decide now with what you have.'))
-            payload = dict(config['controller']['generation'], messages=messages, max_tokens=config['mizpah'].get('controller_output_tokens', 8192))
+            payload = dict(config['controller']['generation'], messages=messages, max_tokens=config['mizpah'].get('controller_output_tokens', 8192),
+                           tools=[DECIDE_TOOL])
             message = parse_turn(client.complete(payload, 'controller')).message
+            decided = decision_call(message.get('tool_calls') or [])
+            if decided is not None:
+                _last_reasoning[0] = (message.get('reasoning_content') or '').strip()
+                return decided, json.dumps(decided, ensure_ascii=False)
             break
     content = (message.get('content') or '').strip()
     # The model's own account of why, when the provider returns one (a reasoning summary, or a local

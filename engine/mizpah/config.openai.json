@@ -123,6 +123,24 @@
       "models_path": "/v1/models",
       "token_count": "tokenize_endpoint",
       "default_model": "nemotron-3.5-lightning"
+    },
+    "ornith": {
+      "name": "ornith",
+      "display_name": "Ornith 1.5 35B-A3B (local)",
+      "auth": {
+        "kind": "none"
+      },
+      "api_base_url": "http://127.0.0.1:58083",
+      "wire": "chat_completions",
+      "models": [],
+      "reasoning_efforts": [],
+      "context_window": 102400,
+      "timeout_seconds": 900,
+      "local_kind": "llama",
+      "completion_path": "/v1/chat/completions",
+      "models_path": "/v1/models",
+      "token_count": "tokenize_endpoint",
+      "default_model": "ornith-1.5"
     }
   }
 }

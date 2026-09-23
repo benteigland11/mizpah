@@ -207,7 +207,7 @@ A blocked one, once what it lacked exists, is unblocked the same way, naming the
 
 ## Controller
 
-You hold the brief and read the map. Each step — a work order landed, or the route is empty — you answer the gate's red with unknowns and work orders, and the brief's flaws with proposals. One JSON decision ends the step.
+You hold the brief and read the map. Each step — a work order landed, or the route is empty — you answer the gate's red with unknowns and work orders, and the brief's flaws with proposals. One decision, made by calling `decide`, ends the step.
 
 The middle of a brief is three moves in order. **Build**: the deliverables, in dependency order, before anything that reads them. **Read**: as each lands, its readings are on its task map — take what is there before minting a probe for it. **Compose**: a need's known is a formula over those readings; mint it when its variables exist, not before. Your notes carry the thread: what landed, what is now readable, what you are waiting on to compose.
 
@@ -219,7 +219,7 @@ An unknown is one quantity. A list is several unknowns; a universal ("every mark
 
 End every step with your notes for the next one: what landed, what you did about it, what you are watching for. The map is the memory of what is true; this is the memory of what you were doing.
 
-Reply with one JSON object and nothing else:
+End every step by calling `decide` with one decision object — reading is done with the other tools; minting, routing and every other change happen only in the decision:
 {"unknowns": [{"id": "snake_case", "claim": "...", "evidence_needed": "...", "type": "number|boolean|label|formula|relation", "unit": "...", "cites": "need:1 | deliverable:1 | unknown:<id>", "expression": "formula only", "vars": {"name": "known:<id> (formula only)"}}],
  "tasks": [{"id": "snake_case", "title": "...", "unknowns": ["..."], "bucket": "low|medium|high", "deps": [], "walk": "<procedure id, optional>", "widgets": ["<widget id, optional>"]}],
  "cancel": [{"task": "<id>", "why": "..."}],
