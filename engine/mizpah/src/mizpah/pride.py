@@ -126,12 +126,31 @@ def render(path: Path, scratch: Path) -> tuple[str, list[dict[str, Any]]]:
     return f'{head}\n({suffix or "extensionless"} file of {path.stat().st_size:,} bytes; not shown)', []
 
 
-def judge(client: Any, config: dict[str, Any], files: list[Path]) -> dict[str, Any]:
-    """The fresh conversation: the assets and the question, nothing else."""
+HISTORY_LOOKS = 3
+
+
+def history_text(earlier: list[dict[str, Any]]) -> str:
+    """The last few looks at earlier versions, as the judge's context: what was said, not what to say. Without them
+    every look was the first, and a judge that named the same shortfall four times could not say the idea itself
+    was the limit (the social video, 2026-09-23). Knowing the effort did not soften the judges in the review of 42
+    deliverables; knowing its own earlier verdicts is the same kind of context."""
+    looks = [v for v in earlier if v.get('proud') is not None][-HISTORY_LOOKS:]
+    if not looks:
+        return ''
+    lines = ['Earlier looks at earlier versions of this work, oldest first. The work has changed since each of them; they '
+             'are context, not a verdict to repeat or to soften. Judge what is here now.']
+    for n, v in enumerate(looks, 1):
+        lines.append(f'{n}. {"proud" if v.get("proud") else "not proud"}. ' + ' '.join(
+            str(v[k]) for k in ('why', 'holds_it_back') if v.get(k)))
+    return '\n'.join(lines)+'\n\n'
+
+
+def judge(client: Any, config: dict[str, Any], files: list[Path], earlier: list[dict[str, Any]] = ()) -> dict[str, Any]:
+    """The fresh conversation: the assets, the question and the last few looks at earlier versions, nothing else."""
     from cg.backend_persistent_model_session_python.src.persistent_model_session import parse_turn
     with tempfile.TemporaryDirectory() as scratch:
         parts = [render(p, Path(scratch)) for p in files]
-        text = prompts.message('pride_controller', assets='\n\n'.join(t for t, _ in parts))
+        text = prompts.message('pride_controller', assets='\n\n'.join(t for t, _ in parts), history=history_text(list(earlier)))
         images = [image for _, imgs in parts for image in imgs]
         content: Any = [dict(type='text', text=text)]+images if images else text
         payload = dict(config['controller']['generation'], messages=[dict(role='user', content=content)],
@@ -163,7 +182,7 @@ def review(client: Any, config: dict[str, Any], project: Path, root: Path | None
             kept = {}
     if key in kept:
         return dict(kept[key], files=[p.name for p in files], fresh=False)
-    verdict = judge(client, config, files)
+    verdict = judge(client, config, files, list(kept.values()))
     if kept_path is not None and verdict.get('proud') is not None:
         kept[key] = verdict
         kept_path.write_text(json.dumps(kept, indent=1, ensure_ascii=False))

@@ -74,3 +74,19 @@ def test_not_proud_leads_what_is_asked(gym: Path):  # noqa: F811
     text = controller.render_observation(observation, 'eval')
     assert 'You are proud of it' in text and 'You are not proud' not in text
 
+
+
+def test_the_judge_sees_its_last_three_looks_as_history(tmp_path):
+    prompts.set_messages_dir(PROMPTS)
+    (tmp_path/'video.md').write_text('v1')
+    root = tmp_path/'sess'
+    root.mkdir()
+    client = Client('{"proud": false, "why": "one visual idea", "holds_it_back": "the ending just stops"}')
+    config = dict(controller=dict(generation={}), mizpah={})
+    brief = dict(deliverables=['video.md'])
+    for n in range(1, 6):
+        (tmp_path/'video.md').write_text(f'v{n}')
+        pride.review(client, config, tmp_path, root, brief)
+    first, last = client.calls[0]['messages'][0]['content'], client.calls[-1]['messages'][0]['content']
+    assert 'Earlier looks' not in first
+    assert last.count('not proud. one visual idea') == 3 and 'context, not a verdict to repeat' in last
