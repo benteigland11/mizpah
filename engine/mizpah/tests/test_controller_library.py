@@ -81,3 +81,16 @@ def test_a_seat_sets_its_own_output_cap():
     base = dict(mizpah=dict(controller_output_tokens=8192))
     assert controller.output_tokens(dict(base, controller=dict(output_tokens=-1))) == 8192
     assert controller.output_tokens(dict(base, controller=dict(output_tokens=32768))) == 32768
+
+
+def test_the_controller_sets_the_order_work_is_taken_in(tmp_path, monkeypatch):
+    monkeypatch.setattr(controller.layout, 'map_root', lambda project: tmp_path)
+    tasks = [dict(id='render', map_id='m1', pickable=True, priority='p2'),
+             dict(id='revise', map_id='m2', pickable=True, priority='p1')]
+    assert [t['id'] for t in controller.ready_order(tmp_path, tasks)] == ['revise', 'render']
+    observation = dict(brief=dict(needs=['n'], deliverables=['d'], non_goals=[]), knowns=[], unknowns=[],
+                       tasks=[dict(id='render', status='ready', unknown='', unknowns=[])], widget_library='', methods=[], playbook_store='')
+    accepted, refusals = controller.guard(dict(prioritize=[dict(task='render', priority='p3', why='wait for the revision'),
+                                                           dict(task='nowhere', priority='p0', why='x')]), observation)
+    assert accepted['prioritize'] == [dict(task='render', priority='p3', why='wait for the revision')]
+    assert any('nowhere' in r for r in refusals)

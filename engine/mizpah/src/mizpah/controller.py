@@ -720,6 +720,10 @@ DECIDE_TOOL = dict(type='function', function=dict(name='decide', description=(
             widgets=dict(type='array', items=_STR, description='widget ids, optional')),
             required=['id', 'title', 'unknowns', 'bucket'])),
         cancel=_WHY_ITEMS('task'), reopen=_WHY_ITEMS('task'), retire=_WHY_ITEMS('unknown'),
+        prioritize=dict(type='array', description='the order work is taken in: p0 first, p3 deferred; ready work of '
+                        'one priority goes builders first', items=dict(type='object', properties=dict(
+                            task=_STR, priority=dict(type='string', enum=['p0', 'p1', 'p2', 'p3']), why=_STR),
+                            required=['task', 'priority', 'why'])),
         unblock=dict(type='array', items=dict(type='object', properties=dict(task=_STR, after=_STR), required=['task', 'after'])),
         rebucket=dict(type='array', items=dict(type='object', properties=dict(
             task=_STR, bucket=dict(type='string', enum=['medium', 'high']), why=_STR), required=['task', 'bucket', 'why'])),
@@ -1687,6 +1691,18 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         if not why:
             refusals.append('reopen '+tid+': say what no longer stands'); continue
         reopen.append(dict(task=tid, why=why))
+    prioritize: list[dict[str, str]] = []
+    minted_tasks = {str(t.get('id')) for t in decision.get('tasks') or [] if isinstance(t, dict)}
+    for item in decision.get('prioritize') or []:
+        # The controller decides the order work is taken in; the loop takes ready work by this priority first.
+        if not isinstance(item, dict):
+            refusals.append('prioritize entry is not an object'); continue
+        tid, pri, why = str(item.get('task') or ''), str(item.get('priority') or ''), str(item.get('why') or '').strip()
+        if tid not in by_id and tid not in minted_tasks:
+            refusals.append('prioritize '+repr(tid)+': no such task'); continue
+        if pri not in ('p0', 'p1', 'p2', 'p3'):
+            refusals.append('prioritize '+tid+': priority is p0, p1, p2 or p3'); continue
+        prioritize.append(dict(task=tid, priority=pri, why=why or 'set by the controller'))
     for item in decision.get('unblock') or []:
         if not isinstance(item, dict):
             refusals.append('unblock entry is not an object'); continue
@@ -1776,7 +1792,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             refusals.append('done refused: '+'; '.join(uncovered)+' — mint one unknown per named thing (with `creates`), '
                             'each claim naming it and the known it must agree with')
     return dict(unknowns=unknowns, tasks=tasks, proposals=proposals, rebucket=rebucket, unblock=unblock, retype=retype, retire=retire, noted=noted,
-                cancel=cancel, reopen_unknowns=sorted(reopened), reopen=reopen, cautions=cautions, done=done, why=str(decision.get('why') or '')), refusals
+                cancel=cancel, reopen_unknowns=sorted(reopened), reopen=reopen, prioritize=prioritize, cautions=cautions, done=done, why=str(decision.get('why') or '')), refusals
 
 
 def terra_refusal(error: Exception) -> str:
@@ -1894,6 +1910,12 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any], root:
             done.setdefault('reopen', []).append(r['task'])
         except RuntimeError as error:
             done.setdefault('refused', []).append('reopen '+r['task']+': '+str(error)[:200])
+    for r in accepted.get('prioritize') or []:
+        try:
+            terra(config, project, 'route', 'prioritize', r['task'], '--priority', r['priority'], '--reason', r['why'])
+            done.setdefault('prioritize', []).append(r['task']+'→'+r['priority'])
+        except RuntimeError as error:
+            done.setdefault('refused', []).append('prioritize '+r['task']+': '+str(error)[:200])
     for r in accepted.get('unblock') or []:
         terra(config, project, 'route', 'unblock', r['task'])
         record_release(project, r['task'], r['after'])
@@ -1986,21 +2008,13 @@ def decide_through_outages(client: Any, config: dict[str, Any], system: str, use
 
 
 def ready_order(project: Path, tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The route's pickable tasks in the order the loop takes them: builders before readers, since a reading of
-    a file whose builder is also ready would only block (logo_mark3 measured contrast of marks nine build tasks
-    had not drawn yet)."""
+    """The route's pickable tasks in the controller's order: its priority (Terra's p0–p3, set with `prioritize`), then
+    the order it routed them — Terra's `route next` order, taken as it is. The loop does not re-sort behind the
+    controller: a builders-first sort put a render and an engraving ahead of the revision the controller had routed
+    to replace what they read (romantic piano, 2026-09-23)."""
+    rank = {'p0': 0, 'p1': 1, 'p2': 2, 'p3': 3}
     ready = [t for t in tasks if t.get('pickable') and t.get('map_id')]
-
-    def builds(task: dict[str, Any]) -> bool:
-        for uid in [task.get('map_id')]+[a.removeprefix('unknown:') for a in task.get('acceptance') or [] if str(a).startswith('unknown:')]:
-            path = layout.map_root(project)/'unknowns'/(str(uid)+'.json')
-            try:
-                if 'creates ' in str(json.loads(path.read_text()).get('notes') or ''):
-                    return True
-            except (OSError, ValueError):
-                continue
-        return False
-    return sorted(ready, key=lambda t: not builds(t))
+    return sorted(ready, key=lambda t: rank.get(str(t.get('priority') or 'p2'), 2))
 
 
 def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dict[str, Any]:
@@ -2086,7 +2100,7 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
         record['attempts'].append(dict(user=user, raw=raw, reasoning=_last_reasoning[0], accepted=accepted, refusals=refusals,
                                        noted=accepted.get('noted') or [], observation_chars=len(user), tools=list(_last_tools[0])))
         record['noted'] = (record.get('noted') or [])+(accepted.get('noted') or [])
-        minted_nothing = not any(accepted[k] for k in ('unknowns', 'tasks', 'proposals', 'rebucket', 'unblock', 'retype'))
+        minted_nothing = not any(accepted.get(k) for k in ('unknowns', 'tasks', 'proposals', 'rebucket', 'unblock', 'retype', 'prioritize'))
         work_routed = any(t['status'] in ('ready', 'in_progress') for t in observation['tasks'])
         if minted_nothing and accepted.get('done') is not True and attempt == 1 and not work_routed:
             # It described what is owed but routed nothing, and nothing is waiting to run: ask once for the
@@ -2098,7 +2112,7 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
             continue
         if not refusals or attempt == 2:
             break
-        if any(accepted[k] for k in ('unknowns', 'tasks', 'proposals', 'rebucket', 'unblock', 'retype')):
+        if any(accepted.get(k) for k in ('unknowns', 'tasks', 'proposals', 'rebucket', 'unblock', 'retype', 'prioritize')):
             # Keep what passed; ask only about what did not.
             applied = apply(config, project, accepted, root=journal.parent)
             if accepted.get('memory'):
