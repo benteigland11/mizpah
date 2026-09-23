@@ -2092,7 +2092,7 @@ def run_through_outages(session: FocusedSession, config: dict[str, Any], root: P
             failed_at = turn
             too_big = 'exceeded the configured byte limit' in str(error)
             if not ops.ride_out(failures, error, role='worker', spec=config['worker'], config=config, root=root,
-                                health=health or ops.Health(config, root), task=root.name, turn=turn, wait_seconds=wait_seconds):
+                                health=health or ops.Health(config, root), task=root.name, turn=turn):
                 raise
             discarded = session.discard_pending()
             if discarded:
@@ -2166,6 +2166,49 @@ def install_widgets(config: dict[str, Any], project: Path, wanted: list[str]) ->
     return present
 
 
+BUCKET_POINTS = dict(low=3, medium=8, high=21)
+
+
+def restart_reason(root: Path, task: dict[str, Any], bucket_before: str | None, archived: Path | None,
+                   discarded: Any) -> tuple[str, str] | None:
+    """Why a work order's session is running again, as (label, text) for the trace: a controller's reopen speaks to the
+    worker itself (`reopened`); a rebucket, an unblock and a plain restart (a crash, a STOP, a RESUME) said nothing
+    anywhere, and the app showed the session picking up with no line (trace notes, 2026-09-22)."""
+    if (root/'reopen.md').exists():
+        return None
+    bucket = task.get('bucket')
+    if bucket_before and bucket and bucket_before != bucket:
+        return ('rebucketed', f'bucket {bucket_before} ({BUCKET_POINTS.get(bucket_before, "?")} points) → '
+                              f'{bucket} ({BUCKET_POINTS.get(bucket, "?")} points)')
+    verdict = ''
+    if archived is not None:
+        try:
+            verdict = str(json.loads(archived.read_text()).get('verdict') or '')
+        except (OSError, ValueError):
+            verdict = ''
+    if verdict in ('blocked', 'blocked_by_worker'):
+        after = ''
+        try:
+            for line in reversed((root.parent.parent/'controller.jsonl').read_text().splitlines()):
+                unblocked = [u for u in ((json.loads(line).get('applied') or {}).get('unblock') or [])
+                             if str(u).split(' ', 1)[0] == task['id']]
+                if unblocked:
+                    after = str(unblocked[-1]).split(' after ', 1)[-1] if ' after ' in str(unblocked[-1]) else ''
+                    break
+        except (OSError, ValueError):
+            pass
+        return ('unblocked', 'released by the controller'+(' after '+after if after else ''))
+    return ('resumed', 'the run restarted (a crash, a stop, or RESUME)'
+                       +('; the call in flight was discarded' if discarded else ''))
+
+
+def mark_restart(session: Any, root: Path, task: dict[str, Any], bucket_before: str | None, archived: Path | None,
+                 discarded: Any) -> None:
+    reason = restart_reason(root, task, bucket_before, archived, discarded)
+    if reason:
+        session.mark(*reason)
+
+
 def archive_report(root: Path) -> Path | None:
     """A reopened work order's last report becomes history (result.<n>.json): result.json is the report of the
     round that is landing, so its absence says the work order is live. Left in place, the app read a released
@@ -2211,8 +2254,9 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
         # another's window (continue_from is retired, 2026-09-21: what is on disk is the continuity).
         saved = json.loads((root/'task.json').read_text())
         task, unknowns, map_id = saved['task'], saved['unknowns'], saved['map']
-        archive_report(root)
+        archived = archive_report(root)
         probes_before = tuple(saved.get('probes_before') or ())
+        bucket_before = task.get('bucket')
         task = pick_task(config, project, task['id']) | dict(bucket=next(
             t['bucket'] for t in terra(config, project, 'route', 'status')['tasks'] if t['id'] == task['id']))
         worker_client, checkin, shell = bindings(config, root, map_id, project=project)
@@ -2226,6 +2270,10 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             session = FocusedSession.open(root, worker=worker_client, shell=shell, controller=checkin,
                                           shared_workspaces=shared_workspaces(root))
         discarded = session.discard_pending()  # a killed run leaves an uncommitted call; nothing is replayed
+        mark_restart(session, root, task, bucket_before, archived, discarded)
+        if bucket_before != task.get('bucket'):
+            saved['task'] = dict(saved['task'], bucket=task.get('bucket'))
+            (root/'task.json').write_text(json.dumps(saved, indent=1))
         lifted = session.reset_generation_block()   # a degenerate window is retried in a fresh one, not re-raised
         if lifted:
             (root/'discarded.jsonl').open('a').write(json.dumps(dict(generation_block=lifted))+'\n')

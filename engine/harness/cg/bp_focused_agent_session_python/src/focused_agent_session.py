@@ -2021,6 +2021,15 @@ class FocusedSession:
             self._save()
             return self.status()
 
+    def mark(self, label: str, text: str = '') -> None:
+        """A line on the session's journal for whoever watches it — why the session restarted, what moved under
+        it — with nothing said to the worker: its window and its next request are untouched."""
+        if not isinstance(label, str) or not label.strip():
+            raise ValueError('A mark requires a label')
+        with self._locked():
+            self._event('marked', dict(window=self.session.window_index, turn=self.progress.turns, label=label.strip(),
+                                       text=(text or '')[:EVENT_TEXT]))
+
     RETUNABLE = ('reasoning_retention', 'rollover_threshold', 'output_headroom_tokens', 'context_capacity', 'reflect_prompt', 'reflect_turns',
                  'recent_result_count', 'recent_result_characters')
 

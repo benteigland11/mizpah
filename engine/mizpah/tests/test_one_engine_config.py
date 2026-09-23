@@ -51,3 +51,18 @@ def test_a_reopened_work_order_moves_its_last_report_aside(tmp_path):
     (tmp_path/'result.json').write_text('{"verdict": "incomplete"}')
     assert worker.archive_report(tmp_path).name == 'result.2.json'
     assert not (tmp_path/'result.json').exists() and worker.archive_report(tmp_path) is None
+
+
+def test_a_restarted_work_order_says_why(tmp_path):
+    from mizpah import worker
+    root = tmp_path/'sess'/'tasks'/'repair'
+    root.mkdir(parents=True)
+    task = dict(id='repair', bucket='high')
+    assert worker.restart_reason(root, task, 'medium', None, None) == ('rebucketed', 'bucket medium (8 points) → high (21 points)')
+    report = root/'result.1.json'
+    report.write_text('{"verdict": "blocked_by_worker"}')
+    (tmp_path/'sess'/'controller.jsonl').write_text(json.dumps(dict(applied=dict(unblock=['repair after check_audio'])))+'\n')
+    assert worker.restart_reason(root, task, 'high', report, None) == ('unblocked', 'released by the controller after check_audio')
+    assert worker.restart_reason(root, task, 'high', None, {'call': 1})[0] == 'resumed'
+    (root/'reopen.md').write_text('the reading no longer stands')
+    assert worker.restart_reason(root, task, 'high', None, None) is None
