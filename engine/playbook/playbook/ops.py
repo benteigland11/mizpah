@@ -69,6 +69,11 @@ def search_procedures(query: str, limit: int | None = None, include_retired: boo
         retired = library.retired_ids()
         catalog = {k: v for k, v in catalog.items() if k not in retired}
     result = _search(catalog, query, limit)
+    # Each hit's gravity: a leaf (0) found by its words is usually walked from the method above it, which
+    # `upstream <id>` names — the controller climbs from what matched to what the library leans on.
+    links = parent_links() if result.get("hits") else {}
+    for hit in result.get("hits", []):
+        hit["gravity"] = gravity(hit["id"], links)
     library.touch([h["id"] for h in result.get("hits", [])], "search")
     here = open_walks(None, target_dir)
     if here:
@@ -852,10 +857,24 @@ def expand(procedure_id: str, _ancestors: tuple[str, ...] = (), _seen: set[str] 
     return out
 
 
-def gravity(procedure_id: str) -> int:
+def gravity(procedure_id: str, links: dict[str, set[str]] | None = None) -> int:
     """How much of the library sinks into this procedure: the procedures that link to it, transitively. A
     validation or pedal method that six others run has gravity six; a tune one gym wrote for itself has none.
     The controller reads it beside reach: a gravity-0 leaf picked by title for a general task is one gym's own."""
+    links = parent_links() if links is None else links
+    seen: set[str] = set()
+    frontier = [procedure_id]
+    while frontier:
+        current = frontier.pop()
+        for parent in links.get(current, ()):
+            if parent not in seen and parent != procedure_id:
+                seen.add(parent)
+                frontier.append(parent)
+    return len(seen)
+
+
+def parent_links() -> dict[str, set[str]]:
+    """Each procedure id to the procedures whose steps link to it."""
     links: dict[str, set[str]] = {}
     for path in store.procedures_dir().glob("*.json"):
         if path.name.startswith("."):
@@ -867,15 +886,7 @@ def gravity(procedure_id: str) -> int:
         for step in document.get("steps") or []:
             if isinstance(step, dict) and step.get("procedure"):
                 links.setdefault(str(step["procedure"]), set()).add(str(document.get("id") or path.stem))
-    seen: set[str] = set()
-    frontier = [procedure_id]
-    while frontier:
-        current = frontier.pop()
-        for parent in links.get(current, ()):
-            if parent not in seen and parent != procedure_id:
-                seen.add(parent)
-                frontier.append(parent)
-    return len(seen)
+    return links
 
 
 def upstream(procedure_id: str) -> dict[str, Any]:

@@ -570,8 +570,8 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
                  'text file in the project.')
     lines.append('  The library — what earlier projects filed for every project to use: procedures, the methods a worker '
                  'walks, and widgets, the instruments a probe calls — is yours to search: `playbook search`, `playbook load '
-                 '<id>`, `cartograph search`, `cartograph inspect <id>`. Name what fits on the work order ("walk", '
-                 '"widgets"); its worker starts from it instead of building its own.')
+                 '<id>`, `playbook upstream <id>`, `cartograph search`, `cartograph inspect <id>`. Name what fits on the '
+                 'work order ("walk", "widgets"); its worker starts from it instead of building its own.')
     now = phases.current(brief)
     if now:
         lines.append('  Current phase: '+str(now['id'])+'.')
@@ -663,13 +663,14 @@ CONTROLLER_TOOLS = [
     dict(type='function', function=dict(name='result', description='What a landed work order reported: verdict, turns, knowns, problems, what it minted, its last words.',
          parameters=dict(type='object', properties=dict(task=dict(type='string')), required=['task']))),
     dict(type='function', function=dict(name='playbook', description='Search the library\'s procedures, read-only: search "<words>" [--limit n], '
-         'load <id> (every step), reach <id> (its length, the procedures it inlines, the widgets it names). JSON back.',
+         'load <id> (every step), reach <id> (its length, the procedures it inlines, the widgets it names), upstream <id> '
+         '(the chains of procedures above it, up to the roots). Each hit carries its gravity: how many procedures run it. JSON back.',
          parameters=dict(type='object', properties=dict(args=dict(type='string', description='the words after `playbook`')), required=['args']))),
     dict(type='function', function=dict(name='cartograph', description='Search the library\'s widgets and blueprints, read-only: '
          'search "<words>" [--top-k n] [--language <lang>], inspect <id> (description, dependencies, examples). JSON back.',
          parameters=dict(type='object', properties=dict(args=dict(type='string', description='the words after `cartograph`')), required=['args']))),
 ]
-LIBRARY_READ_VERBS = dict(playbook={'search', 'load', 'reach'}, cartograph={'search', 'inspect'})
+LIBRARY_READ_VERBS = dict(playbook={'search', 'load', 'reach', 'upstream'}, cartograph={'search', 'inspect'})
 
 
 def run_tool(config: dict[str, Any], project: Path, root: Path | None, name: str, args: dict[str, Any]) -> str:
