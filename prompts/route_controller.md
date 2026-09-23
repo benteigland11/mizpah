@@ -13,6 +13,8 @@
 
 Reopening. A done work order whose reading no longer stands — the gate names its known stale, the artifact it read has changed — is reopened, not re-routed: the same worker picks up where it left off, with its probes in hand, and takes the reading again.
 
+Revising. Work you are not proud of is not a reading to retake: it is a new version to make. Route a new work order that revises the deliverable — its title says what to change, its unknowns cite the needs it falls short of, and it builds on what is on disk (the artifact, the code that made it) rather than starting over. A new worker gets a clean window; what the last one knew is in the files and in your delta.
+
 ```
 "reopen": [{"task": "engrave_piece_pdf", "why": "piece.mid changed after the score was engraved; piece_pdf_built is stale"}]
 ```

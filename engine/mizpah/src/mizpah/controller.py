@@ -21,7 +21,7 @@ from cg.bp_focused_agent_session_python.src import EndpointConfig, ModelClient, 
 from cg.backend_persistent_model_session_python.src.persistent_model_session import parse_turn
 
 from . import briefs, capabilities, enablers, phases
-from . import layout, ops
+from . import layout, ops, pride
 from .worker import terra
 
 ID_PATTERN = re.compile(r'^[a-z][a-z0-9_]*$')
@@ -458,6 +458,18 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
         lines.append('  The route is empty: no work order is ready or running.')
     gate = observation.get('gate') or {}
     lines.append('  Gate: '+('green' if gate.get('ok') else 'red ('+str(len(gate.get('violations') or []))+' open items)')+'.')
+    pride_verdict = observation.get('pride') if mode == 'eval' else None
+    if pride_verdict:
+        files = ', '.join(pride_verdict.get('files') or [])
+        if pride_verdict.get('proud') is None:
+            lines.append('  You tried to look at the delivered work ('+files+') on its own and could not: '+str(pride_verdict.get('error')))
+        else:
+            lines.append('  You looked at the delivered work ('+files+') on its own, with the loop set aside, as the one who has '
+                         'to put their name to it. You are '+('proud of it' if pride_verdict['proud'] else 'NOT proud of it')+'.')
+            for label, key in (('Proudest of', 'proudest'), ('Why', 'why'), ('What holds it back', 'holds_it_back'),
+                               ('What would make you proud', 'would_make_me_proud')):
+                if pride_verdict.get(key):
+                    lines.append('    '+label+': '+str(pride_verdict[key]))
     if observation.get('operator_notes'):
         # The person answered the loop (a reply to a notice): the briefing it writes is the answer. The brief
         # itself moves only through a proposal.
@@ -537,6 +549,12 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
             for ref in re.findall(r'need:\d+', str(u.get('notes') or '').split(';')[0]):
                 targets.setdefault(ref, []).append(u['id'])
     untargeted = ['need:'+str(i) for i in range(1, len(brief.get('needs') or [])+1) if 'need:'+str(i) not in targets]
+    pride_verdict = observation.get('pride') if mode == 'eval' else None
+    if pride_verdict and pride_verdict.get('proud') is False:
+        lines.append('  You are not proud of what was delivered. Go down the path that would make you proud: route a new work '
+                     'order that revises it — say what to change, as the music or the image would be changed, and cite the '
+                     'needs it falls short of — building on the artifact and the code that made it. Reopening is for a reading '
+                     'that no longer stands, not for a new version. A green gate is not done while you are not proud of the work.')
     if delivered and untargeted:
         lines.append('  Judge what has been delivered against the brief. Look at it and at the map\'s readings of it, then for '
                      'each need it serves compose the target that says whether it is met, or reopen the work order that '
@@ -1931,6 +1949,18 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
     observation['reviewer_doubts'] = reviewer_doubts(journal)
     observation['workspaces'] = task_workspaces(Path(journal).parent)
     observation['landed'] = landed_work_order(Path(journal).parent) if mode == 'eval' else None
+    if observation['landed'] and observation['landed'].get('verdict') == 'complete':
+        # The maker's question, asked of the delivered assets alone in a fresh conversation (pride.py): the gate
+        # asks whether the work is wrong; this asks whether it is any good.
+        try:
+            (Path(journal).parent/'controller.live.json').write_text(json.dumps(dict(
+                phase='looking at the delivered work', started_at=time.time(), at=time.time(), model_calls=0, user='', tools=[])))
+        except OSError:
+            pass
+        try:
+            observation['pride'] = pride.review(client, config, project, Path(journal).parent, observation.get('brief') or {})
+        except Exception as error:  # noqa: BLE001 — a failed look never fails the step; the message says it failed
+            observation['pride'] = dict(proud=None, error=f'{type(error).__name__}: {error}'[:300])
     memory_file = Path(journal).parent/'memory.md'
     observation['memory'] = memory_file.read_text().strip() if memory_file.exists() else ''
     refusals: list[str] = []
