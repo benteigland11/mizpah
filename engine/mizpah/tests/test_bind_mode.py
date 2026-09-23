@@ -22,7 +22,7 @@ pytestmark = pytest.mark.skipif(not (Path('/usr/bin/bwrap').exists() and Path('/
 
 
 def test_bind_mode_binds_the_project_keeps_caches_and_writes_state_back(tmp_path: Path) -> None:
-    config = worker.load_config(ROOT/'config.luna.json')
+    config = worker.load_config(ROOT/'config.openai.json')
     config['mizpah']['sandbox'] = dict(config['mizpah']['sandbox'], workspace='bind', cache_dirs=['build'], services=None, network=None,
                                        share_network=False)
     config['shell']['limits'] = dict(config['shell']['limits'], workspace_bytes=4*1024**2, max_files=2000)
@@ -95,7 +95,7 @@ def _known_of_file(project: Path, kid: str, path: str) -> None:
 
 
 def test_the_host_refreshes_a_stale_known_whose_reading_reproduces_and_reports_one_that_moved(tmp_path: Path) -> None:
-    config = worker.load_config(ROOT/'config.luna.json')
+    config = worker.load_config(ROOT/'config.openai.json')
     config['mizpah']['sandbox'] = dict(config['mizpah']['sandbox'], workspace='bind', cache_dirs=[], services=None, network=None,
                                        share_network=False)
     config['mizpah']['scaffolding'] = dict(config['mizpah']['scaffolding'], checkins=False)
@@ -127,7 +127,7 @@ def test_a_bind_session_seeds_its_state_part_and_finds_it_again_after_open(tmp_p
     """The state tar (the project's .mizpah, the worker's .playbook) must reach the directory at create and
     survive an open: every bind-mode session started with an empty state tree before (2026-09-20)."""
     from cg.bp_focused_agent_session_python.src.focused_agent_session import FocusedSession, workspace_files
-    config = worker.load_config(ROOT/'config.luna.json')
+    config = worker.load_config(ROOT/'config.openai.json')
     config['mizpah']['sandbox'] = dict(config['mizpah']['sandbox'], workspace='bind', cache_dirs=[], services=None, network=None,
                                        share_network=False)
     config['mizpah']['scaffolding'] = dict(config['mizpah']['scaffolding'], checkins=False)
@@ -229,7 +229,7 @@ def test_a_continued_session_takes_the_project_state_again(tmp_path: Path) -> No
     """A session adopted onto a new task carries the route as of its first task; the host routed the new task
     since. Its .mizpah is replaced from the live project; the worker's own state dirs stay."""
     from cg.bp_focused_agent_session_python.src.focused_agent_session import FocusedSession, workspace_files
-    config = worker.load_config(ROOT/'config.luna.json')
+    config = worker.load_config(ROOT/'config.openai.json')
     config['mizpah']['sandbox'] = dict(config['mizpah']['sandbox'], workspace='bind', cache_dirs=[], services=None, network=None,
                                        share_network=False)
     config['mizpah']['scaffolding'] = dict(config['mizpah']['scaffolding'], checkins=False)

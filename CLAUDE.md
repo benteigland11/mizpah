@@ -112,7 +112,11 @@ These came out of ten single-seed campaigns on a 26B MoE model in a 60K window
   (`persistent_model_session` wire view, `controller_progress` review policy,
   `sandboxed_shell_execution`, `session_event_log`, `llamaclient`). `engine/harness/tools/`
   has the campaign runner (`run_session.py`, `pilot.py`, `qualify.py`), the controller
-  policy text (`controller.md`) and the v10 configs (`config.gemma.json`).
+  policy text (`controller.md`) and the harness config (`config.openai.json`, the one the app runs).
+- **One engine config** (`engine/mizpah/config.openai.json` over `engine/harness/tools/config.openai.json`)
+  launches every run, from the app or by hand. The model is the project's: `mizpah-provider use --project`
+  pins a crew in its `.mizpah/config.json`; local servers are providers (`mizpah-provider add-local`),
+  and a seat's `context_window` fits the session to its model. No config file per model.
 - `engine/mizpah/` — the new loop (controller + worker roles over the three tools).
   Empty at fork time; this is where the work is.
 - `app/` — Flutter desktop. Launches the engine as a sidecar, renders brief/route/map/

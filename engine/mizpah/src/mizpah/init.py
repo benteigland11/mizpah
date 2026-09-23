@@ -245,6 +245,10 @@ def apply_project_config(config: dict[str, Any], project: Path) -> dict[str, Any
         config['mizpah']['sandbox'] = dict(config['mizpah'].get('sandbox') or {}, **picked)
     if pc.get('builds_base'):
         config['mizpah']['builds_base'] = str(pc['builds_base'])
+    if isinstance(pc.get('scaffolding'), dict):
+        # Scaffolds are toggles per model (a small local model keeps the reviewer a hosted one runs without): the
+        # project that runs that model carries them, over the user's defaults.
+        config['mizpah']['scaffolding'] = dict(config['mizpah'].get('scaffolding') or {}, **pc['scaffolding'])
     environment = project_environment(project) or pc.get('base')
     if environment:
         from . import bases
@@ -259,4 +263,24 @@ def apply_project_config(config: dict[str, Any], project: Path) -> dict[str, Any
                 else:
                     base[key] = value
             config[role] = base
+    fit_windows(config)
+    return config
+
+
+def fit_windows(config: dict[str, Any]) -> dict[str, Any]:
+    """A seat's window never exceeds its model's: a provider that knows its context window (a local server's n_ctx,
+    written on the seat by `mizpah-provider use`) lowers the capacity to it, and the rollover threshold to four
+    fifths of it, so the reflection and the handoff still have room. One engine config then serves a 65K local
+    model and a hosted one; the per-model config files that held these numbers drifted apart (2026-09-22)."""
+    window = (config.get('worker') or {}).get('context_window')
+    policy = config.get('session_policy')
+    if isinstance(window, int) and window > 0 and isinstance(policy, dict) and int(policy.get('context_capacity') or 0) > window:
+        policy = dict(policy, context_capacity=window,
+                      rollover_threshold=min(int(policy.get('rollover_threshold') or window), window*4//5))
+        config['session_policy'] = policy
+    controller = config.get('controller')
+    if isinstance(controller, dict):
+        window = controller.get('context_window')
+        if isinstance(window, int) and window > 0 and int(controller.get('context_capacity') or 0) > window:
+            controller['context_capacity'] = window
     return config

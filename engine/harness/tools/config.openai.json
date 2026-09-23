@@ -58,13 +58,13 @@
     "subscription": "openai_chatgpt"
   },
   "session_policy": {
-    "context_capacity": 131072,
-    "rollover_threshold": 60000,
+    "context_capacity": 110000,
+    "rollover_threshold": 61440,
     "worker_output_tokens": -1,
     "handoff_output_tokens": -1,
-    "output_headroom_tokens": 24000,
+    "output_headroom_tokens": 10000,
     "overflow_excerpt_characters": 16000,
-    "reasoning_retention": "latest",
+    "reasoning_retention": "none",
     "recent_result_count": 3,
     "recent_result_characters": 12000,
     "handoff_prompt": "Write the working memory for the next context window to continue this task accurately.\n\nThe next context receives the original assignment, this memory, retained recent tool results, and access to the existing workspace and history archive. Preserve the additional information it needs to understand the current situation and choose its next action.\n\nOrganize the memory around:\n\n- **Current objective and constraints:** the user\u2019s current intent, later corrections, decisions, and boundaries that still apply.\n- **Established state:** relevant findings, changes actually made, and verification actually completed. Keep exact identifiers and values where precision matters.\n- **Unfinished work:** obligations, unresolved questions, blockers, and any action whose outcome remains uncertain.\n- **Continuation point:** what the last completed action established, what remains to be done with its result, and the next intended action with its prerequisites.\n- **Essential references:** where supporting material lives and what to retrieve there.\n\nDistinguish observed results, prior claims, assumptions, and proposed actions. Record completion only when the available evidence supports it. Preserve the reasons behind decisions when forgetting them would invite repeated mistakes.\n\nReconcile earlier memory with newer evidence into one current account. Correct superseded claims and remove resolved or irrelevant material.\n\nCondense repeated discussion and bulky outputs. Preserve information whose loss could cause incorrect work, violated constraints, or expensive reconstruction.\n\nOutput only the memory in plain Markdown. Describe pending work without performing it. Omit copied message envelopes, nested handoffs, and tool-call markup.",
@@ -72,7 +72,8 @@
     "handoff_generation_overrides": {
       "reasoning_budget_tokens": 2048
     },
-    "argument_excerpt_characters": 2001
+    "argument_excerpt_characters": 2001,
+    "reflect_turns": -1
   },
   "review_policy": {
     "update_interval": 20,
@@ -114,19 +115,19 @@
     "systemctl": "/usr/bin/systemctl",
     "runtime_root": "/usr",
     "limits": {
-      "memory_bytes": 1073741824,
-      "workspace_bytes": 134217728,
-      "temporary_bytes": 67108864,
+      "memory_bytes": 3221225472,
+      "workspace_bytes": 268435456,
+      "temporary_bytes": 268435456,
       "output_bytes": 1048576,
-      "visible_output_bytes": 262144,
-      "processes": 64,
+      "visible_output_bytes": 8192,
+      "processes": 256,
       "cpu_percent": 200,
       "command_seconds": 90,
       "shutdown_seconds": 5,
       "max_files": 10000
     }
   },
-  "maximum_generation_retries": 2,
+  "maximum_generation_retries": 8,
   "worker_tools": [
     "bash",
     "read",

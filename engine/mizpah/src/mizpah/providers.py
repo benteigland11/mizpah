@@ -96,8 +96,21 @@ def local_profile(name: str, base_url: str, kind: str = 'auto', display_name: st
     if kind == 'llama' and root.endswith('/v1'):
         root = root[:-3]  # tokenize/props live at the server root; the profile adds /v1 to the chat path
     return dict(name=name, display_name=display_name or name, auth={'kind': 'none'}, api_base_url=root,
-                wire='chat_completions', models=[], reasoning_efforts=[], context_window=None, timeout_seconds=900,
+                wire='chat_completions', models=[], reasoning_efforts=[],
+                context_window=local_context_window(root) if kind == 'llama' else None, timeout_seconds=900,
                 local_kind=kind, **LOCAL_KINDS[kind])
+
+
+def local_context_window(root: str, *, timeout_seconds: float = 3.0) -> int | None:
+    """llama.cpp's loaded context (`/props` n_ctx), or None when the server is down or does not say."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(root.rstrip('/')+'/props', timeout=timeout_seconds) as response:
+            props = json.loads(response.read())
+    except (OSError, ValueError):
+        return None
+    n = (props.get('default_generation_settings') or {}).get('n_ctx') or props.get('n_ctx')
+    return int(n) if isinstance(n, (int, float)) and n > 0 else None
 
 
 _SHIPPED_CACHE: dict[str, Any] | None = None

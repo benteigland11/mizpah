@@ -85,7 +85,7 @@ def test_the_sandbox_sees_the_base_read_only_with_its_venv_first(data_home: Path
     (folder/'soundfonts').mkdir()
     (folder/'soundfonts'/'gm.sf2').write_bytes(b'not really')
     (folder/'base.json').write_text(json.dumps(dict(name='py', note='a venv', env={'SOUNDFONT': '$BASE/soundfonts/gm.sf2'})))
-    config = worker.load_config(ROOT/'config.luna.json')
+    config = worker.load_config(ROOT/'config.openai.json')
     config['mizpah']['sandbox'] = dict(config['mizpah']['sandbox'], workspace='bind', cache_dirs=[], services=None,
                                        network=None, share_network=False)
     project = tmp_path/'gym'

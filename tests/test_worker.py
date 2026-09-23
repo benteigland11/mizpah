@@ -14,7 +14,7 @@ from mizpah.worker import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = ROOT/'engine'/'mizpah'/'config.gemma.json'
+CONFIG = ROOT/'engine'/'mizpah'/'config.openai.json'
 TERRA = ROOT/'.venv'/'bin'/'terra'
 MAP = 't_measure_mean'
 

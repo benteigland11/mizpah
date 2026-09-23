@@ -10,7 +10,7 @@ from mizpah.controller import apply, guard, observe, render_observation, step
 from mizpah.worker import load_config
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = ROOT/'engine'/'mizpah'/'config.gemma.json'
+CONFIG = ROOT/'engine'/'mizpah'/'config.openai.json'
 TERRA = ROOT/'.venv'/'bin'/'terra'
 
 

@@ -173,7 +173,7 @@ and [resulting project document](../../artifacts/focused-harness/qualification/2
 
 ## Native client adoption, 2026-09-16
 
-The example and `config.gemma.json` select `provider: llama_client` for both roles.
+The example selects `provider: llama_client` for both roles.
 Worker, controller and handoff requests now use the reusable native streaming client.
 The known-issue policy detects repetitive text, reasoning and tool arguments, and
 sequences of eight identical completed tool calls. A detected repetition closes the

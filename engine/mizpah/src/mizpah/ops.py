@@ -29,7 +29,10 @@ from . import layout
 
 
 def settings(config: dict[str, Any]) -> dict[str, Any]:
-    return dict(model_unit=None, restart_after_seconds=60, restart_cooldown_seconds=600, disk_high_percent=92,
+    # A local server's unit rides on the seat that uses it (`models.worker.model_unit` in the project), so one
+    # engine config serves every model; an explicit ops.model_unit still wins.
+    seat_unit = (config.get('worker') or {}).get('model_unit')
+    return dict(model_unit=seat_unit, restart_after_seconds=60, restart_cooldown_seconds=600, disk_high_percent=92,
                 notify_command=None, network_patience_seconds=3600) | dict(config['mizpah'].get('ops') or {})
 
 

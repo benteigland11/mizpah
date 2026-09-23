@@ -11,7 +11,7 @@ Usage: python -m fixtures.design <target_dir> [names...]   (from engine/mizpah; 
 
 Each project holds a small page with the defect planted (the landing1 run showed each of them), the brand
 notes, and needs that are readings off the rendered page. There is no planted truth: the key carries targets
-(a property met or missed) exactly as the landing fixture does. Run with config.landing.json; the brief says
+(a property met or missed) exactly as the landing fixture does. Run with the engine config and the project's pinned crew; the brief says
 to run chromium as a service and the library holds the page CLI.
 """
 from __future__ import annotations

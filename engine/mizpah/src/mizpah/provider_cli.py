@@ -206,6 +206,11 @@ def cmd_use(args: argparse.Namespace) -> int:
             for key in SUBSCRIPTION_UNSUPPORTED_GENERATION_KEYS:
                 generation.pop(key, None)
         generation['model'] = model
+        # The model's window rides on the seat: the engine fits the session's capacity to it (init.fit_windows).
+        if profile.context_window:
+            spec['context_window'] = int(profile.context_window)
+        else:
+            spec.pop('context_window', None)
         if effort is None:
             generation.pop('reasoning_effort', None)
         else:

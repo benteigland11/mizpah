@@ -6,7 +6,7 @@ Nothing here has a planted answer. The needs are levels the page has to reach; w
 rendered page (headless chromium through the page CLI) or the files to show it is the loop's to work
 out. The key keeps the first curve's targets and the evidence numbers for a scorer that wants them;
 the y of a run is the map, the page as rendered, and what the library gained. Run with
-config.landing.json (chromium needs /sys, 3 GB, 256 processes in the sandbox).
+the engine config (its sandbox gives chromium /sys, 3 GB, 256 processes) and the crew pinned on the project.
 """
 from __future__ import annotations
 
