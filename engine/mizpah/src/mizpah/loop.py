@@ -315,6 +315,7 @@ def close_phase(config: dict[str, Any], project: Path, record: dict[str, Any], l
 
 
 HOST_LIVE = 'host.live.json'
+EVAL_OWED = 'eval.owed'   # a hold landed between a work order and its controller review
 
 
 def host_step(root: Path, text: str | None) -> None:
@@ -442,6 +443,10 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
         installed = install_registered_enablers(config, project, log)
         for cycle in range(1, max_cycles+1):
             record = dict(cycle=cycle, tasks=[], evals=[], started_at=time.time())
+            if (root/EVAL_OWED).exists():
+                # A hold landed after a work order and before its review: the review comes first on this start.
+                record['evals'].append(failing_step(config, project, journal, 'eval', log))
+                (root/EVAL_OWED).unlink(missing_ok=True)
             if installed:
                 record['enablers'], installed = installed, []
             if not pickable(config, project, root):
@@ -504,6 +509,11 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                 record['tasks'].append({k: result[k] for k in ('task', 'unknown', 'unknowns', 'verdict', 'blocked_reason', 'turns',
                                                                'resumed', 'checkins', 'held_guidance', 'problems', 'playbook', 'widgets')
                                         if k in result} | dict(reviewer_doubts=result.get('reviewer_doubts') or []))
+                if result['verdict'] == 'stopped':
+                    # The person held the run: the worker paused at its boundary, so the run ends now — not after
+                    # re-taking stale readings and a controller review (a hold took minutes to land, 2026-09-22).
+                    stop = 'stopped_by_operator'
+                    break
                 leaked = reap(task['id'])
                 if leaked:
                     record['tasks'][-1]['leaked'] = [dict(comm=l['comm'], rss_mb=l['rss_mb'], age_s=l['age_s']) for l in leaked]
@@ -511,16 +521,14 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                 # before the eval sees a red gate it would otherwise spend a worker session clearing.
                 try:
                     host_step(root, 'checking the map for stale readings')
-                    refreshed = worker.refresh_stale(config, project, root, progress=lambda text: host_step(root, text))
+                    refreshed = worker.refresh_stale(config, project, root, progress=lambda text: host_step(root, text),
+                                                     stop=lambda: ops.stop_requested(root))
                 except Exception as error:  # noqa: BLE001 — a refresh never ends the run
                     refreshed = dict(refreshed=[], changed=[], failed=['refresh: '+str(error)[:200]])
                     with log.open('a') as handle:
                         handle.write(json.dumps(dict(at=time.time(), where='refresh', error=str(error)[:500]))+'\n')
                 if any(refreshed.values()):
                     record['tasks'][-1]['refreshed'] = refreshed
-                if result['verdict'] == 'stopped':
-                    stop = 'stopped_by_operator'
-                    break
                 if task.get('enabler_id') and result['verdict'] == 'complete':
                     host_step(root, 'advancing the enabler')
                     record.setdefault('enablers', []).append(advance_enabler(config, project, task, result, log))
@@ -552,6 +560,12 @@ def run(config: dict[str, Any], project: Path, root: Path, *, max_cycles: int, m
                             handle.write(json.dumps(dict(at=time.time(), where='settle:'+task['id'], error=str(error)[:500]))+'\n')
                     if settled:
                         record.setdefault('settled', []).append(settled)
+                if ops.stop_requested(root):
+                    # Held before the controller looked at this landing: the review is owed, and the next start
+                    # runs it before anything else instead of the person waiting minutes on a decision.
+                    (root/EVAL_OWED).write_text(task['id']+'\n')
+                    stop = 'stopped_by_operator'
+                    break
                 # The controller works between tasks: it sees the new known as state and may
                 # mint the next unknowns while the route still has work. Its writes are safe
                 # against the worker's entitlement writeback.
