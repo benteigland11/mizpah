@@ -6,7 +6,7 @@
     },
     "generation": {
       "model": "gpt-5.6-luna",
-      "reasoning_effort": "low",
+      "reasoning_effort": "high",
       "reasoning": {
         "summary": "auto"
       }
@@ -55,7 +55,7 @@
     "subscription": "openai_chatgpt"
   },
   "session_policy": {
-    "context_capacity": 102400,
+    "context_capacity": 110000,
     "rollover_threshold": 61440,
     "worker_output_tokens": -1,
     "handoff_output_tokens": -1,
@@ -70,7 +70,7 @@
       "reasoning_budget_tokens": 2048
     },
     "argument_excerpt_characters": 2001,
-    "reflect_turns": 8
+    "reflect_turns": -1
   },
   "review_policy": {
     "update_interval": 20,

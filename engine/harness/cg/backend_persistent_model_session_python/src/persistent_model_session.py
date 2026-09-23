@@ -352,7 +352,8 @@ class SessionPolicy:
     argument_excerpt_characters: int | None = None
     # Stop and reflect before the window rolls: at the threshold the worker is told to record its method (the
     # reflect prompt) and given this many turns for it, overshooting the threshold into the capacity's buffer;
-    # then it writes the handoff. 0 turns: no reflection, the handoff at once (the old shape).
+    # then it writes the handoff. 0 turns: no reflection, the handoff at once (the old shape). Negative: as many
+    # turns as it needs, until it says done or the prompt reaches capacity less headroom.
     reflect_prompt: str = ''
     reflect_turns: int = 0
 

@@ -1963,6 +1963,24 @@ def test_at_the_threshold_the_worker_reflects_then_hands_off(tmp_path):
     assert handoff_requests and 'REFLECT' not in handoff_requests[0]['messages'][0].get('content', '')
 
 
+
+def test_an_unbounded_reflection_runs_until_the_buffer_not_a_turn_count(tmp_path):
+    # reflect_turns < 0: the reflection takes the turns it needs; only `done` or the capacity's buffer ends it (it
+    # was capped at 8 turns, which cut a worker off mid-record, 2026-09-22).
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, total=40, enabled=False, rollover=True)
+    policy = replace(settings.session_policy, reflect_prompt='REFLECT: record the method', reflect_turns=-1)
+    settings = replace(settings, session_policy=policy)
+    session = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell)
+    session.run(maximum_worker_turns=25)
+    events = SessionEventLog((tmp_path/'session')/'events').read_strict('session')
+    kinds = [e.event_type for e in events]
+    assert 'reflect_started' in kinds
+    ended = [e.payload for e in events if e.event_type == 'reflect_ended']
+    assert all(e['why'] != 'turns' for e in ended)
+    reflect_at = kinds.index('reflect_started')
+    stop = kinds.index('reflect_ended') if 'reflect_ended' in kinds else len(kinds)
+    assert len([k for k in kinds[reflect_at:stop] if k == 'worker_turn']) > 3
+
 class ScratchToolTransport(FileToolTransport):
     """Scripted worker: file tools on a host-backed scratch path, in both spellings, and one ordinary file."""
 

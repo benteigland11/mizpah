@@ -1006,7 +1006,9 @@ class FocusedSession:
                     break
         self.progress.observe(self.state['active_turn'])
         if self.state.get('reflect_turns_left') is not None:
-            self.state['reflect_turns_left'] -= 1
+            # Negative is unbounded: the reflection runs until the worker says done or the buffer is full.
+            if self.state['reflect_turns_left'] > 0:
+                self.state['reflect_turns_left'] -= 1
             if self.state.get('proposed_final') is not None:
                 # `done` inside the reflection says the record is written (or there is nothing general): not a claim.
                 self.state['proposed_final'] = None
@@ -1053,7 +1055,7 @@ class FocusedSession:
             if self.session.window_index and len(self.session.messages) <= len(self.session.base_messages)+1:
                 raise ContextCapacityExceeded('The resumed context is already above the rollover threshold')
             policy = self.settings.session_policy
-            if policy.reflect_turns > 0 and policy.reflect_prompt.strip() and not self.session.pending_tools:
+            if policy.reflect_turns != 0 and policy.reflect_prompt.strip() and not self.session.pending_tools:
                 # Stop and reflect first: the method is recorded while the window still holds it; the handoff
                 # follows. The buffer above the threshold is what the reflection runs in.
                 self.session.append_guidance(policy.reflect_prompt)
@@ -1066,11 +1068,11 @@ class FocusedSession:
                 self.state['phase'] = 'handoff'
                 self._save(commit=False)
                 return
-        elif reflecting is not None and (reflecting <= 0 or count >= self.settings.session_policy.context_capacity
+        elif reflecting is not None and (reflecting == 0 or count >= self.settings.session_policy.context_capacity
                                           -self.settings.session_policy.output_headroom_tokens):
             # The reflection's turns are spent, or the buffer is: hand off now.
             self.state.pop('reflect_turns_left', None)
-            self._event('reflect_ended', dict(window=self.session.window_index, why='turns' if reflecting <= 0 else 'buffer'))
+            self._event('reflect_ended', dict(window=self.session.window_index, why='turns' if reflecting == 0 else 'buffer'))
             self.state['phase'] = 'handoff'
             self._save(commit=False)
             return

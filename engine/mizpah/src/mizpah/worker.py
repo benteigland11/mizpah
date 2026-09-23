@@ -111,7 +111,7 @@ def load_config(path: str | Path) -> dict[str, Any]:
     sp = harness.setdefault('session_policy', {})
     sp['handoff_prompt'] = _prompts.message('handoff_worker')
     sp['reflect_prompt'] = _prompts.message('reflect_worker')
-    sp.setdefault('reflect_turns', 8)
+    sp.setdefault('reflect_turns', -1)   # as many turns as the reflection needs; the buffer ends it
     sp['resume_prefix'] = _prompts.message('resume_worker')
     harness['guidance_prefix'] = (prompts_dir/'messages'/'correction_worker.md').read_text()   # a template; the harness fills it
     # Scaffolding is method the host imposes; each piece is a toggle so a model that can orchestrate
