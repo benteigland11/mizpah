@@ -22,7 +22,6 @@ from cg.backend_persistent_model_session_python.src.persistent_model_session imp
 
 from . import briefs, capabilities, enablers, phases
 from . import layout, ops
-from . import priorart
 from .worker import terra
 
 ID_PATTERN = re.compile(r'^[a-z][a-z0-9_]*$')
@@ -181,6 +180,7 @@ def observe(config: dict[str, Any], project: Path) -> dict[str, Any]:
     methods = library_methods(config, brief)
     observation = dict(
         methods=methods, playbook_store=str(config['mizpah'].get('playbook_store') or ''),
+        widget_library=str(config['mizpah'].get('widget_library') or ''),
         project_path=str(project),
         repo=repo_digest(project),
         brief={key: brief.get(key) for key in ('title', 'version', 'status', 'mission', 'needs', 'deliverables',
@@ -204,14 +204,8 @@ def observe(config: dict[str, Any], project: Path) -> dict[str, Any]:
                     bucket=t.get('bucket'), title=t['title'], blocked_reason=t.get('blocked_reason'))
                for t in route.get('tasks') or []],
     )
-    # What the library holds for what is still owed, looked up per entry (no model): the controller's chance to
-    # route an install instead of a build, or mint a reading the way another project did.
-    if config['mizpah'].get('brief_library', True):
-        try:
-            _, owed = coverage(observation)
-            observation['prior_art'] = priorart.render(config, project, owed)
-        except Exception:  # noqa: BLE001 — a lookup never fails an observation
-            observation['prior_art'] = []
+    # The library is searched by the controller through its tools (`playbook`, `cartograph`), not looked up for it:
+    # a list handed over on every step was read as the answer instead of a place to look (2026-09-22).
     return observation
 
 
@@ -574,6 +568,10 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
     lines.append('  The map is yours to read through your tools: `terra known list`, `terra known show <id>`, `terra unknown '
                  'list`, `terra gate`, `terra route status`; `result <task>` for what a work order reported; `read` for a '
                  'text file in the project.')
+    lines.append('  The library — what earlier projects filed for every project to use: procedures, the methods a worker '
+                 'walks, and widgets, the instruments a probe calls — is yours to search: `playbook search`, `playbook load '
+                 '<id>`, `cartograph search`, `cartograph inspect <id>`. Name what fits on the work order ("walk", '
+                 '"widgets"); its worker starts from it instead of building its own.')
     now = phases.current(brief)
     if now:
         lines.append('  Current phase: '+str(now['id'])+'.')
@@ -620,20 +618,6 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
         lines += ['  '+ln for ln in str(observation['memory']).splitlines()]
         lines.append('')
 
-    # ── Library
-    methods = observation.get('methods') or []
-    prior = observation.get('prior_art') or []
-    if methods or prior:
-        lines.append('# Library (what earlier projects filed and every project shares: procedures — the playbook\'s methods '
-                     'a worker walks — and widgets, the instruments a probe calls. Found here by matching the brief; a work '
-                     'order that uses them starts from what is known to work instead of building its own)')
-        if methods:
-            lines.append('  Procedures near this brief (steps, and how many procedures it reaches):')
-            lines += ['    '+m['id']+' — '+str(m.get('title') or '')+' ('+str(m.get('steps', '?'))+' steps, '
-                      +str(m.get('procedures', '?'))+' procedures)' for m in methods]
-        lines += ['  '+ln for ln in prior]
-        lines.append('')
-
     if refusals:
         applied = observation.get('applied_so_far') or {}
         if any(applied.values()):
@@ -678,7 +662,14 @@ CONTROLLER_TOOLS = [
          parameters=dict(type='object', properties=dict(title=dict(type='string')), required=['title']))),
     dict(type='function', function=dict(name='result', description='What a landed work order reported: verdict, turns, knowns, problems, what it minted, its last words.',
          parameters=dict(type='object', properties=dict(task=dict(type='string')), required=['task']))),
+    dict(type='function', function=dict(name='playbook', description='Search the library\'s procedures, read-only: search "<words>" [--limit n], '
+         'load <id> (every step), reach <id> (its length, the procedures it inlines, the widgets it names). JSON back.',
+         parameters=dict(type='object', properties=dict(args=dict(type='string', description='the words after `playbook`')), required=['args']))),
+    dict(type='function', function=dict(name='cartograph', description='Search the library\'s widgets and blueprints, read-only: '
+         'search "<words>" [--top-k n] [--language <lang>], inspect <id> (description, dependencies, examples). JSON back.',
+         parameters=dict(type='object', properties=dict(args=dict(type='string', description='the words after `cartograph`')), required=['args']))),
 ]
+LIBRARY_READ_VERBS = dict(playbook={'search', 'load', 'reach'}, cartograph={'search', 'inspect'})
 
 
 def run_tool(config: dict[str, Any], project: Path, root: Path | None, name: str, args: dict[str, Any]) -> str:
@@ -706,6 +697,16 @@ def run_tool(config: dict[str, Any], project: Path, root: Path | None, name: str
             d = docs[-1]
             text = json.dumps(dict(title=d.get('title'), mission=d.get('mission'), needs=d.get('needs'), deliverables=d.get('deliverables'),
                                    outcome=d.get('stop'), tasks=d.get('tasks'), unknowns=d.get('unknowns')), indent=1)
+        elif name in LIBRARY_READ_VERBS:
+            import shlex
+            words = shlex.split(str(args.get('args') or ''))
+            if not words or words[0] not in LIBRARY_READ_VERBS[name] or any(w in ('>', '|', ';', '&&') for w in words):
+                return 'refused: `'+name+' '+' '.join(words)[:80]+'` is not a read verb of the controller ('+', '.join(sorted(LIBRARY_READ_VERBS[name]))+')'
+            if name == 'cartograph' and words[0] == 'search' and '--local-only' not in words:
+                words.append('--local-only')
+            env = dict(os.environ, WIDGET_LIBRARY_PATH=str(config['mizpah'].get('widget_library') or ''))
+            done = subprocess.run([config['mizpah'][name], *words], cwd=project, capture_output=True, text=True, timeout=60, env=env)
+            text = (done.stdout or done.stderr).strip() or '(no output)'
         elif name == 'result':
             tid = str(args.get('task') or '').strip()
             path = (root/'tasks'/tid/'result.json') if root else None
@@ -819,59 +820,6 @@ def source_exists(project: Path, source: str) -> bool:
     if any(ch in source for ch in '*?['):
         return any(True for _ in project.glob(source))
     return (project/source).exists()
-
-
-def coverage(observation: dict[str, Any]) -> tuple[dict[str, str], list[tuple[str, str]]]:
-    """Computed, not judged: for every brief entry, MET (a known at med or better answers it), OWED (an unknown is
-    open — routed in which task, or unrouted), or UNCOVERED (nothing cites it). Returns the state line per entry
-    ref and the owed/uncovered entries (ref, text) for the prior-art lookup. The controller reasoned this out from
-    the raw lists on every step; a third of its evals were spent restating it."""
-    brief = observation['brief']
-    knowns = {k['id']: k for k in observation['knowns']}
-    task_of: dict[str, str] = {}
-    for t in observation['tasks']:
-        for u in (t.get('unknowns') or [str(t.get('unknown'))]):
-            task_of.setdefault(u, t['id']+' ['+t['status']+']')
-    by_ref: dict[str, list[dict[str, Any]]] = {}
-    for u in observation['unknowns']:
-        notes = str(u.get('notes') or '')
-        for kind, index in re.findall(r'(need|deliverable):(\d+)', notes.split(';')[0]):
-            by_ref.setdefault(kind+':'+index, []).append(u)
-    order = {'high': 3, 'med': 2, 'low': 1}
-    states: dict[str, str] = {}
-    owed: list[tuple[str, str]] = []
-    for key in ('needs', 'deliverables'):
-        for i, text in enumerate(brief.get(key) or [], start=1):
-            ref = key[:-1]+':'+str(i)
-            us = by_ref.get(ref, [])
-            met, open_ = [], []
-            for u in us:
-                k = knowns.get(u['id'])
-                if u.get('status') == 'resolved' and k and order.get(str(k.get('confidence')), 0) >= 2 and not k.get('stale'):
-                    value = k.get('mean') if k.get('mean') is not None else (k.get('rate') if k.get('rate') is not None else k.get('mode'))
-                    bad = k.get('type') == 'boolean' and k.get('rate') is not None and float(k['rate']) < 0.5
-                    if k.get('type') == 'formula':
-                        value, bad = k.get('holds'), k.get('holds') is False
-                    met.append(u['id']+'='+str(value)+(' FALSE' if bad else ''))
-                else:
-                    open_.append(u['id']+(' → '+task_of[u['id']] if u['id'] in task_of else ' (unrouted)'))
-            if not us:
-                states[ref] = 'UNCOVERED'
-                owed.append((ref, str(text)))
-            elif open_:
-                states[ref] = 'OWED: '+', '.join(open_)+((' | met: '+', '.join(met)) if met else '')
-                owed.append((ref, str(text)))
-            elif key == 'needs' and not any(u.get('type') == 'formula' for u in us):
-                # Readings in are not a need met: a need is met when its targets are true, and a target is the
-                # controller's composition over the readings. Printed as MET, decision 2 of the romantic piano
-                # benchmark took the collection for the verdict and waved the delivered piece through (2026-09-22).
-                states[ref] = 'COLLECTED, NOT JUDGED (no target): '+', '.join(met)
-                owed.append((ref, str(text)))
-            else:
-                states[ref] = 'MET: '+', '.join(met)
-                if any(m.endswith('FALSE') for m in met):
-                    owed.append((ref, str(text)))
-    return states, owed
 
 
 def deliverable_ledger(observation: dict[str, Any]) -> list[str]:
@@ -1480,8 +1428,15 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
                 cautions.append('task '+tid+': walk_from '+str(walk_from)+' with no earlier walk of '+repr(walk)+' on the route or a '
                                 'workspace; it starts from 0 — the next walk is routed when the first leaves it')
                 walk_from = 0
+        widgets = [str(w).strip() for w in (item.get('widgets') or []) if str(w).strip()] if isinstance(item.get('widgets'), list) else []
+        library = observation.get('widget_library') or ''
+        unknown_widgets = [w for w in widgets if library and not (Path(library)/w/'widget.json').is_file()]
+        if unknown_widgets:
+            cautions.append('task '+tid+': '+', '.join(unknown_widgets)+' '+('is' if len(unknown_widgets) == 1 else 'are')
+                            +' not in the widget library (`cartograph search` finds what is); dropped from the work order')
+            widgets = [w for w in widgets if w not in unknown_widgets]
         tasks.append(dict(id=tid, title=title, unknowns=ids, unknown=ids[0], bucket=item['bucket'], deps=deps,
-                          enabler=next(iter(carried), ''), walk=walk, walk_from=walk_from))
+                          enabler=next(iter(carried), ''), walk=walk, walk_from=walk_from, widgets=widgets))
     accepted_ids = existing_tasks | {t['id'] for t in tasks}
     for t in tasks:
         gone = [d for d in t['deps'] if d not in accepted_ids]
@@ -1786,6 +1741,8 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any], root:
             args += ['--accept', 'unknown:'+extra]  # the task resolves these too; Terra's map_id holds only one
         if t.get('walk'):
             args += ['--accept', 'walk:'+t['walk']+'@'+str(int(t.get('walk_from') or 0))]   # the procedure walk this task opens
+        for wid in t.get('widgets') or []:
+            args += ['--accept', 'widget:'+wid]   # a widget the controller found for this work; installed before the first turn
         for dep in t['deps']:
             args += ['--dep', dep]
         try:

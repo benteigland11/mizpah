@@ -2172,6 +2172,12 @@ def install_walk_widgets(config: dict[str, Any], project: Path, walk_id: str) ->
         wanted = [str(w) for w in (json.loads(out[out.find('{'):]).get('widgets') or [])]
     except (ValueError, OSError, sp.SubprocessError):
         return []
+    return install_widgets(config, project, wanted)
+
+
+def install_widgets(config: dict[str, Any], project: Path, wanted: list[str]) -> list[str]:
+    """Install library widgets into the project's cg/; the ids present afterwards (a failed install is left to the worker)."""
+    import subprocess as sp
     env = dict(os.environ, WIDGET_LIBRARY_PATH=config['mizpah']['widget_library'])
     present: list[str] = []
     for wid in wanted:
@@ -2186,6 +2192,11 @@ def install_walk_widgets(config: dict[str, Any], project: Path, walk_id: str) ->
         except (OSError, sp.SubprocessError):
             continue
     return present
+
+
+def assigned_widgets(task: dict[str, Any]) -> list[str]:
+    """The widgets the controller named for this task (`widget:<id>` in its acceptance)."""
+    return [e[len('widget:'):].strip() for e in task.get('acceptance') or [] if isinstance(e, str) and e.startswith('widget:')]
 
 
 def assigned_walk(task: dict[str, Any]) -> tuple[str, int]:
@@ -2368,6 +2379,14 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
                 assignment += ('The playbook already has methods near this work; search for them, open the best with '
                                '`playbook open <id> --for ...` and follow it before working the method out yourself:\n'
                                +'\n'.join('  - '+m for m in methods)+'\n')
+        named = assigned_widgets(task)
+        if named:
+            # The controller searched the library and named instruments for this work: installed like a method's.
+            present = install_widgets(config, project, named)
+            assignment += ('The route named widgets for this work, installed under cg/: '+', '.join('`'+w+'`' for w in present)
+                           +(' (not installed: '+', '.join('`'+w+'`' for w in named if w not in present)+' — install it yourself)'
+                             if len(present) < len(named) else '')
+                           +'. Read each one\'s example and call it where it fits; extend it rather than write a near-duplicate.\n')
         from . import bases
         assignment += bases.enabler_text(config)   # the gym's environment base, when it has one
         if config['mizpah'].get('builds_base'):
