@@ -108,3 +108,12 @@ def test_a_work_order_carries_the_controllers_ask_to_the_worker(tmp_path):
                                     [dict(id='anchor', type='boolean', claim='c', evidence_needed='e', quantity='anchor')], 'm', ask=ask)
     lines = text.splitlines()
     assert lines[1] == 'What the controller wants, in its words:' and ask in lines[2] and 'the floor' in lines[3]
+
+
+def test_a_worker_blocked_on_method_is_released_with_the_controllers_words(tmp_path):
+    observation = dict(brief=dict(needs=['n'], deliverables=['d'], non_goals=[]), knowns=[], unknowns=[],
+                       tasks=[dict(id='build_video', status='blocked', unknown='', unknowns=[], blocked_reason='probe too slow')],
+                       widget_library='', methods=[], playbook_store='')
+    words = 'Sample one frame a second instead of decoding every frame; the 10-second probe limit then holds.'
+    accepted, refusals = controller.guard(dict(unblock=[dict(task='build_video', why=words)]), observation)
+    assert accepted['unblock'] == [dict(task='build_video', after='', why=words)] and not refusals

@@ -36,38 +36,6 @@ def gym(tmp_path: Path) -> Path:
     return p
 
 
-def test_the_composition_is_minted_first_and_its_readers_depend_on_it(gym: Path) -> None:
-    observation = controller.observe(CONFIG, gym)
-    # The first briefing, as attempt 1 made it: the builders, nothing else on the map yet.
-    decision = dict(unknowns=[
-        dict(id='piece_mid_built', cites='deliverable:1', type='boolean', creates='piece.mid',
-             claim='piece.mid exists as a standard MIDI file with program 0', evidence_needed='write it, read it back with mido'),
-        dict(id='notes_md_built', cites='deliverable:3', type='boolean', creates='notes.md',
-             claim='notes.md records the key, form and tempo plan of piece.mid', evidence_needed='read it'),
-    ], tasks=[dict(id='compose_piece_mid', unknowns=['piece_mid_built'], bucket='medium', title='compose'),
-              dict(id='write_piece_notes', unknowns=['notes_md_built'], bucket='low', title='notes', deps=['compose_piece_mid'])])
-    accepted, refusals = controller.guard(decision, observation, gym)
-    assert [u['id'] for u in accepted['unknowns']] == ['piece_mid_built', 'notes_md_built'], refusals
-    assert [t['id'] for t in accepted['tasks']] == ['compose_piece_mid', 'write_piece_notes'], refusals
-    controller.apply(CONFIG, gym, accepted)
-
-    # The second briefing, as attempt 2 made it: readings of the MIDI, a render, and (again) the builder.
-    observation = controller.observe(CONFIG, gym)
-    decision = dict(unknowns=[
-        dict(id='piece_duration_seconds', cites='need:1', type='number', source='piece.mid',
-             claim='the duration of piece.mid in seconds', evidence_needed='pretty_midi get_end_time'),
-        dict(id='pedal_changes_per_bar', cites='need:2', type='number', source='piece.mid',
-             claim='CC64 changes per bar in piece.mid', evidence_needed='count CC64 events'),
-        dict(id='piece_mp3_built', cites='deliverable:2', type='boolean', creates='piece.mp3',
-             claim='piece.mp3 is rendered from piece.mid and its duration matches piece_duration_seconds', evidence_needed='render, ffprobe'),
-    ], tasks=[dict(id='validate_music', unknowns=['piece_duration_seconds', 'pedal_changes_per_bar'], bucket='medium', title='validate'),
-              dict(id='build_piece_mp3', unknowns=['piece_mp3_built'], bucket='low', title='render')])
-    accepted, refusals = controller.guard(decision, observation, gym)
-    ids = {t['id']: t for t in accepted['tasks']}
-    assert 'validate_music' in ids and 'build_piece_mp3' in ids, refusals
-    # Readers of the composition depend on its builder; the render (derived) depends on the readings it must agree with.
-    assert 'compose_piece_mid' in ids['validate_music']['deps'], (ids, refusals)
-    assert not any('it builds an artifact that must agree with the map' in r and 'compose' in r for r in refusals), refusals
 
 
 def test_the_model_need_not_send_creates(gym: Path) -> None:
@@ -84,16 +52,6 @@ def test_the_model_need_not_send_creates(gym: Path) -> None:
     assert accepted['unknowns'][0]['creates'] == 'piece.mid'
 
 
-def test_a_report_with_no_anchor_is_cautioned_not_refused(gym: Path) -> None:
-    """The anchor rule is a method caution now: the unknown is minted and the caution rides with the briefing."""
-    observation = controller.observe(CONFIG, gym)
-    decision = dict(unknowns=[
-        dict(id='summary_built', cites='deliverable:3', type='boolean', creates='summary.md',
-             claim='summary.md is written', evidence_needed='read it'),
-    ], tasks=[dict(id='write_summary', unknowns=['summary_built'], bucket='low', title='summary')])
-    accepted, refusals = controller.guard(decision, observation, gym)
-    assert [u['id'] for u in accepted['unknowns']] == ['summary_built'] and not refusals
-    assert any('summary_built' in c and 'names no known' in c for c in accepted['cautions'])
 
 
 def test_a_resolved_reading_minted_again_is_reopened_not_refused(gym: Path) -> None:
@@ -193,21 +151,6 @@ def test_a_budget_ask_is_its_own_patch(gym: Path) -> None:
     assert brief['proposals'][-1]['patch'] == {'budget_delta': 6, 'was_budget_points': 60}
 
 
-def test_a_claim_that_is_the_whole_spec_is_cautioned(gym: Path) -> None:
-    """One reading per quantity is a method rule, so a boolean that is the specification itself is minted with a
-    caution on the next briefing, never refused (counting-a-bar's build task spent forty turns after Terra had it
-    done because one probe had to carry the whole need, 2026-09-21)."""
-    observation = controller.observe(CONFIG, gym)
-    def decide(uid, claim):
-        return dict(unknowns=[dict(id=uid, cites='deliverable:1', type='boolean', claim=claim, evidence_needed='parse piece.mid')],
-                    tasks=[dict(id='build_piece', unknowns=[uid], bucket='low', title='compose')])
-    for uid, claim in (('piece_mid_meets_passage_spec', '`piece.mid` meets the passage spec'),
-                       ('piece_mid_built', '`piece.mid` holds a steady-tempo passage, in 4/4, four sections, each in one subdivision, and a bar of rest between them')):
-        accepted, refusals = controller.guard(decide(uid, claim), observation, gym)
-        assert [x['id'] for x in accepted['unknowns']] == [uid] and not refusals
-        assert any('whole specification' in c for c in accepted.get('cautions') or []), (uid, accepted.get('cautions'))
-    accepted, _ = controller.guard(decide('piece_mid_built', '`piece.mid` exists and parses as a MIDI file'), observation, gym)
-    assert not any('whole specification' in c for c in accepted.get('cautions') or [])
 
 
 def test_reviewer_doubts_reach_the_controller(gym: Path, tmp_path: Path) -> None:

@@ -226,7 +226,7 @@ End every step by calling `decide` with one decision object — reading is done 
  "tasks": [{"id": "snake_case", "title": "...", "ask": "what you want, in your words", "unknowns": ["..."], "bucket": "low|medium|high", "deps": [], "walk": "<procedure id, optional>", "widgets": ["<widget id, optional>"]}],
  "cancel": [{"task": "<id>", "why": "..."}],
  "reopen": [{"task": "<id>", "why": "what no longer stands"}],
- "unblock": [{"task": "<id>", "after": "<done work order that built what was missing>"}],
+ "unblock": [{"task": "<id>", "after": "<done work order that built what was missing>", "why": "or: your words on how to go on"}],
  "prioritize": [{"task": "<id>", "priority": "p0|p1|p2|p3", "why": "..."}],
  "rebucket": [{"task": "<id>", "bucket": "medium|high", "why": "..."}],
  "retire": [{"unknown": "<id>", "why": "why the map no longer needs it answered"}],

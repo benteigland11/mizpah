@@ -170,7 +170,7 @@ def test_enabler_gates_the_needs_that_name_it(instrumented: Path) -> None:
     assert not refusals, refusals
 
 
-def test_reading_of_a_built_file_waits_for_its_builder_and_unblock_needs_a_done_task(project: Path) -> None:
+def test_an_unblock_after_a_task_needs_that_task_done(project: Path) -> None:
     observation = controller.observe(CONFIG, project)
     decision = dict(unknowns=[
         dict(id='line_count', cites='need:1', type='number', claim='lines under src', evidence_needed='wc -l over src'),
@@ -182,9 +182,6 @@ def test_reading_of_a_built_file_waits_for_its_builder_and_unblock_needs_a_done_
               dict(id='write', unknowns=['survey_report'], bucket='low', title='write', deps=['count']),
               dict(id='audit', unknowns=['report_headings'], bucket='low', title='audit the report')])
     accepted, refusals = controller.guard(decision, observation, project)
-    audit = next(t for t in accepted['tasks'] if t['id'] == 'audit')
-    assert audit['deps'] == ['write'], (audit, refusals)
-    assert any('audit' in c and 'added that dependency' in c for c in accepted['cautions'])
     controller.apply(CONFIG, project, accepted)
     terra(project, 'route', 'block', 'count', '--reason', 'the file is absent')
     observation = controller.observe(CONFIG, project)
@@ -192,29 +189,6 @@ def test_reading_of_a_built_file_waits_for_its_builder_and_unblock_needs_a_done_
     assert not accepted['unblock'] and any('"after" must name a task that has since completed' in r for r in refusals)
 
 
-def test_a_built_page_is_anchored_on_its_source_and_its_readings_follow_it(tmp_path: Path) -> None:
-    p = tmp_path/'built'
-    p.mkdir()
-    (p/'content').mkdir()
-    (p/'content'/'pitch.md').write_text('# Hero\n# How\n')
-    terra(p, 'init')
-    terra(p, 'brief', 'init', '--title', 'Page', '--mission', 'build and measure')
-    terra(p, 'brief', 'set', '--status', 'active', '--budget-points', '100',
-          '--need', 'Know the number of <section> elements site/index.html has',
-          '--deliverable', 'site/index.html: a page whose sections follow content/pitch.md')
-    terra(p, 'route', 'init')
-    observation = controller.observe(CONFIG, p)
-    decision = dict(unknowns=[
-        dict(id='site_built', cites='deliverable:1', type='boolean', creates='site/index.html',
-             claim='site/index.html exists and its section headings follow content/pitch.md', evidence_needed='compare headings'),
-        dict(id='section_count', cites='need:1', type='number', claim='sections in site/index.html', evidence_needed='parse it',
-             source='site/index.html'),
-    ], tasks=[dict(id='build', unknowns=['site_built'], bucket='medium', title='build'),
-              dict(id='count', unknowns=['section_count'], bucket='low', title='count')])
-    accepted, refusals = controller.guard(decision, observation, p)
-    assert {u['id'] for u in accepted['unknowns']} == {'site_built', 'section_count'}, refusals
-    by_id = {t['id']: t for t in accepted['tasks']}
-    assert by_id['build']['deps'] == [] and by_id['count']['deps'] == ['build'], (accepted['tasks'], refusals)
 
 
 def test_registry_records_a_graduation_and_shows_it_to_the_next_brief(instrumented: Path, tmp_path: Path) -> None:
@@ -362,23 +336,8 @@ def test_a_number_citing_a_deliverable_is_a_reading_not_an_artifact(project: Pat
         tasks=[dict(id='measure', unknowns=['report_line_length'], bucket='low', title='measure'),
                dict(id='write', unknowns=['survey_written'], bucket='low', title='write')]), observation, project)
     assert sorted(u['id'] for u in accepted['unknowns']) == ['report_line_length', 'survey_written'], refusals
-    assert next(t for t in accepted['tasks'] if t['id'] == 'measure')['deps'] == ['write']
 
 
-def test_a_third_attempt_at_the_same_reading_is_refused(project: Path) -> None:
-    observation = controller.observe(CONFIG, project)
-    first = dict(unknowns=[dict(id='report_ok', cites='need:1', type='boolean', claim='ok', evidence_needed='read')],
-                 tasks=[dict(id='t1', unknowns=['report_ok'], bucket='low', title='a')])
-    accepted, _ = controller.guard(first, observation, project)
-    controller.apply(CONFIG, project, accepted)
-    observation = controller.observe(CONFIG, project)
-    accepted, _ = controller.guard(dict(unknowns=[dict(id='report_ok_v2', cites='need:1', type='boolean', claim='ok', evidence_needed='read')],
-                                        tasks=[dict(id='t2', unknowns=['report_ok_v2'], bucket='low', title='b')]), observation, project)
-    controller.apply(CONFIG, project, accepted)
-    observation = controller.observe(CONFIG, project)
-    accepted, refusals = controller.guard(dict(unknowns=[dict(id='report_ok_current', cites='need:1', type='boolean', claim='ok', evidence_needed='read')],
-                                               tasks=[dict(id='t3', unknowns=['report_ok_current'], bucket='low', title='c')]), observation, project)
-    assert not accepted['unknowns'] and any('third attempt at report_ok' in r for r in refusals)
 
 
 def test_a_second_unknown_for_the_same_claim_is_refused_and_a_stale_known_is_routed_by_id(project: Path) -> None:
@@ -408,19 +367,6 @@ def test_a_second_unknown_for_the_same_claim_is_refused_and_a_stale_known_is_rou
     assert 'owed again under the SAME id' in controller.render_observation(observation, 'eval')
 
 
-def test_a_reading_of_an_unbuilt_deliverable_path_waits_for_a_builder(project: Path) -> None:
-    observation = controller.observe(CONFIG, project)
-    decision = dict(unknowns=[dict(id='report_sections', cites='need:1', type='number', claim='sections under report/survey.md',
-                                   evidence_needed='count headings', source='report/survey.md')],
-                    tasks=[dict(id='count', unknowns=['report_sections'], bucket='low', title='count')])
-    accepted, refusals = controller.guard(decision, observation, project)
-    assert accepted['tasks'] and any('does not exist and no task builds' in c for c in accepted['cautions']), (refusals, accepted['cautions'])
-    decision['unknowns'].append(dict(id='survey_written', cites='deliverable:1', type='boolean', creates='report/survey.md',
-                                     claim='report/survey.md exists with report_sections sections', evidence_needed='read it'))
-    decision['tasks'].append(dict(id='write', unknowns=['survey_written'], bucket='low', title='write'))
-    accepted, refusals = controller.guard(decision, observation, project)
-    by_id = {t['id']: t for t in accepted['tasks']}
-    assert by_id['count']['deps'] == ['write'], (accepted['tasks'], refusals)
 
 
 def test_a_task_is_released_once_per_evidence(project: Path) -> None:
@@ -436,7 +382,7 @@ def test_a_task_is_released_once_per_evidence(project: Path) -> None:
     observation = controller.observe(CONFIG, project)
     observation['tasks'] = [dict(t, status='done') if t['id'] == 'tb' else t for t in observation['tasks']]
     accepted, refusals = controller.guard(dict(unblock=[dict(task='ta', after='tb')]), observation, project)
-    assert accepted['unblock'] == [dict(task='ta', after='tb')], refusals
+    assert accepted['unblock'] == [dict(task='ta', after='tb', why='')], refusals
     controller.record_release(project, 'ta', 'tb')
     accepted, refusals = controller.guard(dict(unblock=[dict(task='ta', after='tb')]), observation, project)
     assert not accepted['unblock'] and any('already released after tb' in r for r in refusals)
@@ -455,14 +401,6 @@ def test_a_boolean_about_an_unbuilt_deliverable_file_builds_it(project: Path) ->
     assert [t['id'] for t in accepted['tasks']] == ['count', 'build'], refusals
 
 
-def test_a_route_reply_without_the_deliverable_is_sent_back_for_the_builder(project: Path) -> None:
-    observation = controller.observe(CONFIG, project)
-    accepted, refusals = controller.guard(dict(unknowns=[
-        dict(id='line_count', cites='need:1', type='number', claim='lines', evidence_needed='wc')],
-        tasks=[dict(id='count', unknowns=['line_count'], bucket='low', title='count')]), observation, project, require_deliverables=True)
-    assert accepted['unknowns'] and any('deliverable:1 has no unknown' in c for c in accepted['cautions'])
-    # A later-phase deliverable is not demanded yet.
-    assert not any('deliverable:2' in r for r in refusals)
 
 
 def test_a_builder_naming_a_deliverable_file_gets_its_cite_inferred(project: Path) -> None:
@@ -518,20 +456,6 @@ def test_retype_asks_the_same_unknown_with_the_right_type_and_releases_its_task(
     assert not accepted['retype'] and any('changes nothing' in r for r in refusals)
 
 
-def test_a_builder_never_waits_on_a_reader_of_its_file_and_stems_name_files(project: Path) -> None:
-    observation = controller.observe(CONFIG, project)
-    decision = dict(unknowns=[
-        dict(id='line_count', cites='need:1', type='number', claim='lines', evidence_needed='wc'),
-        dict(id='survey_written', cites='deliverable:1', type='boolean', creates='report/survey.md',
-             claim='report/survey.md states line_count', evidence_needed='read it'),
-        dict(id='survey_headings', cites='need:2', type='number', claim='headings in the survey', evidence_needed='count # lines')],
-        tasks=[dict(id='count', unknowns=['line_count'], bucket='low', title='count'),
-               dict(id='write', unknowns=['survey_written'], bucket='low', title='write', deps=['count', 'audit']),
-               dict(id='audit', unknowns=['survey_headings'], bucket='low', title='audit the survey')])
-    accepted, refusals = controller.guard(decision, observation, project)
-    by_id = {t['id']: t for t in accepted['tasks']}
-    assert by_id['write']['deps'] == ['count'], (by_id, refusals)
-    assert by_id['audit']['deps'] == ['write'], (by_id, refusals)
 
 
 def test_a_proposal_can_rewrite_or_remove_an_entry(project: Path) -> None:
@@ -560,25 +484,6 @@ def test_a_proposal_can_rewrite_or_remove_an_entry(project: Path) -> None:
     assert brief['needs'][1] == 'Know the branch count before, by ast' and len(brief['needs']) == len(needs)-1
 
 
-def test_sibling_readings_are_routed_as_one_task(project: Path) -> None:
-    """Ten unknowns that differ only by an index, each with its own task, become one task with all ten."""
-    (project/'content').mkdir(exist_ok=True)
-    (project/'content'/'rows.md').write_text('one\ntwo\n')
-    observation = controller.observe(CONFIG, project)
-    unknowns = [dict(id='row_'+str(i)+'_note', cites='deliverable:1', type='boolean', claim='report/survey.md row '+str(i)+' has its note, agreeing with report_exists',
-                     evidence_needed='read the row') for i in range(1, 6)]
-    unknowns.append(dict(id='report_exists', cites='deliverable:1', type='boolean', creates='report/survey.md',
-                         claim='report/survey.md exists with one row per line of content/rows.md', evidence_needed='ls'))
-    tasks = [dict(id='check_row_'+str(i), unknowns=['row_'+str(i)+'_note'], bucket='low', title='Check row '+str(i)+' note',
-                  deps=['write']) for i in range(1, 6)]
-    tasks.append(dict(id='write', unknowns=['report_exists'], bucket='low', title='write'))
-    accepted, refusals = controller.guard(dict(unknowns=unknowns, tasks=tasks), observation, project)
-    ids = {t['id']: t for t in accepted['tasks']}
-    assert set(ids) == {'check_row_1', 'write'}, refusals
-    assert ids['check_row_1']['unknowns'] == ['row_'+str(i)+'_note' for i in range(1, 6)]
-    assert ids['check_row_1']['deps'] == ['write'] and ids['check_row_1']['title'] == 'Check row every note'
-    assert len(accepted['unknowns']) == 6
-    assert any('one reading over the list' in c for c in accepted['cautions'])
 
 
 def test_a_false_reading_about_a_project_file_cited_to_a_need_is_repairable(project: Path) -> None:

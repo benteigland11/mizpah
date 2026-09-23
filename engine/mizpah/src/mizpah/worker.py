@@ -2388,6 +2388,17 @@ def _run_task(config: dict[str, Any], project: Path, root: Path, task_id: str | 
             # rewrite of the romantic piano from recording what the controller's critique taught, 2026-09-23).
             (root/REFLECTED_MARK).unlink(missing_ok=True)
             (root/WRITEUP_MARK).unlink(missing_ok=True)
+        release = root/'release.md'
+        if release.exists() and release.read_text().strip():
+            # The controller released this worker's block with its own words on how to go on.
+            status_now = session.status()
+            from . import prompts as _prompts
+            text = _prompts.message('released_worker', why=release.read_text().strip())
+            if status_now['phase'] == 'complete':
+                session.continue_with(text, label='released')
+            elif status_now['phase'] == 'worker' and status_now['pending_io'] is None:
+                session.interject(text, label='released')
+            release.rename(root/'release.delivered.md')
         nudge = root/'nudge.md'
         if nudge.exists() and nudge.read_text().strip():
             status_now = session.status()

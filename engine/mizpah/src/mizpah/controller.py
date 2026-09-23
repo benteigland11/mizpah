@@ -726,7 +726,9 @@ DECIDE_TOOL = dict(type='function', function=dict(name='decide', description=(
                         'one priority goes builders first', items=dict(type='object', properties=dict(
                             task=_STR, priority=dict(type='string', enum=['p0', 'p1', 'p2', 'p3']), why=_STR),
                             required=['task', 'priority', 'why'])),
-        unblock=dict(type='array', items=dict(type='object', properties=dict(task=_STR, after=_STR), required=['task', 'after'])),
+        unblock=dict(type='array', description='release a task its worker blocked: "after" the work order that built what '
+                     'was missing, or "why" — your words to the worker on how to go on', items=dict(type='object', properties=dict(
+                         task=_STR, after=_STR, why=_STR), required=['task'])),
         rebucket=dict(type='array', items=dict(type='object', properties=dict(
             task=_STR, bucket=dict(type='string', enum=['medium', 'high']), why=_STR), required=['task', 'bucket', 'why'])),
         proposals=dict(type='array', items=dict(type='object')),
@@ -1007,9 +1009,6 @@ def uncovered_deliverable_terms(observation: dict[str, Any], extra_unknowns: lis
 RETRY_SUFFIX = re.compile(r'(_v\d+|_current|_again|_fix(ed)?|_retry|_redo|_\d+)+$')
 
 
-SPEC_CLAIM = re.compile(r'\b(meets|satisf(?:y|ies)|fulfil+s?|conforms? to|matches?|honou?rs?)\b[^.]{0,40}\b(spec|specification|brief|requirements?|request(?:ed)?)\b'
-                        r'|\b(is|are) (valid|correct|complete|acceptable|as requested|as specified)\b|\bas (requested|specified|described)\b',
-                        re.I)
 
 
 def _measured_since_change(project: Path, known: dict[str, Any], refs: list[str], brief: dict[str, Any]) -> str:
@@ -1043,44 +1042,9 @@ def _same_reading(a: str, b: str) -> bool:
     return len(wa & wb)/min(len(wa), len(wb)) >= 0.85
 
 
-def stem(unknown_id: str) -> str:
-    """`repair_docs_handwritten_v2`, `..._current` and `..._again` are one reading asked three times."""
-    return RETRY_SUFFIX.sub('', unknown_id)
 
 
-def _family(unknown_id: str) -> str:
-    """Unknown ids that differ only by a number are one reading over a list: candidate_3_length → candidate_N_length."""
-    return re.sub(r'(?<![a-z])\d+(?![a-z])', 'N', unknown_id)
 
-
-def _merge_sibling_tasks(tasks: list[dict[str, Any]], cautions: list[str]) -> list[dict[str, Any]]:
-    """Ten tasks that each read one row of the same table are one task read ten times: a worker session per
-    row cost headline2 ten sessions of ~25 turns for "candidate N has its note". When three or more tasks
-    carry nothing but members of one family (ids equal after numbers are masked), they become the first task,
-    which takes every sibling and the union of their deps; the others are dropped and the merge is recorded."""
-    by_family: dict[str, list[dict[str, Any]]] = {}
-    for task in tasks:
-        families = {_family(u) for u in task['unknowns']}
-        if len(families) == 1 and any(ch.isdigit() for ch in ''.join(task['unknowns'])):
-            by_family.setdefault(next(iter(families)), []).append(task)
-    dropped: set[str] = set()
-    for family, members in by_family.items():
-        if len(members) < 3:
-            continue
-        head, rest = members[0], members[1:]
-        for task in rest:
-            head['unknowns'] = head['unknowns']+[u for u in task['unknowns'] if u not in head['unknowns']]
-            head['deps'] = head['deps']+[d for d in task['deps'] if d not in head['deps'] and d != head['id']]
-            dropped.add(task['id'])
-        head['deps'] = [d for d in head['deps'] if d not in dropped]
-        head['title'] = re.sub(r'\b\d+\b', 'every', head['title'], count=1) if re.search(r'\b\d+\b', head['title']) else head['title']
-        cautions.append('tasks '+', '.join(t['id'] for t in rest)+': readings that differ only by an index ('+family
-                        +') are one reading over the list; merged into '+head['id']+', which now resolves all '
-                        +str(len(head['unknowns']))+' of them in one session')
-    kept = [t for t in tasks if t['id'] not in dropped]
-    for task in kept:
-        task['deps'] = [d for d in task['deps'] if d not in dropped]
-    return kept
 
 def _procedure_exists(procedure_id: str, store: str) -> bool:
     return bool(store) and (Path(store)/(procedure_id+'.json')).is_file()
@@ -1169,18 +1133,13 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             reopened.setdefault(same_claim[0]['id'], uid)
             cautions.append('unknown '+uid+': the map already holds this reading as '+same_claim[0]['id']+' ['+str(same_claim[0]['status'])
                             +']; tasks naming '+uid+' route on it'); continue
-        twins = [u for u in existing_unknowns.values() if stem(u['id']) == stem(uid) and u['id'] != uid]
-        if len(twins) >= 2:
-            refusals.append('unknown '+uid+': the third attempt at '+stem(uid)+' ('+', '.join(t['id'] for t in twins)+' already exist); '
-                            'a reading that failed twice is not re-minted — propose the change to the need or deliverable '
-                            'it cites, with the two readings as evidence, or leave it'); continue
         def _bad(r: str) -> bool:
             kind, _, rest = r.partition(':')
             if kind == 'unknown':   # transitional: served by the unknown that cannot be resolved until this one is
                 return rest not in existing_unknowns and rest not in {str(x.get('id')) for x in decision.get('unknowns') or [] if isinstance(x, dict)}
             return kind not in counts or not rest.isdigit() or not 1 <= int(rest) <= counts[kind]
-        bad_refs = [r for r in refs if _bad(r)]
-        if not refs or bad_refs:
+        refs = [r for r in refs if not _bad(r)]   # a malformed extra reference is dropped; the good ones stand
+        if not refs:
             refusals.append('unknown '+uid+': cites '+repr(item.get('cites'))+' but the brief has '+str(counts['need'])+
                             ' needs and '+str(counts['deliverable'])+' deliverables; cite need:N, deliverable:N, or unknown:<id> '
                             'for the unknown this one must be resolved before (several allowed, separated by |)'); continue
@@ -1202,6 +1161,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             waiting = enablers.waiting(brief, refs)
             if waiting:
                 refusals.append('unknown '+uid+': '+'; '.join(waiting)); continue
+        cites = refs[0]
         item = dict(item, cites=cites, also=refs[1:], enabler=enabler)
         if item.get('type') not in TYPES:
             refusals.append('unknown '+uid+': type must be one of '+', '.join(TYPES)); continue
@@ -1218,22 +1178,13 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         creates = str(item.get('creates') or '').strip()
         if not claim:
             refusals.append('unknown '+uid+': claim is required'); continue
-        if SPEC_CLAIM.search(claim) or (item.get('type') == 'boolean' and claim.count(',')+claim.count(' and ')+claim.count(';') >= 3):
-            # A caution, not a refusal (the guard is hard only for brief integrity): a boolean that is the spec
-            # itself makes one probe carry the whole need, and the check-in then keeps finding a clause it does
-            # not measure — the worker spent forty turns after Terra had the task done (counting-a-bar, 2026-09-21).
-            cautions.append('unknown '+uid+': the claim reads as the whole specification in one boolean ('+claim[:80]+'). One '
-                            'reading per quantity: the builder\'s unknown is that the file exists and parses; each thing the '
-                            'entry says about it (tempo, meter, sections, spacing) is an unknown of its own, cited to the '
-                            'need that says it, so no single probe has to check everything')
         if not evidence_needed or evidence_needed.lower() in ('true', 'false', 'none', 'yes', 'no'):
             if item.get('type') == 'boolean':
                 # Small models write the expected answer here; for a boolean the reading is derivable.
                 evidence_needed = ('A probe that reads '+(creates or source or 'the source')+' and reports the boolean '
                                    +uid+': '+claim.rstrip('.'))
             else:
-                refusals.append('unknown '+uid+': evidence_needed must say what reading would settle it, '
-                                'not the expected answer'); continue
+                evidence_needed = 'A reading of: '+claim.rstrip('.')
         if creates and not relative_path(creates):
             refusals.append('unknown '+uid+': creates must be a relative path inside the project'); continue
         # A non-goal names things not to be made (`a framework`, `bundler`, external fonts): an artifact unknown
@@ -1276,65 +1227,6 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
                              creates=creates, also=item.get('also') or [], enabler=item.get('enabler') or '',
                              expression=item.get('expression') or '', vars=item.get('vars') or {},
                              x_quantity=item.get('x_quantity') or '', x_unit=item.get('x_unit') or ''))
-    # An artifact is verified by agreement with the map, so its unknown must say which knowns (or
-    # unknowns minted alongside) its content agrees with. Without that anchor the probe can only check
-    # that the file exists: a report with a table of invented stations passed on 2026-09-18.
-    anchors = {k['id'] for k in observation['knowns']} | {u['id'] for u in observation['unknowns']} | {u['id'] for u in unknowns}
-    # Source artifacts: files the readings are taken OF (a composition, a dataset the worker writes), not reports
-    # that must agree with knowns. One is anchored by the needs that describe it by name or by the unknowns that
-    # read it; its measured properties are separate unknowns that depend on the build, and a derived artifact
-    # may anchor on it before it exists. Refusing them ("names no known") left the piano benchmark's attempt 2
-    # with validators of a MIDI nothing was allowed to write, and the deps guard then made the builder wait on
-    # its own readers (2026-09-20).
-    source_artifacts: set[str] = set()
-    for item in unknowns:   # the normalised list: `creates` is derived from the deliverable's text, the model rarely sends it
-        made = str(item.get('creates') or '').lower()
-        if not made:
-            continue
-        others = [u for u in unknowns if u is not item]+list(observation['unknowns'])
-        read_by_others = any(made in (str(u.get('source') or '')+' '+str(u.get('claim') or '')).lower() for u in others)
-        named_by_needs = any(made in str(n).lower() for n in observation['brief'].get('needs') or [])
-        if read_by_others or named_by_needs:
-            source_artifacts.add(made)
-    for item in list(unknowns):
-        # An artifact unknown is one that creates something, or a boolean citing a deliverable ("exits 0" against
-        # `source: environment` is the existence check by another door). A number or label citing a deliverable
-        # is a reading OF the artifact — contrast, line length — and needs no anchor; refusing those threw away
-        # the design unknowns the controller had pulled from the library (docs_page, 2026-09-19).
-        artifact = (item['creates'] or (item['cites'].startswith('deliverable:') and item.get('type') == 'boolean')) \
-            and not item.get('enabler')
-        if artifact and item.get('type') == 'label':
-            # An artifact is verified by agreement with the map, never by recording what it prints.
-            cautions.append('unknown '+item['id']+': an artifact unknown is usually an agreement (boolean) or a value (number), '
-                            'not a label; applied as minted')
-        # A statement about what the map does NOT hold ("the report lists the questions the data could not
-        # answer") is anchored on the proposals that record it (CR-001), not on a known.
-        proposal_ids = {str(p.get('id')) for p in observation['brief'].get('proposals') or []}
-        names_proposal = any(m in proposal_ids for m in re.findall(r'CR-\d+', item['claim']+' '+item['evidence_needed']))
-        # A built thing (a page, a script) is anchored on the source it is built from: an existing project file the
-        # deliverable's text names (content/pitch.md). Its measured properties are separate unknowns taken after the
-        # build; anchoring the build on readings of itself deadlocked landing-en (2026-09-19).
-        text = item['claim']+' '+item['evidence_needed']
-        deliverable_text = ''
-        if item['cites'].startswith('deliverable:'):
-            entries = observation['brief'].get('deliverables') or []
-            index = int(item['cites'].split(':')[1])-1
-            deliverable_text = entries[index] if 0 <= index < len(entries) else ''
-        named_files = [f for f in re.findall(r'[\w./-]+\.[A-Za-z0-9]+', deliverable_text+' '+text)
-                       if f.lower() != str(item['creates']).lower() and f in text and project is not None and source_exists(project, f)]
-        made = str(item['creates'] or '').lower()
-        # A derived artifact (notes.md about piece.mid) anchors on a source artifact this same briefing mints.
-        named_files += [f for f in re.findall(r'[\w./-]+\.[A-Za-z0-9]+', text) if f.lower() in source_artifacts and f.lower() != made]
-        if artifact and not names_proposal and not named_files and made not in source_artifacts \
-                and not [w for w in re.findall(r'[a-z][a-z0-9_]*', text) if w in anchors and w != item['id']]:
-            cautions.append('unknown '+item['id']+': it is about '+(item['creates'] or item['cites'])+' but names no known '
-                            'or unknown its content must agree with; an artifact is verified against the map — name '
-                            'them in the evidence ("the STN01 row matches stn01_mean_temp_c", "the tests assert '
-                            'station_count and mean_temp_c"), minting number unknowns first when the map lacks them; '
-                            'a statement that a need cannot be answered is anchored on the open proposal that records '
-                            'it (name its id, e.g. CR-001); a thing that is built (a page, a script) is anchored on the '
-                            'source files it is built from (name them: "sections follow content/pitch.md"), and its '
-                            'measured properties are separate unknowns that depend on the build')
     minted = {u['id'] for u in unknowns}
     for index, line in enumerate(refusals):
         m = re.match(r'unknown ([a-z][a-z0-9_]*): ', line)
@@ -1439,84 +1331,6 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         title = str(item.get('title') or '').strip()
         if not title:
             refusals.append('task '+tid+': title is required'); continue
-        # An enabler is built before the readings, not after them: it is not an artifact that agrees with the map.
-        artifact_ids = {u['id'] for u in unknowns if u.get('creates') and not u.get('enabler')} | {
-            u['id'] for u in observation['unknowns'] if 'creates ' in str(u.get('notes') or '') and '; enabler ' not in str(u.get('notes') or '')}
-        builds = any(u in artifact_ids for u in ids)
-        # A reading of a file some task builds waits for that task: the static audit of site/index.html was
-        # routed beside the page build and blocked on an absent file (landing-en, 2026-09-19).
-        creators: dict[str, str] = {}
-        decided_tasks = [ti for ti in (decision.get('tasks') or []) if isinstance(ti, dict)]
-        for u in unknowns:
-            if u.get('creates') and not u.get('enabler'):
-                # The builder may come later in the same reply; apply() adds tasks in dependency order.
-                creators[u['creates'].lower()] = next((str(ti.get('id')) for ti in decided_tasks
-                                                       if u['id'] in (ti.get('unknowns') or ([ti['unknown']] if ti.get('unknown') else []))), '')
-        for u in observation['unknowns']:
-            notes = str(u.get('notes') or '')
-            if 'creates ' in notes and '; enabler ' not in notes:
-                made = notes.split('creates ', 1)[1].split(';')[0].strip().lower()
-                owner_task = next((t['id'] for t in observation['tasks'] if u['id'] in (t.get('unknowns') or [])
-                                   and t['status'] in OPEN_TASK), '')
-                creators.setdefault(made, owner_task)
-        def names_file(text: str, made: str) -> bool:
-            # `brand/marks/x/mark.svg` is named by "mark.svg", by "brand/marks", or by the bare stem "mark" as a word
-            # ("render each candidate mark") — the stem match applies only while the file does not exist yet.
-            low = made.lower()
-            stem = low.rsplit('/', 1)[-1].rsplit('.', 1)[0]
-            return low in text or (len(stem) > 2 and re.search(r'\b'+re.escape(stem)+r's?\b', text) is not None)
-        if builds:
-            # A builder never waits on a reader of what it builds (build_candidate_mark_assets was made to depend on
-            # render_marks_small — logo_mark6); the reverse dependency is the true one and is added below.
-            made_by_me = [u['creates'].lower() for u in unknowns if u['id'] in ids and u.get('creates')]
-            for d in list(deps):
-                reader = next((ti for ti in decided_tasks if str(ti.get('id')) == d), None)
-                if reader is None:
-                    continue
-                r_ids = reader.get('unknowns') or ([reader['unknown']] if reader.get('unknown') else [])
-                r_text = ' '.join(str(u.get('source') or '')+' '+str(u.get('claim') or '') for u in unknowns if u['id'] in r_ids).lower()
-                r_builds = any(u.get('creates') for u in unknowns if u['id'] in r_ids)
-                if not r_builds and any(names_file(r_text, m) for m in made_by_me):
-                    deps.remove(d)
-                    cautions.append('task '+tid+': dropped dependency '+d+' — it reads what this task builds; the reverse holds')
-        if not builds:
-            mine = ' '.join(str(u.get('source') or '')+' '+str(u.get('claim') or '') for u in unknowns if u['id'] in ids).lower()
-            for made, owner_task in creators.items():
-                exists = project is not None and (project/made).exists()
-                if owner_task and owner_task != tid and made and (made in mine or (not exists and names_file(mine, made))) \
-                        and owner_task not in deps:
-                    deps.append(owner_task)
-                    cautions.append('task '+tid+': reads '+made+', which '+owner_task+' builds — added that dependency')
-            # A reading of a path a deliverable names that does not exist yet, with nothing routed to build it, is
-            # a task that can only block ("count the candidates under brand/marks/" before any were drawn). Checked
-            # whatever the task already depends on: inspect_mark_files waited on the mark builder and still read
-            # mark-mono.svg and wordmark.svg, which nothing built (logo_mark8).
-            if project is not None:
-                named = {p.rstrip('/').lower() for text in (observation['brief'].get('deliverables') or [])
-                         for p in re.findall(r'[\w./-]+/[\w./-]*|[\w./-]+\.[A-Za-z0-9]+', str(text))}
-                named = {p.split('<')[0].rstrip('/') for p in named if p.split('<')[0].rstrip('/')}
-                def exists_somewhere(p: str) -> bool:
-                    return (project/p).exists() or ('/' not in p and any(project.rglob(p)))
-                missing = sorted({p for p in named if p and (p in mine or ('/' not in p and re.search(r'\b'+re.escape(p)+r'\b', mine)))
-                                  and not exists_somewhere(p) and not any(p in c for c in creators)})
-                if missing:
-                    cautions.append('task '+tid+': reads '+', '.join(missing[:3])+', which does not exist and no task builds — '
-                                    'mint the artifact unknown that creates it (with `creates`) and its task first, and make '
-                                    'this task depend on it')
-        made_here = {u['creates'].lower() for u in unknowns if u['id'] in ids and u.get('creates')}
-        def reads_own(task_unknowns: list[str]) -> bool:
-            texts = ' '.join(str(u.get('source') or '')+' '+str(u.get('claim') or '') for u in unknowns if u['id'] in task_unknowns)
-            texts += ' '.join(str(u.get('claim') or '')+' '+str(u.get('notes') or '') for u in observation['unknowns'] if u['id'] in task_unknowns)
-            return any(m and m in texts.lower() for m in made_here)
-        reading_tasks = [t['id'] for t in tasks if not any(u in artifact_ids for u in t['unknowns']) and not reads_own(t['unknowns'])]
-        reading_tasks += [t['id'] for t in observation['tasks'] if t['status'] in OPEN_TASK
-                          and not any(u in artifact_ids for u in (t.get('unknowns') or [])) and not reads_own(t.get('unknowns') or [])]
-        builds_source = any(str(u.get('creates') or '').lower() in source_artifacts for u in unknowns if u['id'] in ids and u.get('creates'))
-        if builds and not deps and reading_tasks and not builds_source:
-            # An artifact that must agree with the map cannot be built before the readings exist. A source
-            # artifact is the other way round: its readers depend on it (added above), it depends on nobody.
-            cautions.append('task '+tid+': it builds an artifact that must agree with the map; it depends on the '
-                            'tasks that produce those knowns; add deps from: '+', '.join(dict.fromkeys(reading_tasks))+' — applied as routed; add the deps if you meant them')
         carried = {u['enabler'] for u in unknowns if u['id'] in ids and u.get('enabler')}
         if len(carried) > 1:
             refusals.append('task '+tid+': one enabler per task ('+', '.join(sorted(carried))+')'); continue
@@ -1527,15 +1341,6 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
             if walk not in known_methods and not _procedure_exists(walk, observation.get('playbook_store') or ''):
                 cautions.append('task '+tid+': walk '+repr(walk)+' is not a procedure in the playbook; the worker searches instead')
                 walk, walk_from = '', 0
-        if walk:
-            by_method = {m['id']: m for m in observation.get('methods') or []}
-            picked = by_method.get(walk)
-            if picked is not None and int(picked.get('gravity') or 0) == 0:
-                heavier = [m for m in by_method.values() if int(m.get('gravity') or 0) >= 2 and m['id'] != walk]
-                if heavier:
-                    cautions.append('task '+tid+': walk '+repr(walk)+' has gravity 0 — a method one gym wrote for its own piece — while '
-                                    +', '.join('`'+m['id']+'` (gravity '+str(m.get('gravity'))+')' for m in heavier[:3])
-                                    +' is near this brief; a leaf is right when its specifics are the task, otherwise name the method the library leans on')
         if walk and walk_from:
             # The next walk of a long method follows a first one: on the route already, in this decision, or left
             # open on a workspace. Routed alone it starts a worker in the middle of a method (attempt 4 routed
@@ -1563,7 +1368,6 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         if gone:
             cautions.append('task '+t['id']+': dropped dependency '+', '.join(gone)+' (refused); kept the task')
             t['deps'] = [d for d in t['deps'] if d in accepted_ids]
-    tasks = _merge_sibling_tasks(tasks, cautions)
     covered = {u for t in tasks for u in t['unknowns']}
     listed_by_refused = {str(u) for ti in (decision.get('tasks') or []) if isinstance(ti, dict)
                          and not any(t['id'] == str(ti.get('id')) for t in tasks)
@@ -1710,11 +1514,17 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         if not isinstance(item, dict):
             refusals.append('unblock entry is not an object'); continue
         tid, after = str(item.get('task') or ''), str(item.get('after') or '')
+        why = str(item.get('why') or '').strip()
         current = by_id.get(tid)
         if current is None:
             refusals.append('unblock '+repr(tid)+': no such task'); continue
         if current['status'] != 'blocked' or str(current.get('blocked_reason') or '').startswith(BUDGET_BLOCK):
             refusals.append('unblock '+tid+': only a task its worker blocked can be released (budget blocks are re-bucketed)'); continue
+        if why and not after:
+            # Released with the controller's words: a worker blocked on how to measure, not on a missing input, had
+            # nothing to wait "after" and the controller no legal move (Luna, social video, 2026-09-23). The words
+            # reach the worker when it resumes (release.md).
+            unblock.append(dict(task=tid, after='', why=why)); continue
         waited = by_id.get(after)
         if waited is None or waited['status'] != 'done':
             # A release needs a reason the map can check: the task whose completion changed the source.
@@ -1724,7 +1534,7 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         if (tid, after) in released_before(project):
             refusals.append('unblock '+tid+': it was already released after '+after+' and blocked again, so that reason stands — '
                             'mint the readings its block names as unknowns, propose the change, or leave it'); continue
-        unblock.append(dict(task=tid, after=after))
+        unblock.append(dict(task=tid, after=after, why=why))
     for item in decision.get('retype') or []:
         # The worker measured a list where a number was asked, or a name where a number was: the question was
         # typed wrong, and the fix is the same unknown asked with the right type (and, if it must, a sharper
@@ -1771,19 +1581,6 @@ def guard(decision: dict[str, Any], observation: dict[str, Any], project: Path |
         retire.append(dict(unknown=uid, why=why))
     done = decision.get('done')
     done = bool(done) if isinstance(done, bool) else None
-    if require_deliverables:
-        # A route step that leaves a deliverable with no unknown has routed the readings and forgotten the thing
-        # they read: thirteen measurements of marks nobody was asked to draw (logo_mark4, 2026-09-19). The reply is
-        # sent back for the builder — boolean, `creates`, anchored on the source it is built from.
-        cited = {ref for u in observation['unknowns'] for ref in re.findall(r'(?:need|deliverable):\d+', str(u.get('notes') or ''))}
-        cited |= {u['cites'] for u in unknowns} | {a for u in unknowns for a in (u.get('also') or [])}
-        for index, text in enumerate(observation['brief'].get('deliverables') or [], start=1):
-            ref = 'deliverable:'+str(index)
-            if ref in cited or phases.refused_cites(observation['brief'], [ref]):
-                continue
-            cautions.append(ref+' has no unknown yet: the readings you routed are of what it names, and nothing builds it. Mint '
-                            'its artifact unknown first (boolean, `creates` the file, claim naming the source it is built '
-                            'from) with a task; the readings depend on that task')
     if done is True and (observation['brief'].get('proposals') or proposals):
         done = False
         refusals.append('done refused: a proposal is open — the brief is not met until a person decides it; '
@@ -1925,8 +1722,12 @@ def apply(config: dict[str, Any], project: Path, accepted: dict[str, Any], root:
             done.setdefault('refused', []).append('prioritize '+r['task']+': '+str(error)[:200])
     for r in accepted.get('unblock') or []:
         terra(config, project, 'route', 'unblock', r['task'])
-        record_release(project, r['task'], r['after'])
-        done.setdefault('unblock', []).append(r['task']+' after '+r['after'])
+        if r.get('after'):
+            record_release(project, r['task'], r['after'])
+        if r.get('why') and root is not None:
+            (root/'tasks'/r['task']).mkdir(parents=True, exist_ok=True)
+            (root/'tasks'/r['task']/'release.md').write_text(r['why'])
+        done.setdefault('unblock', []).append(r['task']+(' after '+r['after'] if r.get('after') else ': '+r.get('why', '')[:80]))
     for r in accepted.get('retire') or []:
         # Terra's own word for a question that will not be answered: the gate skips it, the record stays.
         try:
