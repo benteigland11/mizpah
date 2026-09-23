@@ -1050,7 +1050,18 @@ class FocusedSession:
             self._save(commit=False)
             return
         reflecting = self.state.get('reflect_turns_left')
-        if reflecting is None and self.session.needs_rollover(count):
+        policy = self.settings.session_policy
+        wrapping_up = self.state.get('reviews_suspended') is not None
+        if reflecting is None and wrapping_up and self.session.needs_rollover(count):
+            # Wrapping up after green: the worker was already asked to record what it learned, so the threshold asks
+            # nothing again (Grok got "the window is full, record your method" in the middle of its green reflection,
+            # 2026-09-22). The window runs on into the buffer and rolls only when that is full.
+            if count >= policy.context_capacity-policy.output_headroom_tokens:
+                self._event('rollover_at_capacity', dict(window=self.session.window_index, prompt_tokens=count, why='wrapping up'))
+                self.state['phase'] = 'handoff'
+                self._save(commit=False)
+                return
+        elif reflecting is None and self.session.needs_rollover(count):
             # A just-reset window must leave room for actual work.
             if self.session.window_index and len(self.session.messages) <= len(self.session.base_messages)+1:
                 raise ContextCapacityExceeded('The resumed context is already above the rollover threshold')

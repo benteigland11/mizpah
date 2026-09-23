@@ -1981,6 +1981,20 @@ def test_an_unbounded_reflection_runs_until_the_buffer_not_a_turn_count(tmp_path
     stop = kinds.index('reflect_ended') if 'reflect_ended' in kinds else len(kinds)
     assert len([k for k in kinds[reflect_at:stop] if k == 'worker_turn']) > 3
 
+
+def test_wrapping_up_is_not_asked_to_reflect_again_and_rolls_only_at_capacity(tmp_path):
+    # After green the worker was already asked to record what it learned: crossing the threshold then asks nothing
+    # again, and the window rolls only when the buffer is full (Grok, 2026-09-22).
+    settings, worker, shell, controller, wt, ct = setup(tmp_path, total=40, enabled=False, rollover=True)
+    policy = replace(settings.session_policy, reflect_prompt='REFLECT: record the method', reflect_turns=-1)
+    settings = replace(settings, session_policy=policy)
+    session = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell)
+    session.suspend_reviews('gate green: the harvest is the review')
+    session.run(maximum_worker_turns=25)
+    kinds = [e.event_type for e in SessionEventLog((tmp_path/'session')/'events').read_strict('session')]
+    assert 'reflect_started' not in kinds
+    assert not any('REFLECT: record the method' in json.dumps(r['messages']) for r in wt.requests)
+
 class ScratchToolTransport(FileToolTransport):
     """Scripted worker: file tools on a host-backed scratch path, in both spellings, and one ordinary file."""
 
