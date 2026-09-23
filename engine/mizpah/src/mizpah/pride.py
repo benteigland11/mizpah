@@ -26,6 +26,11 @@ from cg.data_smf_byte_notes_python.src.smf_byte_notes import read_smf, read_sust
 
 from . import prompts
 
+
+def _output_tokens(config: dict[str, Any]) -> int:
+    from .controller import output_tokens
+    return output_tokens(config)
+
 VERDICTS = 'pride.json'
 TEXT_ASSET_CHARS = 40000     # a document is read whole: this is the pride call's own window, and the asset is all it holds
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp'}
@@ -173,7 +178,7 @@ def judge(client: Any, config: dict[str, Any], files: list[Path], earlier: list[
         images = [image for _, imgs in parts for image in imgs]
         content: Any = [dict(type='text', text=text)]+images if images else text
         payload = dict(config['controller']['generation'], messages=[dict(role='user', content=content)],
-                       max_tokens=config['mizpah'].get('controller_output_tokens', 8192))
+                       max_tokens=_output_tokens(config))
         response = client.complete(payload, 'pride')
     reply = str(parse_turn(response).message.get('content') or '')
     match = re.search(r'\{.*\}', reply, re.S)

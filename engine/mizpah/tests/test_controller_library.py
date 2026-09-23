@@ -75,3 +75,9 @@ def test_minting_through_terra_is_pointed_at_decide(tmp_path):
     out = controller.run_tool(CONFIG, tmp_path, None, 'terra', dict(args='unknown mint baseline_x id=x'))
     assert out.startswith('refused') and '`decide`' in out
     assert '`decide`' not in controller.run_tool(CONFIG, tmp_path, None, 'terra', dict(args='known frobnicate'))
+
+
+def test_a_seat_sets_its_own_output_cap():
+    base = dict(mizpah=dict(controller_output_tokens=8192))
+    assert controller.output_tokens(dict(base, controller=dict(output_tokens=-1))) == 8192
+    assert controller.output_tokens(dict(base, controller=dict(output_tokens=32768))) == 32768

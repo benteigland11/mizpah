@@ -785,6 +785,13 @@ def run_tool(config: dict[str, Any], project: Path, root: Path | None, name: str
 _last_tools: list[list[dict[str, Any]]] = [[]]
 
 
+def output_tokens(config: dict[str, Any]) -> int:
+    """The controller's output cap: its seat's own `output_tokens` when set (a local model that thinks before it writes
+    spent all 8,192 and was cut off inside its `decide` call — Ornith, 2026-09-23), else the loop's."""
+    seat = config['controller'].get('output_tokens')
+    return seat if isinstance(seat, int) and seat > 0 else config['mizpah'].get('controller_output_tokens', 8192)
+
+
 def decision_call(calls: list[dict[str, Any]]) -> dict[str, Any] | None:
     """The decision, when one of the model's tool calls is `decide`: its arguments, parsed."""
     for call in calls:
@@ -844,7 +851,7 @@ def decide(client: ModelClient, config: dict[str, Any], system: str, user: str,
             pass
     while True:
         payload = dict(config['controller']['generation'], messages=messages,
-                       max_tokens=config['mizpah'].get('controller_output_tokens', 8192))
+                       max_tokens=output_tokens(config))
         if project is not None:
             payload['tools'] = CONTROLLER_TOOLS+[DECIDE_TOOL]
         live('model')
@@ -888,7 +895,7 @@ def decide(client: ModelClient, config: dict[str, Any], system: str, user: str,
         if len(calls) >= ceiling or empty_run >= 3:
             messages.append(dict(role='user', content=('That is '+str(ceiling)+' reads' if len(calls) >= ceiling else
                                  'The last three reads brought nothing new')+'; decide now with what you have.'))
-            payload = dict(config['controller']['generation'], messages=messages, max_tokens=config['mizpah'].get('controller_output_tokens', 8192),
+            payload = dict(config['controller']['generation'], messages=messages, max_tokens=output_tokens(config),
                            tools=[DECIDE_TOOL])
             message = parse_turn(client.complete(payload, 'controller')).message
             decided = decision_call(message.get('tool_calls') or [])
