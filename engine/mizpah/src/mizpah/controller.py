@@ -406,72 +406,191 @@ def last_cautions(journal: Path) -> list[str]:
     return []
 
 
+def landed_work_order(root: Path | None) -> dict[str, Any] | None:
+    """The work order whose landing this eval answers: the newest result.json under the session's tasks."""
+    if root is None or not (root/'tasks').is_dir():
+        return None
+    results = sorted((d/'result.json' for d in (root/'tasks').iterdir() if (d/'result.json').exists()),
+                     key=lambda p: p.stat().st_mtime)
+    if not results:
+        return None
+    try:
+        r = json.loads(results[-1].read_text())
+    except (OSError, ValueError):
+        return None
+    return dict(task=r.get('task') or results[-1].parent.name, verdict=r.get('verdict'), turns=r.get('turns'),
+                knowns=len(r.get('knowns') or []), problems=[str(p)[:200] for p in (r.get('problems') or [])[:3]],
+                blocked_reason=str(r.get('blocked_reason') or '')[:300] or None)
+
+
 def render_observation(observation: dict[str, Any], mode: str, refusals: list[str] = ()) -> str:
+    """The controller's message: what just happened, what is asked of it, the brief, related briefs, its notes, the
+    library. The map is not printed: the controller reads it through its tools. Every fact appears once; the
+    old sitrep printed the readings three times and the deliverables three ways, opened on stale cautions and
+    closed on "an empty reply is right", and the controller waved a delivered piece through (2026-09-22)."""
     brief = observation['brief']
-    lines = []
-    if observation.get('cautions'):
-        lines.append('# Cautions on your last briefing (applied as you decided; nothing to redo unless you agree)')
-        lines += ['  - '+c[:300] for c in observation['cautions']]
-        lines.append('')
+    tasks = observation['tasks']
+    title_of = {t['id']: t['title'] for t in tasks}
+    lines: list[str] = []
+
+    # ── What just happened
+    lines.append('# What just happened')
+    landed = observation.get('landed') if mode == 'eval' else None
+    ledger = deliverable_ledger(observation)
+    built_by: dict[str, list[str]] = {}
+    for u in observation['unknowns']:
+        notes = str(u.get('notes') or '')
+        if 'creates ' in notes:
+            made = notes.split('creates ', 1)[1].split(';')[0].strip()
+            for t in tasks:
+                if u['id'] in (t.get('unknowns') or []):
+                    built_by.setdefault(t['id'], []).append(made)
+    delivered = [line.split(' — ')[0] for line in ledger if line.endswith(' — built')]
+    if landed:
+        verdict = str(landed.get('verdict'))
+        head = ('A work order completed' if verdict == 'complete' else 'A work order ended '+verdict)
+        lines.append('  '+head+': '+str(landed['task'])+' ('+str(landed.get('turns'))+' turns, '
+                     +str(landed.get('knowns'))+' knowns recorded) — "'+str(title_of.get(landed['task']) or '')+'"')
+        made = [d for d in delivered if any(d.split(' ', 1)[-1] == m or d.endswith(' '+m) for m in built_by.get(landed['task'], []))]
+        if made:
+            lines.append('  It delivered: '+', '.join(made)+'.')
+        if landed.get('blocked_reason'):
+            lines.append('  Its worker blocked: '+landed['blocked_reason'])
+        for p in landed.get('problems') or []:
+            lines.append('  Left red: '+p)
+    elif mode == 'eval':
+        lines.append('  A work order landed.')
+    else:
+        lines.append('  The route is empty: no work order is ready or running.')
+    gate = observation.get('gate') or {}
+    lines.append('  Gate: '+('green' if gate.get('ok') else 'red ('+str(len(gate.get('violations') or []))+' open items)')+'.')
     if observation.get('operator_notes'):
-        # The person answered the loop (a reply to a notice): it is the first thing the controller reads, and the
-        # briefing it writes is the answer. The brief itself moves only through a proposal.
-        lines.append('# From the person (a reply to this run; answer it in this briefing — route what it asks, propose '
-                     'what would change the brief, or say why nothing changes)')
+        # The person answered the loop (a reply to a notice): the briefing it writes is the answer. The brief
+        # itself moves only through a proposal.
+        lines.append('  The person wrote to this run (answer it in this briefing — route what it asks, propose what '
+                     'would change the brief, or say why nothing changes):')
         for note in observation['operator_notes']:
             text = str(note.get('text') or '').strip()
             if len(text) > NOTE_CHARACTERS:
                 # Cut silently at 1,200 before, and the controller cannot reach operator.jsonl (audit, 2026-09-22).
                 text = text[:NOTE_CHARACTERS]+f' …[the person\'s note is cut here at {NOTE_CHARACTERS:,} of {len(text):,} characters]'
-            lines.append('  '+time.strftime('%Y-%m-%d %H:%M', time.gmtime(float(note.get('at') or 0)))+': '+text)
-        lines.append('')
+            lines.append('    '+time.strftime('%Y-%m-%d %H:%M', time.gmtime(float(note.get('at') or 0)))+': '+text)
     if observation.get('reviewer_doubts'):
-        # The check-in reviewer's leftover doubt about a probe, after the reading stood: not a task for the same
-        # worker (it had its budget of send-backs); a candidate reading of its own, cited to the need it serves,
-        # if the doubt is real — or nothing, if the reading already answers the need.
-        lines.append('# What the check-in reviewer still doubted about a probe when the reading stood (a reading of its own, or nothing)')
+        # The check-in reviewer's leftover doubt about a probe, after the reading stood: a candidate reading of its
+        # own, cited to the need it serves, if the doubt is real — or nothing, if the reading already answers it.
+        lines.append('  The check-in reviewer still doubted a probe when its reading stood (a reading of its own, or nothing):')
         for d in observation['reviewer_doubts']:
-            lines.append('  task '+str(d['task'])+' ('+', '.join(d['unknowns'])+'): '+d['correction']
+            lines.append('    task '+str(d['task'])+' ('+', '.join(d['unknowns'])+'): '+d['correction']
                          +(' — evidence: '+d['evidence'] if d['evidence'] else ''))
-        lines.append('')
-    if observation.get('memory'):
-        lines.append('# Your notes from last step (memory.md — what you were doing; the map is what is true)')
-        lines += ['  '+ln for ln in str(observation['memory']).splitlines()]
+    if observation.get('cautions'):
+        # One line per kind of caution, naming every unknown it applies to: six copies of the same advice, each cut
+        # mid-sentence at 300 characters, opened the message on the romantic piano benchmark (2026-09-22).
+        lines.append('  The guard applied your last briefing with cautions (nothing to redo unless you agree):')
+        kinds: dict[str, list[str]] = {}
+        for c in observation['cautions']:
+            m = re.match(r'(unknown|task) (\S+): (.*?) \(.*?\)\. (.*)', str(c), re.S)
+            key, name = ((m.group(3)+'. '+m.group(4)), m.group(2)) if m else (str(c), '')
+            kinds.setdefault(key, []).append(name)
+        for advice, names in kinds.items():
+            lines.append('    - '+(', '.join(n for n in names if n)+': ' if any(names) else '')+advice)
+    stale = [k['id'] for k in observation['knowns'] if k.get('stale')]
+    if stale:
+        lines.append('  Knowns went STALE ('+', '.join(stale[:6])+'): a file they depend on changed after their readings, so '
+                     'they are no longer believed. Each is owed again under the SAME id — route a task that lists it among '
+                     'its unknowns; the worker re-takes that reading with its probe. Never mint a new unknown for a claim the '
+                     'map already holds: a second probe for the same question is shopping for an answer.')
+    false_artifacts = [k['id'] for k in observation['knowns'] if k['type'] == 'boolean' and k.get('rate') is not None
+                       and float(k['rate']) < 0.5 and not k.get('stale')]
+    failed_targets = [k['id'] for k in observation['knowns'] if k.get('type') == 'formula' and k.get('holds') is False]
+    if false_artifacts or failed_targets:
+        lines.append('  Read false: '+', '.join((false_artifacts+failed_targets)[:6])+'. It is answered by a task that lists '
+                     'that same id: the worker changes the artifact and re-takes the reading (voiding the false runs). Not a '
+                     'new unknown, not a new probe.')
+    blocked_unknowns = [u['id'] for u in observation['unknowns'] if u['status'] in OPEN_UNKNOWN and 'blocked: ' in str(u.get('notes') or '')]
+    if blocked_unknowns:
+        lines.append('  Blocked unknowns ('+', '.join(blocked_unknowns[:6])+'): their worker could not record the reading as '
+                     'the unknown is typed or asked (`terra unknown show <id>` has the reason). If the type was wrong, retype '
+                     'it: "retype": [{"unknown": "<id>", "type": "number|boolean|label", "claim": "<sharper claim, optional>"}] '
+                     '— the same id, asked right, and its task is released. Otherwise propose the change and leave it.')
+    for t in tasks:
+        reason = str(t.get('blocked_reason') or '')
+        if t['status'] != 'blocked' or not reason:
+            continue
+        if reason.startswith(DRIVER_BLOCK):
+            lines.append('  '+t['id']+' is blocked by the harness, not the worker ('+reason[:200]+'): it is retried on the next '
+                         'run; nothing about the source or the brief follows from it.')
+        elif reason.startswith(BUDGET_BLOCK):
+            lines.append('  '+t['id']+' is blocked on budget: it resumes from where it stopped if you re-bucket it.')
+        elif re.search(r'does not exist|do not exist|not exist|missing|absent|no such|not present|only .* exist', reason, re.I):
+            lines.append('  '+t['id']+' is blocked on a source that does not exist yet ('+reason[:200]+'): this is your routing, '
+                         'not the brief — the reading was routed before anything built its source. If nobody builds it, mint '
+                         'the artifact unknown that creates it (boolean, `creates`) with a task, then release the blocked task '
+                         'once with "unblock" after that task is done.')
+        else:
+            lines.append('  '+t['id']+' is blocked by its worker ('+reason[:300]+'): the source could not be read as the '
+                         'unknown asks. The question needs a different source, or the brief needs to change — that is what '
+                         'proposals are for; do not re-mint the same question.')
+    for name, text in (observation.get('looked') or {}).items():
+        lines.append('  '+name+' (you asked to see this):')
+        lines += ['    '+ln for ln in text.splitlines()]
+    lines.append('')
+
+    # ── What is asked of you
+    lines.append('# What is asked of you')
+    targets = {}
+    for u in observation['unknowns']:
+        if u.get('type') == 'formula':
+            for ref in re.findall(r'need:\d+', str(u.get('notes') or '').split(';')[0]):
+                targets.setdefault(ref, []).append(u['id'])
+    untargeted = ['need:'+str(i) for i in range(1, len(brief.get('needs') or [])+1) if 'need:'+str(i) not in targets]
+    if delivered and untargeted:
+        lines.append('  Judge what has been delivered against the brief. Look at it and at the map\'s readings of it, then for '
+                     'each need it serves compose the target that says whether it is met, or reopen the work order that '
+                     'built it with the delta. Needs with no target yet: '+', '.join(untargeted)+'.')
+    elif mode == 'route' or not tasks:
+        lines.append('  Plan the route to the brief: mint the unknowns the map still owes it and the work orders that resolve '
+                     'them, or say "done": true if nothing is owed.')
+    else:
+        lines.append('  Keep the route moving toward the brief: route what the map still owes it; an empty reply is right when '
+                     'the work orders below already cover it.')
+    for line in ledger:
+        name, _, state = line.partition(' — ')
+        if state == 'built':
+            continue
+        builder = state.split(' → ', 1)[-1] if ' → ' in state else ''
+        lines.append('  '+name+(': nobody builds it yet — route its builder first; readings of it depend on it'
+                                if state == 'NOBODY BUILDS IT YET' else ' is not built yet: '+builder+' builds it.'))
+    waiting = [t for t in tasks if t['status'] in ('ready', 'in_progress')]
+    if waiting:
+        lines.append('  Routed and waiting: '+'; '.join(t['id']+' ['+t['status']+', '+str(t['bucket'])+'] → '
+                                                       +', '.join(t.get('unknowns') or [str(t['unknown'])]) for t in waiting)+'.')
+    budget = observation.get('budget') or {}
+    if budget:
+        lines.append('  Points: budget '+str(budget.get('budget_points'))+', planned '+str(budget.get('points_plan'))
+                     +', done '+str(budget.get('points_done'))+', unallocated '+str(budget.get('points_remaining_budget'))+'.')
+    files = [t for t in (observation.get('repo') or {}).get('tree') or []]
+    if files:
+        lines.append('  Project files: '+', '.join(files[:30])+(' …' if len(files) > 30 else ''))
+    lines.append('  The map is yours to read through your tools: `terra known list`, `terra known show <id>`, `terra unknown '
+                 'list`, `terra gate`, `terra route status`; `result <task>` for what a work order reported; `read` for a '
+                 'text file in the project.')
+    now = phases.current(brief)
+    if now:
+        lines.append('  Current phase: '+str(now['id'])+'.')
+    lines.append('')
+
+    # ── The brief, in its own words
     lines += ['# Brief (reference, v'+str(brief.get('version'))+', '+str(brief.get('status'))+')',
-             'Mission: '+str(brief.get('mission'))]
+              'Mission: '+str(brief.get('mission'))]
     lines += phases.render(brief)
     lines += enablers.render(brief)
     lines += observation.get('registry') or []
-    cited: dict[str, list[str]] = {}
-    for u in observation['unknowns']:
-        notes = str(u.get('notes') or '')
-        ref = notes.split('cites ', 1)[1].split(';')[0].strip() if 'cites ' in notes else ''
-        if ref:
-            cited.setdefault(ref, []).append(u['id']+' ['+str(u.get('status'))+']: '+str(u.get('claim')))
-    states, owed = coverage(observation)
     for key in ('needs', 'deliverables', 'non_goals'):
         entries = brief.get(key) or []
-        lines.append(key.capitalize()+':'+('' if entries else ' (none)'))
+        lines.append(key.replace('_', '-').capitalize()+':'+('' if entries else ' (none)'))
         for i, entry in enumerate(entries):
             ref = key[:-1].replace('non_goal', 'non-goal')+':'+str(i+1)
-            state = ('  ['+states[ref]+']') if ref in states else ''
-            lines.append('  '+ref+' '+str(entry)+((phases.tag(brief, ref)+enablers.tag(brief, ref)) if key != 'non_goals' else '')+state)
-            if key == 'deliverables':
-                for line in cited.get(ref, []):
-                    lines.append('      ↳ '+line[:160])
-                if not cited.get(ref):
-                    lines.append('      ↳ (no unknown cites this deliverable)')
-    # The ledger of things the deliverables name and who makes them exist. A reading of a file nobody builds can
-    # only block; the controller minted readers before builders on every brief that built something (2026-09-19).
-    ledger = deliverable_ledger(observation)
-    if ledger:
-        lines.append('Deliverable files (what must exist before it can be read — route the builder first, readers depend on it):')
-        lines += ['  '+line for line in ledger]
-        unbuilt = [line.split(' — ')[0] for line in ledger if line.endswith('NOBODY BUILDS IT YET')]
-        if len(unbuilt) > 1:
-            lines.append('  Several are unbuilt: mint a builder for EACH of them in this reply (one unknown per file, or one '
-                         'unknown per candidate set), not one per eval — each eval you spend on a single file is a worker '
-                         'turn nobody needed.')
+            lines.append('  '+ref+' '+str(entry)+((phases.tag(brief, ref)+enablers.tag(brief, ref)) if key != 'non_goals' else ''))
     if brief.get('budget_points') is not None:
         lines.append('Budget points: '+str(brief['budget_points']))
     proposals = brief.get('proposals') or []
@@ -479,150 +598,43 @@ def render_observation(observation: dict[str, Any], mode: str, refusals: list[st
         lines.append('Open proposals (queued for the person; the map\'s record that a need cannot be met as written; '
                      'the project cannot be judged met while one is open):')
         for p in proposals:
-            lines.append('  '+str(p.get('id'))+' '+str(p.get('summary') or '').split(' \u2014 evidence:')[0][:200]
+            lines.append('  '+str(p.get('id'))+' '+str(p.get('summary') or '').split(' — evidence:')[0][:200]
                          +(' (the same ask as '+str(p['same_as'])+'; asking again adds nothing)' if p.get('same_as') else ''))
     decided = brief.get('decided') or []
     if decided:
         # What the person decided and why: a rejected proposal is not re-proposed, an accepted one is now the brief.
         lines.append('Decided proposals (the person\'s reasons; a rejected change is not proposed again in other words):')
         for p in decided:
-            lines.append('  '+str(p.get('id'))+' '+str(p.get('status'))+': '+str(p.get('summary') or '').split(' \u2014 evidence:')[0][:120]
+            lines.append('  '+str(p.get('id'))+' '+str(p.get('status'))+': '+str(p.get('summary') or '').split(' — evidence:')[0][:120]
                          +(' — reason: '+_marked(str(p['decision_reason']), 400) if p.get('decision_reason') else ''))
-    if states:
-        n_met = sum(1 for v in states.values() if v.startswith('MET') and 'FALSE' not in v)
-        lines.append('Coverage: '+str(n_met)+' of '+str(len(states))+' entries met; owed: '
-                     +(', '.join(ref for ref, _ in owed) if owed else 'none')+'.')
-    lines += observation.get('prior_art') or []
     lines.append('')
-    lines += briefs.render(observation.get('related_briefs') or [])
-    lines.append('# Map (state)')
-    lines.append('Gate: '+('green' if (observation.get('gate') or {}).get('ok') else 'red')+
-                 ''.join('\n  - '+str(v.get('why') or v.get('kind')) for v in (observation.get('gate') or {}).get('violations') or []))
-    repo = observation.get('repo') or {}
-    if repo:
-        lines.append('# Project files ('+str(repo.get('files', 0))+' files'+(', tree truncated' if repo.get('truncated') else '')+'; '
-                     +', '.join(k+' '+str(v) for k, v in (repo.get('kinds') or {}).items())+')')
-        lines += ['  '+t for t in repo.get('tree') or []] or ['  (empty)']
-        for name, head in (repo.get('heads') or {}).items():
-            lines.append('# '+name+' (head)')
-            lines += ['  '+ln for ln in head.splitlines()]
-    for name, text in (observation.get('looked') or {}).items():
-        lines.append('# '+name+' (you asked to see this)')
-        lines += ['  '+ln for ln in text.splitlines()]
-    lines.append('Knowns:'+('' if observation['knowns'] else ' (none)'))
-    claims = {u['id']: u.get('claim') for u in observation['unknowns']}
-    for k in observation['knowns']:
-        value = k['mean'] if k['mean'] is not None else k['rate']
-        if k['type'] == 'label':
-            value = repr(k.get('mode')) if k.get('mode') is not None else None
-        elif k['type'] == 'boolean' and value is not None:
-            value = 'true' if float(value) >= 0.5 else 'false'
-        elif isinstance(value, float):
-            value = round(value, 4)
-        stale = ' STALE: '+'; '.join(str(r)[:80] for r in k['stale_reasons'][:2]) if k.get('stale') else ''
-        # The claim is what has been read: without it the controller saw ids and numbers, could not tell that an
-        # entry's clauses were already covered, and minted a validation per clause (changing-meter, three tasks
-        # on deliverable 2's four clauses in one night).
-        claim = str(claims.get(k['id']) or '').strip()
-        lines.append('  '+str(k['id'])+' = '+str(value)+' ('+str(k['confidence'])+', n='+str(k['n'])+')'+stale+(': '+claim if claim else ''))
-    if any(k.get('stale') for k in observation['knowns']):
-        lines.append('A STALE known is no longer believed: a file it depends on changed after its readings. It is owed '
-                     'again under the SAME id — route a task that lists the stale known\'s id among its unknowns; the '
-                     'worker re-takes that reading with its probe. Never mint a new unknown for a claim the map already '
-                     'holds: a second probe for the same question is shopping for an answer.')
-    false_artifacts = [k for k in observation['knowns'] if k['type'] == 'boolean' and k.get('rate') is not None
-                       and float(k['rate']) < 0.5 and not k.get('stale')]
-    if false_artifacts:
-        lines.append('A boolean that reads false about an artifact ('+', '.join(k['id'] for k in false_artifacts[:4])+') is '
-                     'answered by a task that lists that same id: the worker changes the artifact and re-takes the reading '
-                     '(voiding the false runs). Not a new unknown, not a new probe.')
-    open_unknowns = [u for u in observation['unknowns'] if u['status'] in OPEN_UNKNOWN]
-    resolved = len(observation['unknowns'])-len(open_unknowns)
-    lines.append('Open unknowns:'+('' if open_unknowns else ' (none)')+(' — '+str(resolved)+' resolved' if resolved else ''))
-    for u in open_unknowns:
-        notes = str(u.get('notes') or '')
-        reason = notes.split('blocked: ', 1)[1] if 'blocked: ' in notes else ''
-        # The worker's reason usually opens with what it did resolve and ends with why the rest could not be.
-        why = ' (blocked: '+(reason if len(reason) <= 400 else reason[:120]+' … '+reason[-260:])+')' if reason else ''
-        lines.append('  '+u['id']+' ['+str(u['status'])+'] '+str(u['claim'])+why)
-    if any('blocked: ' in str(u.get('notes') or '') for u in open_unknowns):
-        lines.append('A blocked unknown has no task: its worker could not record the reading as the unknown is typed '
-                     'or asked. If the type was wrong (a list measured where a number was asked, a name where a number '
-                     'was), retype it: "retype": [{"unknown": "<id>", "type": "number|boolean|label", "claim": "<sharper '
-                     'claim, optional>"}] — the same id, asked right, and its task is released. Otherwise propose the '
-                     'change and leave it — the artifacts that depend on the map may still be built.')
-    lines.append('Route tasks:'+('' if observation['tasks'] else ' (none)'))
-    finished = [t for t in observation['tasks'] if t['status'] in ('done', 'cancelled')]
-    if finished:
-        # Closed tasks are history the map already shows as knowns: ids only.
-        lines.append('  done: '+', '.join(t['id'] for t in finished))
-    for t in observation['tasks']:
-        if t in finished:
-            continue
-        reason = str(t.get('blocked_reason') or '')
-        lines.append('  '+t['id']+' ['+t['status']+', '+str(t['bucket'])+'] → '+', '.join(t.get('unknowns') or [str(t['unknown'])])+': '+t['title']+
-                     ((' (blocked by the harness, not the worker: '+reason+' — it is retried on the next run; nothing about the '
-                       'source or the brief follows from it)') if reason.startswith(DRIVER_BLOCK) else
-                      (' (blocked: '+reason+')' if reason else '')))
-    worker_blocked = [t for t in observation['tasks'] if t not in finished and t.get('blocked_reason')
-                      and not str(t['blocked_reason']).startswith(DRIVER_BLOCK)]
-    if observation.get('workspaces'):
-        lines.append('Past work orders and what they left on disk (a fresh worker finds it there; nothing of their windows carries):')
-        for w in observation['workspaces']:
-            lines.append('  '+w['task']+' ['+str(w['verdict'])+(', '+str(w['turns'])+' turns' if w.get('turns') else '')+'] → '
-                         +', '.join(w['unknowns'])+(' · probes: '+', '.join(w['probes']) if w['probes'] else '')
-                         +(' · walked: '+', '.join(w['walks']) if w['walks'] else '')+(' · widgets: '+', '.join(w['widgets']) if w['widgets'] else '')
-                         +(' · walks left: '+'; '.join(str(x['procedure'])+' ('+str(x['unticked'])+' unticked)' for x in w['walks_open']) if w.get('walks_open') else ''))
-            if w.get('readings'):
-                lines.append('    readings on its map: '+'; '.join(str(r['quantity'])+'='+json.dumps(r['value'])[:24]+' (n='+str(r['runs'])+', '+str(r['probe'])+')'
-                                                                 for r in w['readings'][:12]))
-    waiting = [t for t in observation['tasks'] if t['status'] in ('ready', 'in_progress')]
-    if waiting and mode == 'eval':
-        lines.append('Already routed and waiting to run: '+', '.join(t['id'] for t in waiting)+' — they cover '
-                     +', '.join(sorted({u for t in waiting for u in (t.get('unknowns') or [str(t.get('unknown'))])}))
-                     +'. Route only what these leave uncovered; an empty reply is right when they cover everything still owed.')
-    if any(str(t.get('blocked_reason') or '').startswith(BUDGET_BLOCK) for t in observation['tasks']):
-        lines.append('A task blocked on budget resumes from where it stopped if you re-bucket it.')
-    if any(t['status'] == 'blocked' and not str(t.get('blocked_reason') or '').startswith(BUDGET_BLOCK)
-           for t in observation['tasks']):
-        unbuilt = [t for t in observation['tasks'] if t['status'] == 'blocked'
-                   and not str(t.get('blocked_reason') or '').startswith(DRIVER_BLOCK)
-                   and re.search(r'does not exist|do not exist|not exist|missing|absent|no such|not present|only .* exist', str(t.get('blocked_reason') or ''), re.I)]
-        if unbuilt:
-            lines.append('Blocked on a source that does not exist yet ('+', '.join(t['id'] for t in unbuilt)+'): this is your '
-                         'routing, not the brief — the reading was routed before anything built its source. Look at the '
-                         'deliverable files above: if nobody builds it, mint the artifact unknown that creates it (boolean, '
-                         '`creates`) with a task, then release the blocked task once with "unblock" after that task is done. '
-                         'Do not release it before the builder has run, and do not mint the reading again under another name.')
-        lines.append('A task blocked by its worker for any other reason means the source could not be read as the unknown '
-                     'asks: the question needs a different source, or the brief needs to change. That is what '
-                     'proposals are for; do not re-mint the same question.')
-    budget = observation.get('budget') or {}
-    if budget:
-        lines.append('Points: budget '+str(budget.get('budget_points'))+', planned '+str(budget.get('points_plan'))+
-                     ', done '+str(budget.get('points_done'))+', unallocated '+str(budget.get('points_remaining_budget'))+
-                     '.')
-    lines.append('')
-    now = phases.current(brief)
-    unjudged = [ref for ref, state in states.items() if state.startswith('COLLECTED')]
-    delivered = [line.split(' — ')[0] for line in ledger if line.endswith(' — built')]
-    if delivered and unjudged:
-        # A built deliverable is the thing the brief asked for, on disk: the step is to judge it, not to wait
-        # for the gate. The ledger always knew it was built; it reached the controller as one line among many.
-        lines.append('# Delivered, not yet judged')
-        lines += ['  '+d+' is on disk' for d in delivered]
-        lines.append('  Needs whose readings are in but carry no target: '+', '.join(unjudged)+'.')
+
+    # ── Related briefs
+    related = briefs.render(observation.get('related_briefs') or [])
+    if related:
+        lines += related+['']
+
+    # ── Your notes
+    if observation.get('memory'):
+        lines.append('# Your notes from last step (memory.md — what you were doing; the map is what is true)')
+        lines += ['  '+ln for ln in str(observation['memory']).splitlines()]
         lines.append('')
-        lines.append('Step: '+('a work order landed' if mode == 'eval' else 'the route is empty')+' and the project holds '
-                     +'deliverables nobody has judged. Review them: read what you can of each, set it beside the map\'s '
-                     +'readings, and judge it against the needs it serves — compose their targets, or reopen the work order '
-                     +'that built it with the delta. An empty reply leaves them unjudged'
-                     +(' (phase '+now['id']+')' if now else '')+'.')
-    else:
-        lines.append('Step: '+('a work order landed' if mode == 'eval' else 'the route is empty')+'. Answer the gate\'s red'
-                     +(' (phase '+now['id']+')' if now else '')+'; an empty reply is right when the route already covers it.')
+
+    # ── Library
+    methods = observation.get('methods') or []
+    prior = observation.get('prior_art') or []
+    if methods or prior:
+        lines.append('# Library (what earlier projects filed and every project shares: procedures — the playbook\'s methods '
+                     'a worker walks — and widgets, the instruments a probe calls. Found here by matching the brief; a work '
+                     'order that uses them starts from what is known to work instead of building its own)')
+        if methods:
+            lines.append('  Procedures near this brief (steps, and how many procedures it reaches):')
+            lines += ['    '+m['id']+' — '+str(m.get('title') or '')+' ('+str(m.get('steps', '?'))+' steps, '
+                      +str(m.get('procedures', '?'))+' procedures)' for m in methods]
+        lines += ['  '+ln for ln in prior]
+        lines.append('')
+
     if refusals:
-        lines.append('')
         applied = observation.get('applied_so_far') or {}
         if any(applied.values()):
             lines.append('Applied from your previous reply (on the route now; do not send them again): '
@@ -1967,6 +1979,7 @@ def step(config: dict[str, Any], project: Path, journal: Path, mode: str) -> dic
     observation['cautions'] = last_cautions(journal)
     observation['reviewer_doubts'] = reviewer_doubts(journal)
     observation['workspaces'] = task_workspaces(Path(journal).parent)
+    observation['landed'] = landed_work_order(Path(journal).parent) if mode == 'eval' else None
     memory_file = Path(journal).parent/'memory.md'
     observation['memory'] = memory_file.read_text().strip() if memory_file.exists() else ''
     refusals: list[str] = []

@@ -75,6 +75,6 @@ def test_a_decision_reason_reaches_the_controller_as_the_persons_note_once(tmp_p
     notes = controller.operator_notes(tmp_path)
     assert len(notes) == 1 and notes[0]['text'] == 'On CR-001 (you rejected it): Investigate whether an existing tool does this.'
     text = controller.render_observation(dict(_observation([], []), operator_notes=notes), 'eval')
-    assert '# From the person' in text and 'On CR-001 (you rejected it)' in text
+    assert 'The person wrote to this run' in text and 'On CR-001 (you rejected it)' in text
     controller.mark_notes_read(tmp_path, notes)
     assert controller.operator_notes(tmp_path) == []

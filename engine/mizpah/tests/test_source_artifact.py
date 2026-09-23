@@ -140,7 +140,7 @@ def test_a_note_from_the_person_is_put_first_and_read_once(gym: Path, tmp_path: 
     observation = controller.observe(CONFIG, gym)
     observation['operator_notes'] = notes
     text = controller.render_observation(observation, 'eval')
-    assert text.startswith('# From the person') and 'harmony change' in text.splitlines()[1]
+    assert text.startswith('# What just happened') and 'The person wrote to this run' in text and 'harmony change' in text.split('# What is asked')[0]
     controller.mark_notes_read(root, notes)
     assert controller.operator_notes(root) == []
     assert controller.operator_notes(root, unread_only=False)[0]['read'] is True
@@ -223,7 +223,7 @@ def test_reviewer_doubts_reach_the_controller(gym: Path, tmp_path: Path) -> None
                            evidence='no time_signature read')]
     observation = controller.observe(CONFIG, gym) | dict(reviewer_doubts=doubts)
     text = controller.render_observation(observation, 'eval')
-    assert 'What the check-in reviewer still doubted' in text and 'never verifies the MIDI is 4/4' in text
+    assert 'The check-in reviewer still doubted' in text and 'never verifies the MIDI is 4/4' in text
     assert text.index('reviewer still doubted') < text.index('# Brief')
     assert controller.reviewer_doubts(tmp_path/'nowhere'/'controller.jsonl') == []
 
@@ -390,7 +390,8 @@ def test_past_work_orders_are_listed_by_what_they_left_on_disk(gym: Path, tmp_pa
     assert spaces[0]['task'] == 'build_piece_mid' and spaces[0]['walks'] == ['midi-piano-voicing-melody'] and spaces[0]['widgets'] == ['data_music_x_python']
     observation = controller.observe(CONFIG, gym) | dict(workspaces=spaces)
     text = controller.render_observation(observation, 'route')
-    assert 'Past work orders and what they left on disk' in text and 'continue_from' not in text
+    # The map and past work orders are read through the tools (`result <task>`), not printed.
+    assert 'continue_from' not in text
     accepted, refusals = controller.guard(dict(unknowns=[], tasks=[dict(id='t', unknowns=['piece_mid_built'], bucket='low', title='x', continue_from='build_piece_mid')]), observation, gym)
     assert 'continue_from' not in json.dumps(accepted)
 
@@ -437,5 +438,3 @@ def test_a_task_maps_readings_are_on_the_sitrep(tmp_path: Path, gym: Path) -> No
     readings = {r['quantity']: r for r in spaces[0]['readings']}
     assert readings['grid_lock'] == dict(quantity='grid_lock', probe='performance', runs=2, value=0.41)
     assert readings['piece_mid_built']['runs'] == 2
-    text = controller.render_observation(controller.observe(CONFIG, gym) | dict(workspaces=spaces), 'eval')
-    assert 'readings on its map: grid_lock=0.41 (n=2, performance); piece_mid_built=true (n=2, performance)' in text
