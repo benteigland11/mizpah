@@ -254,3 +254,59 @@ def test_a_continued_session_takes_the_project_state_again(tmp_path: Path) -> No
     result = shell.run('cat /work/.mizpah/route.json', session.workspace())
     assert result.status == 'ok' and 'second' in result.stdout, (result.status, result.stderr)
     shell.close()
+
+
+HAND_WRITTEN = '''REQUIRED_EXPORTS = ["to", "status", "artifacts"]
+KIND = "run"
+
+
+def run(ctx=None):
+    ctx = ctx or {}
+    to = ctx.get("to") or {"kind": "file"}
+    if ctx.get("dry_run") or ctx.get("_terra_validation") == "level1":
+        return {"to": to, "status": "ok", "artifacts": []}
+    lines = sum(1 for _ in open("hand.txt"))
+    return {"to": to, "status": "ok", "artifacts": [{"role": "reading", "hand_lines": lines}],
+            "measures": [{"quantity": "hand_lines", "value": lines}]}
+'''
+
+
+def test_the_remeasure_reads_terras_run_record_so_a_hand_written_probe_passes(tmp_path: Path) -> None:
+    """A probe written by hand never writes the scaffold's _last_reading.json; the host read only that file, so every
+    re-measure of one failed as "did not produce a reading" while the run had succeeded (build_video, 2026-09-23)."""
+    config = worker.load_config(ROOT/'config.openai.json')
+    config['mizpah']['sandbox'] = dict(config['mizpah']['sandbox'], workspace='bind', cache_dirs=[], services=None, network=None,
+                                       share_network=False)
+    config['mizpah']['scaffolding'] = dict(config['mizpah']['scaffolding'], checkins=False)
+    config['shell']['limits'] = dict(config['shell']['limits'], workspace_bytes=4*1024**2, max_files=2000)
+    project = tmp_path/'proj'
+    project.mkdir()
+    _terra(project, 'init')
+    (project/'hand.txt').write_text('a\nb\nc\n')
+    _terra(project, 'unknown', 'create', 'hand_lines', '--claim', 'lines in hand.txt', '--evidence', 'count', '--type', 'number',
+           '--quantity', 'hand_lines')
+    _terra(project, 'probe', 'create', 'hand_probe', '--purpose', 'count lines of hand.txt', '--kind', 'run', '--measure', 'hand_lines')
+    probe = project/'.terra'/'map'/'probes'/'hand_probe'
+    (probe/'probe.py').write_text(HAND_WRITTEN)
+    (probe/'measure.py').unlink(missing_ok=True)
+    run_id = _first_json(_terra(project, 'probe', 'run', 'hand_probe', '--to', '{"kind":"file"}', '--json'))['id']
+    _terra(project, 'unknown', 'link-run', 'hand_lines', run_id)
+    _terra(project, 'unknown', 'graduate', 'hand_lines')
+    assert not (probe/'_last_reading.json').exists()
+    root = tmp_path/'sess'
+    root.mkdir()
+    assert worker.remeasure(config, project, root, ['hand_lines']) == []
+    (project/'hand.txt').write_text('a\nb\nc\nd\n')
+    moved = worker.remeasure(config, project, root, ['hand_lines'])
+    assert len(moved) == 1 and 'read 4' in moved[0] and 'not reproducible' in moved[0]
+
+
+def test_a_probe_run_record_is_read_from_terras_json() -> None:
+    printed = 'note: something first\n' + json.dumps({"id": "20260923T225633Z_fast_media_audit_c14ae8", "status": "ok", "error": None,
+        "measures": [{"quantity": "video_exists_decodes", "value": True}, {"quantity": "fps", "value": 24.0}],
+        "run_dir": "/work/.mizpah/map/runs/x"}, indent=2) + '\n'
+    record = worker.probe_run_record(printed)
+    assert record['id'].endswith('c14ae8') and record['readings'] == {'video_exists_decodes': True, 'fps': 24.0}
+    failed = worker.probe_run_record(json.dumps({"id": "r", "status": "error", "error": "decode failed", "measures": []}, indent=2))
+    assert failed['status'] == 'error' and failed['error'] == 'decode failed' and failed['readings'] == {}
+    assert worker.probe_run_record('Traceback (most recent call last):\n  boom\n')['readings'] == {}

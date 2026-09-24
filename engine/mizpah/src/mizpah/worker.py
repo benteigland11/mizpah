@@ -1199,6 +1199,25 @@ def duplicate_reading_problems(project: Path, unknown_ids: list[str]) -> list[st
     return problems
 
 
+def probe_run_record(text: str) -> dict[str, Any]:
+    """The run record `terra probe run --json` printed: its id, status, error and readings ({quantity: value}
+    from its `measures`). Read from Terra's record, not the scaffold's _last_reading.json: a hand-written probe
+    never writes that file, so every re-measure of one failed as "did not produce a reading" (a whole work order
+    ended on gate rounds, 2026-09-23) while the run itself had succeeded."""
+    decoder = json.JSONDecoder()
+    for start in [i for i, line in enumerate(text.splitlines(keepends=True)) if line.startswith('{')][::-1]:
+        offset = sum(len(line) for line in text.splitlines(keepends=True)[:start])
+        try:
+            doc, _ = decoder.raw_decode(text[offset:])
+        except ValueError:
+            continue
+        if isinstance(doc, dict) and ('measures' in doc or 'readings' in doc or 'status' in doc):
+            readings = {m.get('quantity'): m.get('value') for m in doc.get('measures') or [] if isinstance(m, dict)}
+            readings.update(doc.get('readings') or {})
+            return dict(id=doc.get('id'), status=doc.get('status'), error=doc.get('error'), readings=readings)
+    return dict(id=None, status=None, error=None, readings={})
+
+
 def remeasure(config: dict[str, Any], project: Path, root: Path, known_ids: list[str]) -> list[str]:
     """The host takes each adopted reading again, in a sandbox the worker never touched, and compares.
 
@@ -1234,21 +1253,19 @@ def remeasure(config: dict[str, Any], project: Path, root: Path, known_ids: list
                 problems.append('re-measure: known '+known_id+' names no probe')
                 continue
             expected = extract_known_value(known)
-            result = shell.run('terra probe run '+probe_id+' --to \'{"kind": "file"}\' --json 2>/dev/null; '
-                               'cat '+layout.dirname(project)+'/map/probes/'+probe_id+'/_last_reading.json 2>/dev/null', workspace,
+            result = shell.run('terra probe run '+probe_id+' --to \'{"kind": "file"}\' --json', workspace,
                                timeout_seconds=min(80, config['shell']['limits']['command_seconds']),
                                **(dict(detached=True) if bind_mode(config) else {}))
-            reading = None
-            text = result.stdout
-            start = text.rfind('{"to"') if '{"to"' in text else text.rfind('{\n  "to"')
-            try:
-                doc = json.loads(text[start:]) if start >= 0 else {}
-                reading = (doc.get('readings') or {}).get(known.get('quantity') or known_id)
-            except ValueError:
-                reading = None
+            record = probe_run_record(result.stdout)
+            quantity = known.get('quantity') or known_id
+            reading = record['readings'].get(quantity)
             if reading is None:
+                if record['id'] and record['status'] == 'ok':
+                    why = 'the run succeeded but measured no quantity '+quantity+' (it measured '+(', '.join(map(str, record['readings'])) or 'nothing')+')'
+                else:
+                    why = str(record['error'] or (result.stderr or result.stdout).strip()[-300:] or 'no output')
                 problems.append('re-measure: probe '+probe_id+' did not produce a reading for '+known_id+' when the host ran it '
-                                'alone (exit '+str(result.exit_code)+'): '+(result.stderr or result.stdout).strip()[-200:]
+                                'alone (exit '+str(result.exit_code)+'): '+why
                                 +' — a reading must not depend on state only your session had (a service on a port, a file outside the project)')
                 continue
             if not values_agree(known.get('type'), expected, reading):
@@ -1293,7 +1310,6 @@ def refresh_stale(config: dict[str, Any], project: Path, root: Path, progress: A
         share_network=bool(sandbox.get('share_network', False)) and network is None, network=network,
         refused_paths=tuple(sandbox.get('refused_paths') or ()), refused_patterns=REFUSED_PATTERNS,
         scratch_dirs=scratch_dirs(config)) | bound)))
-    state_dir = layout.dirname(project)
     try:
         workspace = pack_workspace(project, exclude=cache_dirs(config)+scratch_dirs(config)) if bind_mode(config) \
             else pack_workspace(project, exclude=scratch_dirs(config))
@@ -1310,20 +1326,12 @@ def refresh_stale(config: dict[str, Any], project: Path, root: Path, progress: A
             if not probe_id:
                 out['failed'].append(known_id+': names no probe'); continue
             expected = extract_known_value(record)
-            result = shell.run('terra probe run '+probe_id+' --to \'{"kind": "file"}\' --json 2>/dev/null; '
-                               'echo; cat '+state_dir+'/map/probes/'+probe_id+'/_last_reading.json 2>/dev/null', workspace,
+            result = shell.run('terra probe run '+probe_id+' --to \'{"kind": "file"}\' --json', workspace,
                                timeout_seconds=min(80, config['shell']['limits']['command_seconds']),
                                **(dict(detached=True) if bind_mode(config) else {}))
-            text = result.stdout
-            run_id = None
-            m = re.search(r'"id": "(\d{8}T\d{6}Z_'+re.escape(probe_id)+r'_[0-9a-f]+)"', text)
-            if m:
-                run_id = m.group(1)
-            start = text.rfind('{"to"') if '{"to"' in text else text.rfind('{\n  "to"')
-            try:
-                reading = ((json.loads(text[start:]) if start >= 0 else {}).get('readings') or {}).get(record.get('quantity') or known_id)
-            except ValueError:
-                reading = None
+            run = probe_run_record(result.stdout)
+            run_id = run['id'] if run['status'] == 'ok' else None
+            reading = run['readings'].get(record.get('quantity') or known_id)
             if run_id is None or reading is None or not isinstance(result.workspace, (bytes, bytearray)):
                 out['failed'].append(known_id+': the probe produced no run when the host ran it alone (exit '+str(result.exit_code)+')')
                 continue
