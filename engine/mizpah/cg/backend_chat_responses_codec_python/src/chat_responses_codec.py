@@ -23,7 +23,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
-PASSTHROUGH_FIELDS = ("temperature", "top_p", "metadata", "parallel_tool_calls", "reasoning", "include", "user")
+PASSTHROUGH_FIELDS = ("temperature", "top_p", "metadata", "parallel_tool_calls", "reasoning", "include", "user",
+                      "prompt_cache_key")
 RENAMED_FIELDS = {"max_tokens": "max_output_tokens", "max_completion_tokens": "max_output_tokens"}
 FINISH_BY_STATUS = {"completed": "stop", "incomplete": "length", "failed": "error", "cancelled": "error"}
 

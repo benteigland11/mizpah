@@ -628,6 +628,18 @@ class ProviderTransport:
                 body = (chat_to_responses if self.profile.wire == "responses" else chat_to_messages)(body).body
             except ValueError as error:
                 return b"", f"CodecError: {error}"
+        cache_key = getattr(self.profile, "cache_key_field", None)
+        if cache_key:
+            body.setdefault(cache_key, self.session_id)
+        for key, value in (getattr(self.profile, "static_body", None) or {}).items():
+            body.setdefault(key, value)
+        marker = getattr(self.profile, "message_cache", None) or {}
+        if (marker.get("field") and self.profile.wire == "chat_completions" and isinstance(body.get("messages"), list)
+                and str(marker.get("models", "")).lower() in str(body.get("model", "")).lower()):
+            messages = body["messages"] = list(body["messages"])
+            marked = [i for i, m in enumerate(messages) if m.get("role") == "system"][:1] + [len(messages)-1]
+            for i in sorted(set(marked)):
+                messages[i] = dict(messages[i], **{marker["field"]: {"type": "ephemeral"}})
         for key in getattr(self.profile, "unsupported_fields", ()):
             body.pop(key, None)   # the backend answers 400 to these; the profile says so
         for old, new in getattr(self.profile, "renamed_fields", {}).items():

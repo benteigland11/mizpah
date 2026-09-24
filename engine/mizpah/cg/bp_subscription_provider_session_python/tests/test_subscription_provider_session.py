@@ -383,6 +383,49 @@ def test_session_header_is_stable_per_transport(store: CredentialStore) -> None:
     assert ids[0] == ids[1] == first.session_id and ids[2] == "fixed" and ids[0] != "fixed"
 
 
+def test_cache_key_field_carries_the_conversation_id(store: CredentialStore) -> None:
+    # Without it ChatGPT's Codex backend cached none of an append-only conversation (0% against 98%, 2026-09-23).
+    keyed = ProviderProfile("keyed", "Keyed", ApiKeyAuth(environment_variable="K"), "https://api.example.org/v1", "/responses",
+                            wire="responses", credential_headers={"Authorization": "Bearer {token}"},
+                            cache_key_field="prompt_cache_key")
+    http = FakeHttp()
+    session = _session(keyed, store, http)
+    session.login(api_key="sk-1")
+    done = json.dumps({"id": "r", "status": "completed", "output": [{"type": "message", "role": "assistant",
+                       "content": [{"type": "output_text", "text": "ok"}]}],
+                       "usage": {"input_tokens": 1, "output_tokens": 1}}).encode()
+    http.model_answers += [HttpResponse(200, {}, done)] * 2
+    transport = session.transport()
+    transport("/responses", {"messages": [{"role": "user", "content": "a"}]})
+    transport("/responses", {"messages": [{"role": "user", "content": "b"}], "prompt_cache_key": "mine"})
+    keys = [json.loads(c["body"])["prompt_cache_key"] for c in http.calls if "/responses" in c["url"]]
+    assert keys == [transport.session_id, "mine"]
+
+
+def test_static_body_and_message_cache_marker(store: CredentialStore) -> None:
+    # OpenRouter caches Claude on a top-level cache_control; Copilot on a message-level copilot_cache_control.
+    profile = ProviderProfile("marked", "Marked", ApiKeyAuth(environment_variable="K"), "https://api.example.org/v1",
+                              "/chat/completions", credential_headers={"Authorization": "Bearer {token}"},
+                              static_body={"cache_control": {"type": "ephemeral"}},
+                              message_cache={"field": "copilot_cache_control", "models": "claude"})
+    http = FakeHttp()
+    session = _session(profile, store, http)
+    session.login(api_key="sk-1")
+    chat = json.dumps({"choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+                       "usage": {"prompt_tokens": 1, "completion_tokens": 1}}).encode()
+    http.model_answers += [HttpResponse(200, {}, chat)] * 2
+    messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "a"},
+                {"role": "assistant", "content": "b"}, {"role": "user", "content": "c"}]
+    transport = session.transport()
+    transport("/chat/completions", {"model": "claude-x", "messages": messages})
+    transport("/chat/completions", {"model": "gpt-x", "messages": messages})
+    claude, gpt = [json.loads(c["body"]) for c in http.calls if "/chat/completions" in c["url"]]
+    assert claude["cache_control"] == {"type": "ephemeral"}
+    assert [("copilot_cache_control" in m) for m in claude["messages"]] == [True, False, False, True]
+    assert not any("copilot_cache_control" in m for m in gpt["messages"])
+    assert not any("copilot_cache_control" in m for m in messages)   # the caller's list is left alone
+
+
 def test_pkce_device_flow_and_per_user_host(store: CredentialStore) -> None:
     profile = ProviderProfile("per_user", "Per user", DeviceCodeFlow(device_authorization_endpoint="https://auth.example.org/device/code",
                                                                       token_endpoint="https://auth.example.org/token", client_id="c", pkce=True),
@@ -475,7 +518,7 @@ def test_messages_wire_round_trips(store: CredentialStore) -> None:
     chat = json.loads(response.body)
     assert response.status == 200 and chat["choices"][0]["message"]["content"] == "hi" and chat["usage"]["prompt_tokens"] == 9
     sent = json.loads(http.calls[-1]["body"])
-    assert sent["system"][0]["text"] == "s" and sent["messages"] == [{"role": "user", "content": [{"type": "text", "text": "u"}]}]
+    assert sent["system"][0]["text"] == "s" and sent["messages"] == [{"role": "user", "content": [{"type": "text", "text": "u", "cache_control": {"type": "ephemeral"}}]}]
     assert http.calls[-1]["headers"]["x-api-key"] == "sk-1" and http.calls[-1]["headers"]["anthropic-version"] == "2023-06-01"
     http.model_answers.append(HttpResponse(200, {"content-type": "application/json"}, json.dumps(
         {"id": "msg_2", "content": [{"type": "text", "text": "plain"}], "stop_reason": "end_turn", "usage": {"input_tokens": 1, "output_tokens": 1}}).encode()))

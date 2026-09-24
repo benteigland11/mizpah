@@ -44,7 +44,8 @@ def test_request_translation() -> None:
     results = body["messages"][2]["content"]
     assert results == [{"type": "tool_result", "tool_use_id": "call_1", "content": "found x"},
                        {"type": "tool_result", "tool_use_id": "call_2", "content": "found y"},
-                       {"type": "text", "text": "Thanks"}]
+                       {"type": "text", "text": "Thanks", "cache_control": {"type": "ephemeral"}}]
+    assert sum("cache_control" in b for m in body["messages"] for b in m["content"]) == 1   # only the newest block
     assert body["tools"] == [{"name": "lookup", "description": "Find", "input_schema": {"type": "object"},
                               "cache_control": {"type": "ephemeral"}}]
 
@@ -141,3 +142,15 @@ def test_fold_sse_cut_short_and_error() -> None:
                           {"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "{oops"}},
                           {"type": "content_block_stop", "index": 0}, {"type": "message_stop"}]))
     assert json.loads(chat["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]) == {"_raw": "{oops"}
+
+
+def test_history_breakpoint_rides_the_newest_block_and_can_be_turned_off() -> None:
+    # Only system and tools were cached: every turn paid for the whole conversation again (2026-09-23).
+    chat = {"messages": [{"role": "user", "content": "one"}, {"role": "assistant", "content": "two"},
+                         {"role": "user", "content": "three"}]}
+    body = chat_to_messages(chat).body
+    assert body["messages"][-1]["content"] == [{"type": "text", "text": "three", "cache_control": {"type": "ephemeral"}}]
+    assert body["messages"][0]["content"] == "one" or "cache_control" not in str(body["messages"][0])
+    assert chat["messages"][-1]["content"] == "three"   # the caller's request is not mutated
+    plain = chat_to_messages(chat, cache_history=False).body
+    assert "cache_control" not in str(plain["messages"])

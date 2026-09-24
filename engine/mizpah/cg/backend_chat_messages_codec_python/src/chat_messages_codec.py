@@ -4,7 +4,8 @@ A client that already speaks Chat Completions talks to a Messages-only
 endpoint through two pure functions:
 
 * ``chat_to_messages`` rewrites the request. System messages are hoisted
-  into ``system`` (one block, optionally a cache breakpoint); assistant
+  into ``system`` (one block, optionally a cache breakpoint; the last tool and
+  the newest message block carry the other two); assistant
   tool calls become ``tool_use`` blocks and tool results become
   ``tool_result`` blocks in a user turn; function tools become
   ``input_schema`` tools; ``reasoning_effort`` becomes
@@ -44,7 +45,8 @@ class CodecError(ValueError):
 
 
 def chat_to_messages(payload: dict[str, Any], *, default_max_tokens: int = DEFAULT_MAX_TOKENS, stream: bool = True,
-                     cache_system: bool = True, cache_last_tool: bool = True) -> MessagesRequest:
+                     cache_system: bool = True, cache_last_tool: bool = True,
+                     cache_history: bool = True) -> MessagesRequest:
     """Rewrite a Chat Completions request body as a Messages request body."""
     messages = payload.get("messages")
     if not isinstance(messages, list) or not messages:
@@ -70,6 +72,15 @@ def chat_to_messages(payload: dict[str, Any], *, default_max_tokens: int = DEFAU
     body["messages"] = _merge_adjacent(turns)
     if not body["messages"]:
         raise CodecError("no user or assistant messages to send")
+    if cache_history:
+        # A rolling breakpoint on the newest block: the next request finds this one's prefix within Anthropic's
+        # 20-block lookback, so a growing conversation is read from cache rather than billed in full each turn.
+        # Without it only system and tools were cached and every turn paid for the whole history.
+        content = body["messages"][-1].get("content")
+        if isinstance(content, str):
+            body["messages"][-1]["content"] = content = [{"type": "text", "text": content}] if content else []
+        if content:
+            content[-1] = dict(content[-1], cache_control={"type": "ephemeral"})
     limit = payload.get("max_completion_tokens", payload.get("max_tokens"))
     body["max_tokens"] = int(limit) if isinstance(limit, (int, float)) and limit > 0 else default_max_tokens
     if payload.get("tools"):

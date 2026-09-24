@@ -35,7 +35,8 @@
       },
       "credential_headers": {
         "Authorization": "Bearer {token}",
-        "chatgpt-account-id": "{account_id}"
+        "chatgpt-account-id": "{account_id}",
+        "session_id": "{session}"
       },
       "models": [],
       "default_model": null,
@@ -53,7 +54,8 @@
       "default_reasoning_effort": "medium",
       "unsupported_fields": [
         "max_output_tokens"
-      ]
+      ],
+      "cache_key_field": "prompt_cache_key"
     },
     {
       "name": "xai_grok",
@@ -76,7 +78,8 @@
       "completion_path": "/responses",
       "wire": "responses",
       "credential_headers": {
-        "Authorization": "Bearer {token}"
+        "Authorization": "Bearer {token}",
+        "x-grok-conv-id": "{session}"
       },
       "models": [],
       "default_model": null,
@@ -97,7 +100,8 @@
       },
       "unsupported_fields": [
         "max_output_tokens"
-      ]
+      ],
+      "cache_key_field": "prompt_cache_key"
     },
     {
       "name": "github_copilot",
@@ -134,7 +138,11 @@
         "low",
         "medium",
         "high"
-      ]
+      ],
+      "message_cache": {
+        "field": "copilot_cache_control",
+        "models": "claude"
+      }
     },
     {
       "name": "openai_api",
@@ -164,7 +172,8 @@
       "default_reasoning_effort": "medium",
       "renamed_fields": {
         "max_tokens": "max_completion_tokens"
-      }
+      },
+      "cache_key_field": "prompt_cache_key"
     },
     {
       "name": "xai_api",
@@ -177,7 +186,8 @@
       "completion_path": "/chat/completions",
       "wire": "chat_completions",
       "credential_headers": {
-        "Authorization": "Bearer {token}"
+        "Authorization": "Bearer {token}",
+        "x-grok-conv-id": "{session}"
       },
       "models": [],
       "default_model": null,
@@ -369,7 +379,8 @@
         "X-Title": "Mizpah"
       },
       "credential_headers": {
-        "Authorization": "Bearer {token}"
+        "Authorization": "Bearer {token}",
+        "x-session-id": "{session}"
       },
       "models": [],
       "default_model": null,
@@ -382,7 +393,12 @@
         "low",
         "medium",
         "high"
-      ]
+      ],
+      "static_body": {
+        "cache_control": {
+          "type": "ephemeral"
+        }
+      }
     },
     {
       "name": "groq_api",
@@ -461,7 +477,8 @@
       "notes": "Your Azure OpenAI resource name is the subdomain of its endpoint; the key is from the resource's Keys page. Deployments appear as models.",
       "renamed_fields": {
         "max_tokens": "max_completion_tokens"
-      }
+      },
+      "cache_key_field": "prompt_cache_key"
     },
     {
       "name": "together_api",
@@ -498,7 +515,8 @@
       "wire": "chat_completions",
       "static_headers": {},
       "credential_headers": {
-        "Authorization": "Bearer {token}"
+        "Authorization": "Bearer {token}",
+        "x-session-affinity": "{session}"
       },
       "models": [],
       "default_model": null,

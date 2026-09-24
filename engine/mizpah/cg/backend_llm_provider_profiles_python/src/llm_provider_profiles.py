@@ -113,6 +113,16 @@ class ProviderProfile:
     unsupported_fields: tuple[str, ...] = ()
     # Request fields this backend spells differently (OpenAI's newer models want max_completion_tokens).
     renamed_fields: dict[str, str] = field(default_factory=dict)
+    # Body field that carries the transport's conversation id, so the backend routes every call of one
+    # conversation to the server holding its prompt cache (ChatGPT's Codex backend: prompt_cache_key).
+    # A header does the same through ``credential_headers`` and ``{session}``.
+    cache_key_field: str | None = None
+    # Body fields sent on every request unless the caller set them (OpenRouter's top-level cache_control turns on
+    # Anthropic caching that advances with the conversation).
+    static_body: dict[str, Any] = field(default_factory=dict)
+    # A message-level cache marker for models whose id contains ``models``: {"field": ..., "models": ...}. Set on
+    # the first system message and the newest message (Copilot serves Claude with copilot_cache_control).
+    message_cache: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.wire not in WIRE_DIALECTS:
