@@ -49,6 +49,16 @@ def call(value='one'):
     return dict(id=value, type='function', function=dict(name='measure', arguments='{"value":1}'))
 
 
+def test_a_handoff_that_keeps_tools_shares_the_worker_prefix():
+    item = session()
+    dropped = item.handoff_payload()
+    assert 'tools' not in dropped and 'tool_choice' not in dropped
+    item.policy = replace(item.policy, handoff_keeps_tools=True)
+    kept, worker = item.handoff_payload(), item.payload()
+    assert kept['tools'] == worker['tools'] and kept['tool_choice'] == 'none'
+    assert kept['messages'][:-1] == worker['messages'] and kept['messages'][-1]['content'] == 'Write a handoff'
+
+
 def test_unrestricted_outputs_use_separate_input_headroom_and_preserve_archive():
     item = session()
     item.policy = replace(item.policy, worker_output_tokens=-1, handoff_output_tokens=-1,

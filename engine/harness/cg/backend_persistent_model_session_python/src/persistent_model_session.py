@@ -356,6 +356,11 @@ class SessionPolicy:
     # turns as it needs, until it says done or the prompt reaches capacity less headroom.
     reflect_prompt: str = ''
     reflect_turns: int = 0
+    # The handoff request keeps the worker's tools and forbids calling them (tool_choice none) instead of
+    # dropping them: tools sit at the front of a hosted prompt cache, so dropping them made every handoff a full
+    # miss (ChatGPT 0% cached against 99%, Grok 53% against 92%, 2026-09-23). Only for a server that enforces
+    # tool_choice; llama.cpp does not, and a local model asked for text wrote a tool call as text.
+    handoff_keeps_tools: bool = False
 
     def __post_init__(self) -> None:
         if self.reasoning_retention not in REASONING_RETENTION:
@@ -418,9 +423,12 @@ class PersistentSession:
             if history[:len(self.base_messages)] != self.base_messages:
                 raise ValueError('Projected handoff history must preserve the original base messages')
             payload['messages'] = self._wire_view(history)
-        payload.pop('tools')
-        payload.pop('tool_choice', None)
-        payload.pop('parallel_tool_calls', None)
+        if self.policy.handoff_keeps_tools:
+            payload['tool_choice'] = 'none'
+        else:
+            payload.pop('tools')
+            payload.pop('tool_choice', None)
+            payload.pop('parallel_tool_calls', None)
         payload.update(deepcopy(dict(self.policy.handoff_generation_overrides)))
         prompt = self.policy.handoff_prompt
         boundary = self.continuation_boundary()

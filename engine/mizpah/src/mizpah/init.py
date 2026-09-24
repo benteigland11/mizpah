@@ -277,6 +277,25 @@ def apply_project_config(config: dict[str, Any], project: Path) -> dict[str, Any
                     base[key] = value
             config[role] = base
     fit_windows(config)
+    fit_handoff(config)
+    return config
+
+
+def fit_handoff(config: dict[str, Any]) -> dict[str, Any]:
+    """A hosted worker's handoff keeps its tools (tool_choice none), so the handoff reuses the window's prompt cache;
+    a local server does not enforce tool_choice (llama.cpp, Ollama), so a local worker's handoff drops them (see
+    SessionPolicy). Hosted: a subscription seat whose profile takes a credential; a no-auth profile is a local one."""
+    policy = config.get('session_policy')
+    if isinstance(policy, dict) and 'handoff_keeps_tools' not in policy:
+        spec = config.get('worker') or {}
+        hosted = False
+        if spec.get('provider') == 'subscription' and spec.get('subscription'):
+            try:
+                from mizpah.providers import registry
+                hosted = registry(config, only=spec['subscription']).get(spec['subscription']).auth.kind != 'none'
+            except (KeyError, ValueError, AttributeError, OSError):
+                hosted = False
+        config['session_policy'] = dict(policy, handoff_keeps_tools=hosted)
     return config
 
 

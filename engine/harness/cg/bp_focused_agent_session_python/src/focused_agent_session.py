@@ -2043,7 +2043,7 @@ class FocusedSession:
                                        text=(text or '')[:EVENT_TEXT]))
 
     RETUNABLE = ('reasoning_retention', 'rollover_threshold', 'output_headroom_tokens', 'context_capacity', 'reflect_prompt', 'reflect_turns',
-                 'recent_result_count', 'recent_result_characters')
+                 'recent_result_count', 'recent_result_characters', 'handoff_keeps_tools')
 
     def retune(self, **changes: Any) -> dict[str, Any]:
         """Change wire-view policy on a saved session without replaying anything.

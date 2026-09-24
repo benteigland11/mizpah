@@ -15,6 +15,21 @@ def test_a_seat_with_a_smaller_window_fits_the_session_to_it():
     assert init.fit_windows(hosted)['session_policy'] == dict(context_capacity=110000, rollover_threshold=61440)
 
 
+def test_a_hosted_worker_hands_off_with_its_tools_and_a_local_one_without():
+    def seat(**worker):
+        return init.fit_handoff(dict(worker=worker, session_policy=dict(context_capacity=1)))['session_policy']['handoff_keeps_tools']
+    assert seat(provider='subscription', subscription='openai_chatgpt') is True
+    assert seat(provider='llama_client') is False
+    # A local server that is not llama.cpp (Ollama, vLLM) is seated through a no-auth profile.
+    local = dict(mizpah=dict(providers=dict(ollama=dict(name='ollama', display_name='ollama', auth=dict(kind='none'),
+                 api_base_url='http://127.0.0.1:11434/v1', completion_path='/chat/completions'))))
+    assert init.fit_handoff(dict(local, worker=dict(provider='subscription', subscription='ollama'),
+                                 session_policy=dict(context_capacity=1)))['session_policy']['handoff_keeps_tools'] is False
+    pinned = init.fit_handoff(dict(worker=dict(provider='subscription', subscription='openai_chatgpt'),
+                                   session_policy=dict(handoff_keeps_tools=False)))
+    assert pinned['session_policy']['handoff_keeps_tools'] is False
+
+
 def test_a_project_carries_its_scaffolding_and_its_seat_its_server_unit(tmp_path):
     (tmp_path/'.mizpah').mkdir()
     (tmp_path/'.mizpah'/'config.json').write_text(json.dumps(dict(
