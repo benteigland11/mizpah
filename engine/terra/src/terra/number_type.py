@@ -246,6 +246,9 @@ def is_determined(stats: dict[str, Any]) -> bool:
 
 def derive_confidence(stats: dict[str, Any], map_type: str | None = None) -> str:
     kind = map_type or stats.get("kind") or "number"
+    if kind in ("number", "boolean", "label") and stats.get("inputs_confidence") and int(stats.get("n") or 0) >= 1:
+        # Computed from knowns by calculation: its inputs' confidence, not the count of its re-runs.
+        return str(stats["inputs_confidence"])
     if kind in ("number", "boolean", "label") and is_determined(stats):
         # A determined quantity earns nothing from repetition: identical runs are one reading written
         # again, so two of them are as good as twenty and the ladder need not climb by n. One method's
@@ -550,6 +553,8 @@ def recompute_typed_node(
 
     all_values: list[Any] = []
     sample_runs: list[dict[str, Any]] = []
+    calculation_inputs: list[str] = []   # the sources the calculation runs read (known:<id>, assumption:<id>)
+    measured_runs = 0
     values_by_probe: dict[str, list[Any]] = {}
     input_assumptions: set[str] = set()
     for rid in record.get("run_ids") or []:
@@ -611,6 +616,10 @@ def recompute_typed_node(
         )
         values_by_probe.setdefault(pid, []).extend(vals)
         all_values.extend(vals)
+        if meta.get("source_type") == "calculation":
+            calculation_inputs.extend(str(s.get("source") or "") for s in (meta.get("inputs") or {}).values() if isinstance(s, dict))
+        else:
+            measured_runs += 1
 
     if map_type == "relation":
         from .relation_type import compute_relation_stats
@@ -716,6 +725,20 @@ def recompute_typed_node(
     record["stats"] = stats
     record["conditional"] = bool(input_assumptions)
     record["assumptions"] = sorted(input_assumptions)
+    if calculation_inputs and not measured_runs:
+        # A known computed only by calculations is as trustworthy as the weakest thing it was computed from, read
+        # now: a calculation over a low input is not med because it ran twice alike, and one over med inputs does
+        # not need its arithmetic re-run to be believed (2026-09-23). An assumption is low.
+        from .knowns import load_known
+
+        levels = []
+        for source in calculation_inputs:
+            kind, _, ref = source.partition(":")
+            try:
+                levels.append(str(load_known(project_root, ref).get("confidence") or "low") if kind == "known" else "low")
+            except Exception:  # noqa: BLE001 — an input that cannot be read is no support
+                levels.append("low")
+        stats["inputs_confidence"] = min(levels, key=confidence_rank)
     record["confidence_derived"] = derive_confidence(stats, map_type=map_type)
     claimed = record.get("confidence") or "low"
     if claimed not in CONFIDENCE_SET:

@@ -199,3 +199,29 @@ def test_session_formula_can_use_parent_run(tmp_path: Path, monkeypatch):
         rec = graduate_unknown(tmp_path, "closes_ceiling")
         assert rec["stats"]["holds"] is True
         assert rec["run_ids"] == [global_run]
+
+
+def test_a_formula_over_knowns_is_as_confident_as_its_weakest_input(tmp_path: Path, monkeypatch):
+    """A formula computed wholly from knowns earns its confidence from them, not from how often its arithmetic was
+    re-run: identical re-evaluations add no evidence, and an honest worker would not repeat them (2026-09-23)."""
+    monkeypatch.chdir(tmp_path)
+    init_probe(tmp_path, "a", purpose="a")
+    init_probe(tmp_path, "b", purpose="b")
+    _write_measure_probe(tmp_path, "a", quantity="width", value=1080)
+    a_runs = [run_probe(tmp_path, "a", to={"kind": f"w{i}"})["id"] for i in range(2)]
+    _write_measure_probe(tmp_path, "b", quantity="height", value=1920)
+    b_run = run_probe(tmp_path, "b", to={"kind": "h"})["id"]
+    create_known(tmp_path, "width_k", claim="width", quantity="width", run_id=a_runs[0])
+    link_run_known(tmp_path, "width_k", a_runs[1])
+    create_known(tmp_path, "height_k", claim="height", quantity="height", run_id=b_run)
+    promote_known(tmp_path, "width_k", "med")
+    assert load_known(tmp_path, "width_k")["confidence"] == "med" and load_known(tmp_path, "height_k")["confidence"] == "low"
+    create_known(tmp_path, "portrait", claim="portrait", map_type="formula", expression="w < h",
+                 vars=["w=known:width_k", "h=known:height_k"], run_id=b_run)
+    rec = load_known(tmp_path, "portrait")
+    assert rec["stats"]["holds"] is True and rec["confidence_derived"] == "low"   # the weakest input
+    run2 = run_probe(tmp_path, "b", to={"kind": "h2"})["id"]
+    link_run_known(tmp_path, "height_k", run2)
+    promote_known(tmp_path, "height_k", "med")                                   # height is now med too
+    link_run_known(tmp_path, "portrait", run2)                                  # recompute the formula
+    assert load_known(tmp_path, "portrait")["confidence_derived"] == "med"

@@ -534,3 +534,30 @@ def test_status_and_gate_surface_calculation_state(tmp_path: Path):
     scope = collect_status_board(tmp_path)["scopes"][0]
     assert scope["counts"]["calculations"] == 1
     assert scope["calculations"][0]["conditional"] is True
+
+
+def test_a_calculated_known_takes_its_inputs_confidence(tmp_path: Path, monkeypatch):
+    """A known computed by calculation is as trustworthy as its weakest input, read now: not med because the
+    arithmetic ran twice alike, and not held back once its inputs are med (2026-09-23)."""
+    from terra.knowns import link_run_known, load_known, promote_known
+
+    monkeypatch.chdir(tmp_path)
+    _known(tmp_path, "width", 4.0)
+    create_calculation(tmp_path, "double_width", inputs={"width": "known:width"}, output_type="number",
+                       quantity="derived_width", unit="m")
+    (calculation_dir(tmp_path, "double_width") / "calc.py").write_text(
+        'def calculate(inputs):\n    return {"value": inputs["width"] * 2}\n', encoding="utf-8")
+    first = run_calculation(tmp_path, "double_width")["evidence_run_id"]
+    second = run_calculation(tmp_path, "double_width")["evidence_run_id"]
+    create_unknown(tmp_path, "derived_width", claim="derived width?", evidence_needed="composition",
+                   map_type="number", quantity="derived_width", unit="m")
+    link_calculation(tmp_path, "derived_width", "double_width")
+    known = graduate_unknown(tmp_path, "derived_width")
+    link_run_known(tmp_path, "derived_width", second) if second != first else None
+    assert load_known(tmp_path, "width")["confidence"] == "low"
+    assert load_known(tmp_path, "derived_width")["confidence_derived"] == "low"   # its input is low, however often it ran
+    probe_run = run_probe(tmp_path, "p_width", to={"kind": "again"})["id"]
+    link_run_known(tmp_path, "width", probe_run)
+    promote_known(tmp_path, "width", "med")
+    link_run_known(tmp_path, "derived_width", run_calculation(tmp_path, "double_width")["evidence_run_id"])
+    assert load_known(tmp_path, "derived_width")["confidence_derived"] == "med"

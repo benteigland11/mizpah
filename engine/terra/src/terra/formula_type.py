@@ -454,6 +454,7 @@ def recompute_formula_node(
     n_data_runs = 0
 
     known_values: dict[str, Any] = {}
+    known_confidences: dict[str, str] = {}
     input_assumptions: set[str] = set()
     for name, spec in vars_spec.items():
         if not isinstance(spec, dict) or not spec.get("known_id"):
@@ -468,6 +469,7 @@ def recompute_formula_node(
             record=False,
         )
         known_values[str(name)] = reading.get("value")
+        known_confidences[str(name)] = str(reading.get("confidence") or "low")
         input_assumptions.update(reading.get("assumptions") or [])
 
     for rid in record.get("run_ids") or []:
@@ -601,6 +603,12 @@ def recompute_formula_node(
     record["stats"] = stats
     record["conditional"] = bool(input_assumptions)
     record["assumptions"] = sorted(input_assumptions)
+    if vars_spec and set(known_confidences) == {str(k) for k in vars_spec}:
+        # Computed wholly from knowns: the answer is as trustworthy as the weakest input, no more and no less.
+        # Re-evaluating a deterministic expression over the same knowns adds no evidence, so counting the
+        # evaluations made an honest worker's target unadoptable (it would not re-run identical arithmetic to
+        # reach n=3) and its controller proposed rewording the brief (social video, 2026-09-23).
+        stats["inputs_confidence"] = min(known_confidences.values(), key=confidence_rank)
     record["confidence_derived"] = derive_confidence_formula(stats)
     claimed = record.get("confidence") or "low"
     if claimed not in CONFIDENCE_SET:
@@ -613,7 +621,12 @@ def recompute_formula_node(
 
 
 def derive_confidence_formula(stats: dict[str, Any]) -> str:
-    """Derive confidence in the verdict, independently of pass/fail."""
+    """Derive confidence in the verdict, independently of pass/fail. A formula over knowns only is as confident
+    as its weakest input once it evaluates; one over run measurements counts the runs that carried them."""
+    if stats.get("inputs_confidence"):
+        if stats.get("error") or stats.get("holds") is None:
+            return "low"
+        return str(stats["inputs_confidence"])
     n = int(stats.get("n") or 0)
     if n < 1 or stats.get("error"):
         return "low"
