@@ -115,7 +115,7 @@ def load_config(path: str | Path) -> dict[str, Any]:
     if isinstance(network, dict):
         for name in ('unshare', 'nsenter', 'socat'):
             if name in network:
-                network[name] = user_config.tool(network[name], name)
+                network[name] = user_config.tool(network[name], name, missing='/usr/bin')   # the sandbox wants absolute paths
     from . import prompts as _prompts
     prompts_dir = (path.parent/config.get('prompts_dir', '../../prompts')).resolve()
     config['prompts_dir'] = str(prompts_dir)

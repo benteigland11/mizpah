@@ -124,12 +124,13 @@ def expand(value: Any, names: dict[str, str]) -> Any:
     return value
 
 
-def tool(name_or_path: str | None, default: str) -> str:
-    """A program the engine runs: an absolute path as given, else the one beside this interpreter, else PATH."""
+def tool(name_or_path: str | None, default: str, missing: str | None = None) -> str:
+    """A program the engine runs: an absolute path as given, else the one beside this interpreter, else PATH, else
+    `missing/<name>` when given (a host without it fails when the program is run, not when the config loads)."""
     given = name_or_path or default
     if os.path.isabs(given):
         return given
     beside = Path(sys.executable).parent/given
     if beside.exists():
         return str(beside)
-    return shutil.which(given) or given
+    return shutil.which(given) or (str(Path(missing)/given) if missing else given)
