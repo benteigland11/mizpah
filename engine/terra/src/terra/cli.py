@@ -3842,6 +3842,33 @@ def cmd_probe_validate(args: argparse.Namespace) -> int:
     return rc
 
 
+def _listed_probe(pdir: Path) -> dict[str, Any]:
+    """A probe's row for `probe list`: its stamp when the stamp is for this exact package, else a validation.
+    Validation exercises measure(); listing six video probes that each decode the video took 72 s a call."""
+    from .probe_stamp import STAMP_FAILED, STAMP_VALID, check_probe_stamp
+
+    check = check_probe_stamp(pdir)
+    stamp = check.get("stamp") or {}
+    if check["state"] not in (STAMP_VALID, STAMP_FAILED):
+        return validate_probe_dir(pdir)
+    try:
+        meta = json.loads((pdir / "probe.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return validate_probe_dir(pdir)
+    return {
+        "ok": check["state"] == STAMP_VALID,
+        "level": stamp.get("level"),
+        "id": stamp.get("probe_id") or pdir.name,
+        "path": str(pdir.resolve()),
+        "blocks": list(stamp.get("blocks") or []),
+        "warnings": list(stamp.get("warnings") or []),
+        "meta": meta if isinstance(meta, dict) else {},
+        "exercise": None,
+        "stamp": {"source_sha256": stamp.get("source_sha256"), "validated_at": stamp.get("validated_at"),
+                  "ok": stamp.get("ok")},
+    }
+
+
 def cmd_probe_list(args: argparse.Namespace) -> int:
     try:
         root = require_project_root()
@@ -3858,8 +3885,7 @@ def cmd_probe_list(args: argparse.Namespace) -> int:
             continue
         if not (child / "probe.json").is_file() and not (child / "probe.py").is_file():
             continue
-        r = validate_probe_dir(child)
-        rows.append(r)
+        rows.append(_listed_probe(child))
     if args.json:
         print(json.dumps(rows, indent=2, default=str))
         return 0

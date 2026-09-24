@@ -110,3 +110,18 @@ def test_stamp_file_is_not_part_of_the_hash(tmp_path, monkeypatch):
     validate_probe_dir(pdir)
     validate_probe_dir(pdir)  # rewriting the stamp must not stale it
     assert check_probe_stamp(pdir)["state"] == STAMP_VALID
+
+
+def test_list_reads_a_current_stamp_and_validates_an_edited_probe(tmp_path, monkeypatch):
+    # Listing exercised every probe's measure(): six video probes took 72 s a call (2026-09-23).
+    from terra import cli
+
+    monkeypatch.chdir(tmp_path)
+    good, bad = _mk(tmp_path, GOOD % 1, "good"), _mk(tmp_path, BAD, "bad")
+    validate_probe_dir(good), validate_probe_dir(bad)
+    calls = []
+    monkeypatch.setattr(cli, "validate_probe_dir", lambda p: calls.append(p.name) or validate_probe_dir(p))
+    rows = {r["id"]: r for r in (cli._listed_probe(good), cli._listed_probe(bad))}
+    assert calls == [] and rows["good"]["ok"] and not rows["bad"]["ok"] and rows["bad"]["blocks"]
+    (good / "probe.py").write_text(GOOD % 2, encoding="utf-8")
+    assert cli._listed_probe(good)["ok"] and calls == ["good"]
