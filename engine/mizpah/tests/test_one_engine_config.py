@@ -150,3 +150,21 @@ def test_a_red_completion_says_what_terra_refused_and_that_nothing_retried_it(tm
     text = worker.completion_problem(root, dict(id='audit'), 'in_progress')
     assert 'known k is low' in text and 'Nothing has run it again since' in text
     assert 'you have not run it yet' in worker.completion_problem(tmp_path/'none', dict(id='audit'), 'in_progress')
+
+
+def test_the_committed_config_is_this_machines_once_loaded_and_the_users_choices_stay_outside_the_repo(tmp_path):
+    """The repository's config holds placeholders and no providers; loading it fills in this machine's paths, and a
+    provider or seat chosen here comes from the user's layer (the tests' own, see conftest), never the tracked files."""
+    from pathlib import Path
+    from mizpah import user_config
+    committed = Path(__file__).resolve().parents[1]/'config.openai.json'
+    raw = committed.read_text()
+    assert '/home/' not in raw and json.loads(raw)['providers'] == {}
+    user_config.update_section('engine', {'providers': {'box': {'name': 'box', 'api_base_url': 'http://127.0.0.1:9'}}})
+    user_config.update_section('harness', {'deputy': {'provider': 'llama_client', 'generation': {'model': 'mine'}}})
+    config = worker.load_config(committed)
+    assert '${' not in json.dumps(config['mizpah'])
+    assert Path(config['mizpah']['terra']).name == 'terra' and Path(config['mizpah']['terra']).exists()
+    assert config['mizpah']['providers']['box']['api_base_url'] == 'http://127.0.0.1:9'
+    assert config['deputy']['generation']['model'] == 'mine'
+    assert committed.read_text() == raw

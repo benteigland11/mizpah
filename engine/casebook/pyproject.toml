@@ -7,6 +7,7 @@ name = "casebook"
 version = "0.1.0"
 description = "Cases as JSON: a problem as it presented, what it turned out to be, what fixed it, and the instances it happened in. Search by the problem."
 requires-python = ">=3.10"
+license = "Apache-2.0"
 dependencies = []
 
 [project.scripts]

@@ -1,8 +1,9 @@
 [project]
 name = "mizpah-harness"
 version = "0.11.1"
-description = "The focused agent session harness: bounded worker sessions, wire-view projections, concern-gated controller reviews, sandboxed shell. Forked from decisions/cg at the v10 campaign."
+description = "The focused agent session harness: bounded worker sessions, wire-view projections, concern-gated controller reviews, sandboxed shell. Grew out of ten single-seed agent campaigns (see UPSTREAM.txt)."
 requires-python = ">=3.12"
+license = "Apache-2.0"
 dependencies = ["aiohttp>=3.9"]
 
 [build-system]

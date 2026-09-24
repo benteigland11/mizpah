@@ -97,11 +97,25 @@ WHOLE_FILE_BOUNDS = (('maximum_write_characters', 20000), ('maximum_edit_charact
 
 
 def load_config(path: str | Path) -> dict[str, Any]:
-    """Mizpah config layered over the harness config it names; paths resolve from each file."""
+    """Mizpah config layered over the harness config it names; paths resolve from each file. The user's layer
+    (`user_config`: providers and seats chosen on this machine) goes over both, and the committed ${NAME}
+    placeholders and bare program names resolve to this machine's."""
+    from . import user_config
     path = Path(path).resolve()
-    config = json.loads(path.read_text())
-    harness_path = (path.parent/config['harness_config']).resolve()
-    harness = json.loads(harness_path.read_text())
+    config = user_config.engine(path)
+    harness, harness_path = user_config.harness(path)
+    config['widget_library'] = str(Path(config.get('widget_library') or '~/.local/share/cartograph/Widget_Library').expanduser())
+    config = user_config.expand(config, user_config.places(path, config['widget_library']))
+    for name in ('terra', 'playbook', 'cartograph'):
+        config[name] = user_config.tool(config.get(name), name)
+    sandbox = config.get('sandbox') or {}
+    if sandbox.get('read_only_binds'):
+        sandbox['read_only_binds'] = list(dict.fromkeys(sandbox['read_only_binds']))   # the two Python homes may be one
+    network = (config.get('sandbox') or {}).get('network')
+    if isinstance(network, dict):
+        for name in ('unshare', 'nsenter', 'socat'):
+            if name in network:
+                network[name] = user_config.tool(network[name], name)
     from . import prompts as _prompts
     prompts_dir = (path.parent/config.get('prompts_dir', '../../prompts')).resolve()
     config['prompts_dir'] = str(prompts_dir)

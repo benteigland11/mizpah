@@ -8,3 +8,13 @@ dist/
 build/
 app/build/
 app/.dart_tool/
+
+# Run state and search logs the tools write as they work; never source.
+.searched
+.terra/
+.mizpah/
+.tool-output/
+engine/cartograph/src/.cartograph/
+*.key.json
+.claude/
+CLAUDE.local.md

@@ -1,0 +1,37 @@
+Mizpah
+Copyright 2026 Ben Teigland and the Mizpah contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+It includes the following software and material, each under its own license.
+
+Forked tools (source in this repository; fork points in UPSTREAM.txt, with every
+change made here listed under its "diverged" lines)
+
+  engine/terra        Terra - Apache License 2.0 (engine/terra/LICENSE)
+                      https://github.com/benteigland11/Terra
+  engine/cartograph   Cartograph - MIT License, Copyright (c) 2025 Cartograph
+                      Contributors (engine/cartograph/LICENSE)
+                      https://github.com/benteigland11/Cartograph
+  engine/playbook     Playbook - MIT License, Copyright (c) 2026 Ben Teigland
+                      (engine/playbook/LICENSE)
+                      https://github.com/benteigland11/Playbook
+
+Provider constants (engine/mizpah/src/mizpah/providers.json)
+
+  The openai_chatgpt sign-in constants come from the openai/codex source
+  (codex-rs/login), Apache License 2.0, Copyright OpenAI.
+  https://github.com/openai/codex
+  The xai_grok endpoints come from the xai-org/grok-build source
+  (crates/codegen/xai-grok-login), Apache License 2.0, Copyright xAI.
+  https://github.com/xai-org/grok-build
+  Signing in to a subscription through these clients is unofficial: it is not
+  endorsed by OpenAI or xAI and may stop working at any time.
+
+Fonts (app/assets/fonts, each with its license file beside it)
+
+  JetBrains Mono - SIL Open Font License 1.1, Copyright 2020 The JetBrains Mono
+  Project Authors (https://github.com/JetBrains/JetBrainsMono)
+  Space Grotesk - SIL Open Font License 1.1, Copyright 2020 The Space Grotesk
+  Project Authors (https://github.com/floriankarsten/space-grotesk)
+  Homemade Apple - Apache License 2.0, by Font Diner (Sideshow), distributed
+  through Google Fonts (https://fonts.google.com/specimen/Homemade+Apple)

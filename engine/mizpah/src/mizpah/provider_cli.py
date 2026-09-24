@@ -15,6 +15,7 @@ from typing import Any
 
 from cg.bp_subscription_provider_session_python.src.subscription_provider_session import LoginError, LoginPrompt
 
+from mizpah import user_config
 from mizpah.providers import (available_models, credential_path, local_profile, missing_client_id, registry, session_for,
                               shipped_names)
 
@@ -26,10 +27,8 @@ SUBSCRIPTION_UNSUPPORTED_GENERATION_KEYS = LLAMA_ONLY_GENERATION_KEYS + ('temper
 
 
 def _config(path: Path | None) -> dict[str, Any]:
-    if path is None:
-        return {}
-    raw = json.loads(path.read_text())
-    return raw if 'mizpah' in raw else {'mizpah': raw}
+    """The engine config with this machine's layer over it (the layer alone without --config)."""
+    return {'mizpah': user_config.engine(path)}
 
 
 def _emit(payload: dict[str, Any]) -> None:
@@ -166,18 +165,20 @@ def cmd_use(args: argparse.Namespace) -> int:
     # in the project's .mizpah/config.json; the loop layers it over the user config when it starts.
     project = getattr(args, 'project', None)
     harness_path = args.harness
-    if project is None and harness_path is None:
+    to_user = project is None and harness_path is None
+    if to_user:
         if args.config is None:
             _emit(dict(event='error', error='pass --config (the engine config) or --harness (the harness config)'))
             return 2
-        harness_path = (args.config.parent/json.loads(args.config.read_text())['harness_config']).resolve()
-    if project is not None:
+        # The user's choice, not the repository's: the seats go to the user's layer (user_config).
+        harness, _ = user_config.harness(args.config)
+    elif project is not None:
         from . import init as init_module, layout
         state = layout.state(Path(project))
         cfg_path = state/'config.json'
         project_cfg = init_module.project_config(Path(project))
         harness = project_cfg.setdefault('models', {})
-    else:
+    elif not to_user:
         harness = json.loads(harness_path.read_text())
     roles = ('worker', 'controller') if args.role == 'both' else ('worker', 'controller', 'deputy') if args.role == 'all' else (args.role,)
     native = profile.auth.kind == 'none' and profile.token_count == 'tokenize_endpoint'
@@ -221,26 +222,25 @@ def cmd_use(args: argparse.Namespace) -> int:
         _emit(dict(event='using', provider=profile.name, model=model, effort=effort, roles=list(roles),
                    transport='llama_client' if native else 'subscription', project=str(project), project_config=str(cfg_path)))
         return 0
-    harness_path.write_text(json.dumps(harness, indent=2)+'\n')
+    if to_user:
+        written = user_config.update_section('harness', {role: harness[role] for role in roles})
+    else:
+        harness_path.write_text(json.dumps(harness, indent=2)+'\n')
+        written = harness_path
     _emit(dict(event='using', provider=profile.name, model=model, effort=effort, roles=list(roles),
-               transport='llama_client' if native else 'subscription', harness_config=str(harness_path)))
+               transport='llama_client' if native else 'subscription', harness_config=str(written)))
     return 0
 
 
 def _write_override(config_path: Path | None, name: str, override: dict[str, Any] | None) -> dict[str, Any]:
-    """Set (or with None, delete) mizpah.providers.<name> in the engine config; returns the raw file."""
-    if config_path is None:
-        _emit(dict(event='error', error='this command needs --config (the engine config to write into)'))
-        raise SystemExit(2)
-    raw = json.loads(config_path.read_text())
-    target = raw['mizpah'] if 'mizpah' in raw else raw
-    overrides = target.setdefault('providers', {})
+    """Set (or with None, delete) providers.<name> in the user's layer; returns that layer's engine section."""
+    providers = dict(user_config.section('engine').get('providers') or {})
     if override is None:
-        overrides.pop(name, None)
+        providers.pop(name, None)
     else:
-        overrides[name] = override
-    config_path.write_text(json.dumps(raw, indent=2)+'\n')
-    return raw
+        providers[name] = override
+    user_config.update_section('engine', {'providers': providers})
+    return user_config.section('engine')
 
 
 def cmd_add_local(args: argparse.Namespace) -> int:
@@ -313,12 +313,8 @@ def cmd_configure(args: argparse.Namespace) -> int:
     else a string; an empty value removes the override. The result must still be a valid profile, or
     nothing is written.
     """
-    if args.config is None:
-        _emit(dict(event='error', error='configure needs --config (the engine config to write the override into)'))
-        return 2
-    raw = json.loads(args.config.read_text())
-    target = raw['mizpah'] if 'mizpah' in raw else raw
-    override = json.loads(json.dumps(target.setdefault('providers', {}).setdefault(args.provider, {})))
+    target = user_config.engine(args.config)
+    override = json.loads(json.dumps(dict(target.get('providers') or {}).get(args.provider) or {}))
     if args.base_url:
         args.set = [f'api_base_url={args.base_url}'] + (args.set or [])
     if args.default_model:
@@ -343,13 +339,13 @@ def cmd_configure(args: argparse.Namespace) -> int:
         if key in ('completion_path', 'models_path', 'tokenize_path', 'template_path') and isinstance(parsed, str) and parsed and not parsed.startswith('/'):
             parsed = '/' + parsed
         _apply_set(override, key, parsed)
-    target['providers'][args.provider] = override
+    target['providers'] = dict(target.get('providers') or {}, **{args.provider: override})
     try:
         session = session_for(args.provider, {'mizpah': target})
     except (ValueError, TypeError, KeyError) as error:
         _emit(dict(event='error', provider=args.provider, error=f'that would not be a valid profile: {error}'))
         return 2
-    args.config.write_text(json.dumps(raw, indent=2)+'\n')
+    _write_override(args.config, args.provider, override)
     _emit(dict(event='configured', provider=args.provider, override=override, **{k: v for k, v in session.status().items()
                                                                                   if k in ('signed_in', 'reachable', 'reason')}))
     return 0
@@ -410,6 +406,17 @@ def cmd_check(args: argparse.Namespace) -> int:
     return 0 if report['ok'] else 1
 
 
+def cmd_current(args: argparse.Namespace) -> int:
+    """The seats a run would use on this machine: the committed harness config with the user's layer over it."""
+    if args.config is None:
+        _emit(dict(event='error', error='current needs --config (the engine config)'))
+        return 2
+    harness, _ = user_config.harness(args.config)
+    _emit(dict(seats={role: harness.get(role) for role in ('worker', 'controller', 'deputy')},
+               user_config=str(user_config.path())))
+    return 0
+
+
 def cmd_logout(args: argparse.Namespace) -> int:
     session = session_for(args.provider, _config(args.config))
     _emit(dict(event='signed_out', provider=args.provider, removed=session.logout()))
@@ -421,6 +428,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--config', type=Path, default=None, help='engine config (for mizpah.providers overrides)')
     commands = parser.add_subparsers(dest='command', required=True)
     commands.add_parser('list').set_defaults(run=cmd_list)
+    commands.add_parser('current', help="the seats a run would use: repo defaults with this machine's choices over them"
+                        ).set_defaults(run=cmd_current)
     status = commands.add_parser('status'); status.add_argument('provider'); status.set_defaults(run=cmd_status)
     login = commands.add_parser('login'); login.add_argument('provider')
     login.add_argument('--no-browser', action='store_true', help='print the URL; do not launch a browser')

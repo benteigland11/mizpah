@@ -1,0 +1,48 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  engine:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --python 3.12 --managed-python
+      - name: packages
+        run: |
+          for pkg in terra cartograph playbook casebook mizpah; do
+            echo "::group::$pkg"
+            (cd engine/$pkg && ../../.venv/bin/python -m pytest -q) || failed="$failed $pkg"
+            echo "::endgroup::"
+          done
+          test -z "$failed" || { echo "failed:$failed"; exit 1; }
+      - name: widgets
+        run: |
+          for pkg in harness mizpah; do
+            for widget in engine/$pkg/cg/*/; do
+              [ -d "$widget/tests" ] || continue
+              echo "::group::$widget"
+              (cd engine/$pkg && PYTHONPATH=$PWD:$PWD/${widget#engine/$pkg/} ../../.venv/bin/python -m pytest -q ${widget#engine/$pkg/}tests) || failed="$failed $widget"
+              echo "::endgroup::"
+            done
+          done
+          test -z "$failed" || { echo "failed:$failed"; exit 1; }
+
+  app:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libmpv-dev libnotify-dev libayatana-appindicator3-dev clang cmake ninja-build
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
