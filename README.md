@@ -2,6 +2,8 @@
 
 **A long-horizon agent harness for work nobody can check directly.**
 
+*Early and changing fast. Linux only for now.*
+
 Agents are good when there is a right answer to test against. Most real work has none: a design, a
 piece of music, a deployment plan. Mizpah breaks that kind of work into small pieces that *can* be
 checked, measures each one, and only calls the work done when the evidence says so.
