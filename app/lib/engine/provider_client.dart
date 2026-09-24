@@ -206,19 +206,15 @@ class ProcessProviderClient implements ProviderClient {
 
   @override
   Future<Map<ModelRole, ModelChoice>> current() async {
-    // The harness config the engine config names; read it directly, the
-    // same way the engine does, so the page shows what a run would use.
-    final engine =
-        jsonDecode(await File(config).readAsString()) as Map<String, dynamic>;
-    final harnessPath = File(
-      config,
-    ).parent.uri.resolve(engine['harness_config'] as String).toFilePath();
-    final harness =
-        jsonDecode(await File(harnessPath).readAsString())
-            as Map<String, dynamic>;
+    // The seats a run would use on this machine: the repository's defaults
+    // with the user's choices (~/.config/mizpah/config.json) over them. The
+    // engine does the layering; the app never reads a config file for this.
+    final seats =
+        ((await _one(['current']))['seats'] as Map?)?.cast<String, dynamic>() ??
+        const {};
     return {
       for (final role in ModelRole.values)
-        role: _choice((harness[role.name] as Map?)?.cast<String, dynamic>()),
+        role: _choice((seats[role.name] as Map?)?.cast<String, dynamic>()),
     };
   }
 
