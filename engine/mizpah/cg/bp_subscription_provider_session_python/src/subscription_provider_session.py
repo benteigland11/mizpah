@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import json
 import re
+import socket
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -105,6 +107,7 @@ HttpCall = Callable[[str, str, Mapping[str, str], bytes | None, float], HttpResp
 """``http(method, url, headers, body, timeout_seconds) -> HttpResponse``."""
 
 
+STALL_SECONDS = 120.0   # silence after a reply has started that counts as a stall; 0 turns the watchdog off
 _LAST_TYPE = re.compile(rb'"type":\s*"(response\.[a-z_.]+)"')
 
 
@@ -128,28 +131,65 @@ def urllib_http(maximum_response_bytes: int = DEFAULT_MAXIMUM_RESPONSE_BYTES) ->
             # read returned the whole reply at once and progress was one event at the end (the probe
             # call, 2026-09-21: 15 KB in one read after 1.4 s). read1 returns what has arrived.
             read = getattr(response, "read1", None) or response.read
-            while True:
-                chunk = read(65536)
-                if not chunk:
-                    break
-                chunks.append(chunk)
-                total += len(chunk)
-                if total > maximum_response_bytes:
-                    raise OSError("response exceeded the configured byte limit")
-                if progress is not None:
-                    # The event's name: the `event:` line, or the `"type"` inside `data:` when the
-                    # stream carries data lines only. Enough to say thinking from writing.
-                    i = chunk.rfind(b"event: ")
-                    if i >= 0:
-                        last_event = chunk[i + 7:chunk.find(b"\n", i) if chunk.find(b"\n", i) > 0 else None].decode("utf-8", "replace").strip()
-                    else:
-                        m = _LAST_TYPE.findall(chunk)
-                        if m:
-                            last_event = m[-1].decode("utf-8", "replace")
+            # Once a reply has started, silence is a stall, not thinking: the socket timeout (the patience a model
+            # needs before its first byte) left a reply that streamed 900 KB and stopped hanging ten minutes before
+            # the retry (Grok, 2026-09-24). A watchdog closes the response after `stall_seconds` without a byte;
+            # the read then fails and the caller's retry takes over.
+            stall = getattr(call, "stall_seconds", STALL_SECONDS)
+            last_byte = [0.0]
+            stop = threading.Event()
+
+            def watch() -> None:
+                while not stop.wait(2.0):
+                    if last_byte[0] and time.monotonic()-last_byte[0] > stall:
+                        stalled[0] = True
+                        # close() from another thread does not wake a blocked read; shutting the socket down does.
+                        sock = getattr(getattr(getattr(response, "fp", None), "raw", None), "_sock", None)
+                        for stop_it in ((lambda: sock.shutdown(socket.SHUT_RDWR)) if sock is not None else None, response.close):
+                            if stop_it is None:
+                                continue
+                            try:
+                                stop_it()
+                            except Exception:  # noqa: BLE001 — best effort; the read fails either way
+                                pass
+                        return
+            stalled = [False]
+            watcher = threading.Thread(target=watch, daemon=True) if stall else None
+            if watcher is not None:
+                watcher.start()
+            try:
+                while True:
                     try:
-                        progress(total, last_event)
-                    except Exception:  # noqa: BLE001 — progress is a courtesy, never the call
-                        pass
+                        chunk = read(65536)
+                    except Exception as error:
+                        if stalled[0]:
+                            raise OSError(f"the reply stalled: no bytes for {stall:.0f} s after it had started") from error
+                        raise
+                    if not chunk:
+                        if stalled[0]:
+                            raise OSError(f"the reply stalled: no bytes for {stall:.0f} s after it had started")
+                        break
+                    last_byte[0] = time.monotonic()
+                    chunks.append(chunk)
+                    total += len(chunk)
+                    if total > maximum_response_bytes:
+                        raise OSError("response exceeded the configured byte limit")
+                    if progress is not None:
+                        # The event's name: the `event:` line, or the `"type"` inside `data:` when the
+                        # stream carries data lines only. Enough to say thinking from writing.
+                        i = chunk.rfind(b"event: ")
+                        if i >= 0:
+                            last_event = chunk[i + 7:chunk.find(b"\n", i) if chunk.find(b"\n", i) > 0 else None].decode("utf-8", "replace").strip()
+                        else:
+                            m = _LAST_TYPE.findall(chunk)
+                            if m:
+                                last_event = m[-1].decode("utf-8", "replace")
+                        try:
+                            progress(total, last_event)
+                        except Exception:  # noqa: BLE001 — progress is a courtesy, never the call
+                            pass
+            finally:
+                stop.set()
             raw = b"".join(chunks)
             return HttpResponse(response.status, {k.lower(): v for k, v in response.headers.items()}, raw)
 
@@ -273,7 +313,8 @@ class ProviderSession:
         return self.store.delete(self.profile.name)
 
     def reachable(self, *, timeout_seconds: float = 5.0) -> tuple[bool, str]:
-        """Does the endpoint answer at all? Any HTTP status but 503 counts; a socket error does not."""
+        """Does the endpoint answer at all? Any HTTP status below 500 counts (a 401 is a live host refusing an
+        unsigned request); a 5xx or a socket error does not. No tokens are spent: it reads the model list."""
         url = self.profile.models_url or self.profile.api_base_url
         try:
             response = self.http("GET", url, self._headers({"Accept": "application/json"}), None, timeout_seconds)
@@ -281,6 +322,8 @@ class ProviderSession:
             return False, f"{type(error).__name__}: {error}"
         if response.status == 503:
             return False, "http 503: still loading"
+        if response.status >= 500:
+            return False, f"http {response.status}"
         return True, f"http {response.status}"
 
     # -- the transport --------------------------------------------------------
@@ -301,7 +344,7 @@ class ProviderSession:
         """Prompt-token estimate in the shape a model client's ``count`` returns."""
         return self.estimator.estimate(payload).as_dict()
 
-    def list_model_info(self) -> list[ModelInfo]:
+    def list_model_info(self, *, timeout_seconds: float | None = None) -> list[ModelInfo]:
         """What the provider reports for this credential: ids and, when it says, effort ladders.
 
         Accepts the OpenAI ``{"data": [{"id"}]}`` shape, a ``{"models": [{"slug"|"id", "visibility"?,
@@ -317,7 +360,8 @@ class ProviderSession:
         url = self.profile.models_url_for(record.metadata) or ""
         headers = self._headers({"Accept": "application/json"})
         headers.update(self.profile.headers_for(record.secret["access_token"], record.metadata))
-        response = self.http("GET", url, headers, None, self.profile.timeout_seconds)
+        timeout = self.profile.timeout_seconds if timeout_seconds is None else min(timeout_seconds, self.profile.timeout_seconds)
+        response = self.http("GET", url, headers, None, timeout)
         if not 200 <= response.status < 300:
             raise LookupError(f"model list http {response.status}: {response.body[:200].decode('utf-8', 'replace')}")
         try:
@@ -594,7 +638,8 @@ class ProviderTransport:
     def _decode(self, response: HttpResponse, elapsed: float, payload: dict[str, Any]) -> WireResponse:
         text = response.body.decode("utf-8", errors="replace")
         if not 200 <= response.status < 300:
-            return WireResponse(response.status, text, elapsed)
+            retry_after = response.headers.get("retry-after")
+            return WireResponse(response.status, text, elapsed, evidence={"retry_after": retry_after} if retry_after else None)
         streamed = (response.headers.get("content-type", "").startswith("text/event-stream")
                     or text.lstrip().startswith(("event:", "data:")))
         if self.profile.wire == "chat_completions":
