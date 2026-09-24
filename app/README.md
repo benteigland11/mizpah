@@ -1,17 +1,16 @@
-# mizpah_app
+# Mizpah app
 
-A new Flutter project.
+The desktop app: the inbox, briefs, tasks, providers and the Deputy. It runs the engine from the
+checkout it sits in (the `.venv` made by `uv sync` at the repository root); set `MIZPAH_ENGINE` to
+point it at another checkout.
 
-## Getting Started
+```bash
+flutter run -d linux     # run
+flutter analyze          # lint
+flutter test             # tests
+```
 
-This project is a starting point for a Flutter application.
+Build dependencies on Linux: GTK 3, mpv, libnotify and ayatana-appindicator development packages,
+plus clang, cmake and ninja. See the [repository README](../README.md) for the full setup.
 
-A few resources to get you started if this is your first Flutter project:
-
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+`cg/` holds the app's Cartograph widgets (reusable Flutter pieces); `lib/cg/` links to them.

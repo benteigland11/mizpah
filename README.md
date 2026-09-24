@@ -1,31 +1,44 @@
 # Mizpah
 
-A self-improving engineering loop. Three tools, forked and coupled by one harness:
+**A long-horizon agent harness for work nobody can check directly.**
 
-- **Terra** (`engine/terra`) — the reference (brief) and the working set (map: unknowns,
-  probes, runs, knowns), the route, the gate, the sitrep.
-- **Cartograph** (`engine/cartograph`) — capabilities: widgets and blueprints that probes
-  call.
-- **Playbook** (`engine/playbook`) — methods: procedures a worker follows one step at a
-  time.
-- **Mizpah engine** (`engine/mizpah`) — the loop: a controller that reads brief against
-  map and mints unknowns and route tasks; workers that take one task, find a procedure,
-  build or reuse a widget, run a probe, graduate a known. Gate green is the signal that a
-  method may be written back to the playbook.
-- **App** (`app/`) — Flutter desktop; launches the engine as a sidecar and is where the
-  user holds the brief (proposal queue, mode dial).
+Agents are good when there is a right answer to test against. Most real work has none: a design, a
+piece of music, a deployment plan. Mizpah breaks that kind of work into small pieces that *can* be
+checked, measures each one, and only calls the work done when the evidence says so.
 
-The tools are forked, not vendored: they will change here. Upstream commits are recorded
-in `UPSTREAM.txt`. MCP servers, plugin manifests, docs and demos were left behind; the
-harness couples the tools directly.
+You write a brief. Agents turn it into questions ("does the left hand ever stretch past an
+octave?"), answer each with a measurement, and keep the methods and code that worked, so the next
+task starts ahead of the last one.
 
-## Develop
+<!-- screenshot: the desk, with the inbox, a brief and a running task -->
 
-    uv sync --python 3.12 --managed-python
-    .venv/bin/terra --help; .venv/bin/cartograph --help; .venv/bin/playbook --help
-    (cd engine/terra && ../../.venv/bin/python -m pytest -q)
-    (cd engine/cartograph && ../../.venv/bin/python -m pytest -q)
-    (cd engine/playbook && ../../.venv/bin/python -m pytest -q)
+## Try it
 
-One `uv` workspace, one managed interpreter; the same environment is what the app will
-ship as its sidecar.
+Linux only for now. You need [uv](https://docs.astral.sh/uv/), the
+[Flutter SDK](https://docs.flutter.dev/get-started/install/linux), and a few system packages
+(Fedora shown):
+
+```bash
+sudo dnf install bubblewrap socat gtk3-devel mpv-devel libnotify-devel libayatana-appindicator-gtk3-devel clang cmake ninja-build
+```
+
+Then:
+
+```bash
+git clone https://github.com/benteigland11/mizpah.git
+cd mizpah
+uv sync --python 3.12 --managed-python
+cd app && flutter run -d linux
+```
+
+Connect a model under **Providers** (a ChatGPT or Grok subscription, an API key, or a local
+server), then tell the Deputy on **Home** what you want built. It drafts a brief; you sign it; the
+work starts.
+
+> Subscription sign-in for ChatGPT and Grok is unofficial and may stop working at any time. API
+> keys and local servers are unaffected.
+
+## More
+
+- [Glossary](prompts/glossary.md) · [Contributing](CONTRIBUTING.md) · the story behind it: **mizpah.ai** (soon)
+- Licensed under [Apache 2.0](LICENSE); see [NOTICE](NOTICE) for the parts under other licenses.

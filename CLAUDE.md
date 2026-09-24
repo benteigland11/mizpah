@@ -102,7 +102,7 @@ These came out of ten single-seed campaigns on a 26B MoE model in a 60K window
 
 - `prompts/` — what the seats are fed, as small Markdown files composed into prompts: the
   glossary (`glossary.md`), blocks that say how one thing works (`unknowns.md`,
-  `terra_philosophy.md`), and each seat's policy. One file, one thing; see its README.
+  `probes.md`), and each seat's policy. One file, one thing; see its README.
 - `design/` — our notes on how a mechanism is meant to work (`gate.md`, `handoff.md`), for
   the people designing the loop; never fed to a seat.
 - `engine/terra`, `engine/cartograph`, `engine/playbook` — forks (source, `cg/` widgets,
@@ -117,15 +117,13 @@ These came out of ten single-seed campaigns on a 26B MoE model in a 60K window
   launches every run, from the app or by hand. The model is the project's: `mizpah-provider use --project`
   pins a crew in its `.mizpah/config.json`; local servers are providers (`mizpah-provider add-local`),
   and a seat's `context_window` fits the session to its model. No config file per model.
-- `engine/mizpah/` — the new loop (controller + worker roles over the three tools).
-  Empty at fork time; this is where the work is.
+- `engine/mizpah/` — the loop (controller, worker, reviewer and Deputy over the three tools).
 - `app/` — Flutter desktop. Launches the engine as a sidecar, renders brief/route/map/
   gate, holds the proposal queue and the autonomy dial.
 - `docs/DESIGN.md` — the loop in prose with the open seams. `docs/lineage/` — the
-  design and evidence documents this grew out of, with pointers back to the research
-  workspace `/home/Vinscen/decisions` (see `docs/lineage/LINEAGE.md`).
-- Design canvas (Flywheel Studio): https://claude.ai/artifact/47xMRDgkAUvhp5siPbw6jq —
-  the agreed graph and answered questions live in its `design/main` document.
+  design and evidence documents this grew out of (see `docs/lineage/LINEAGE.md`).
+- Machine-specific notes (local model servers, private research paths, design canvas) live in
+  `CLAUDE.local.md`, which is not committed.
 
 ## Working here
 
@@ -135,8 +133,5 @@ These came out of ten single-seed campaigns on a 26B MoE model in a 60K window
   widgets: `cd engine/harness && PYTHONPATH=$PWD:$PWD/cg/<widget> ../../.venv/bin/python -m pytest -q cg/<widget>/tests`.
 - `cg` is a namespace package merged from terra, cartograph and harness; never add
   `cg/__init__.py`.
-- Local model: llama.cpp Gemma-4-26B-A4B behind a manager on :58000 (`/start`,
-  `/status/58081`); launch request and pid history in
-  `/home/Vinscen/decisions/artifacts/focused-harness/gemma4-gpu0/`.
 - The three tools will change here. When you change one, note it in `UPSTREAM.txt`
   under a "diverged" line so the fork point stays legible.
