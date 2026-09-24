@@ -14,6 +14,10 @@ class BriefManager extends ChangeNotifier {
   }
 
   final Engine _engine;
+
+  /// The saved gym environments a brief may name.
+  Future<List<Map<String, String>>> environments() => _engine.environments();
+  Future<void> setDefaultEnvironment(String name) => _engine.setDefaultEnvironment(name);
   StreamSubscription<void>? _changes;
 
   /// Re-list projects without touching the open draft: a run appeared,
@@ -24,7 +28,24 @@ class BriefManager extends ChangeNotifier {
       deselect();
       return;
     }
+    await _syncOpen();
     notifyListeners();
+  }
+
+  /// The open brief follows the disk while no edit is pending: the loop
+  /// accepted a proposal, a change request arrived, a version bumped. An
+  /// unsaved draft is the person's and is left alone.
+  Future<void> _syncOpen() async {
+    final id = selectedId;
+    if (id == null || draft == null || dirty) return;
+    final fresh = Brief.fromJson(await _engine.readBrief(id));
+    if (selectedId != id) return;
+    final encoded = jsonEncode(fresh.toJson());
+    if (encoded == _loaded) return;
+    draft = fresh;
+    _loaded = encoded;
+    route = await _engine.readRoute(id);
+    generation++;
   }
 
   @override
@@ -64,6 +85,86 @@ class BriefManager extends ChangeNotifier {
     briefs = await _engine.listBriefs();
     notifyListeners();
   }
+
+  /// A task's brief as it sits on disk, without selecting it — for a
+  /// sheet that shows another task's paper (Home).
+  Future<Brief> peek(String id) async => Brief.fromJson(await _engine.readBrief(id));
+
+  /// Open a new task: the engine makes the folder and a blank brief, the
+  /// list refreshes, and the new task is selected so the person can write.
+  Future<String> create(String title, {required String mission, String? repo}) async {
+    final id = await _engine.createTask(title, mission: mission, repo: repo);
+    briefs = await _engine.listBriefs();
+    if (id.isNotEmpty) await select(id);
+    notifyListeners();
+    return id;
+  }
+
+  /// Sign and issue the open draft: the loop starts; the brief re-reads.
+  /// A draft is first made a project (furnished where it is, or moved
+  /// into [repo], where the id changes and the desk follows it), then
+  /// issued and started.
+  Future<void> issue({String? repo}) async {
+    var id = selectedId;
+    if (id == null || dirty) return;
+    id = await _engine.authorizeDraft(id, repo: repo);
+    selectedId = id;
+    await _engine.startTask(id);
+    await select(id);
+    briefs = await _engine.listBriefs();
+    notifyListeners();
+  }
+
+  /// Start a brief that was signed and never ran (a signature with no
+  /// session: the loop was never launched, or its sessions were removed).
+  Future<void> start() async {
+    final id = selectedId;
+    if (id == null) return;
+    await _engine.startTask(id);
+    await select(id);
+    briefs = await _engine.listBriefs();
+    notifyListeners();
+  }
+
+  /// The project as a whole, from its row. Archive and unarchive keep the
+  /// desk where it is; delete leaves it (the project is gone) — unless it
+  /// was a draft, which discards.
+  Future<void> archiveProject(String id) async {
+    await _engine.archiveProject(id);
+    briefs = await _engine.listBriefs();
+    notifyListeners();
+  }
+
+  Future<void> unarchiveProject(String id) async {
+    await _engine.unarchiveProject(id);
+    briefs = await _engine.listBriefs();
+    notifyListeners();
+  }
+
+  Future<void> deleteProject(String id) async {
+    final summary = briefs.where((b) => b.id == id).firstOrNull;
+    if (summary?.state == 'idle') {
+      await _engine.discardDraft(id);
+    } else {
+      await _engine.deleteProject(id);
+    }
+    if (selectedId == id) deselect();
+    briefs = await _engine.listBriefs();
+    notifyListeners();
+  }
+
+  /// Throw the open draft away: the desk clears and the list re-reads.
+  Future<void> discard() async {
+    final id = selectedId;
+    if (id == null) return;
+    await _engine.discardDraft(id);
+    deselect();
+    briefs = await _engine.listBriefs();
+    notifyListeners();
+  }
+
+  /// Whether a path on the desk is a folder and a git repository.
+  Future<Map<String, bool>> inspectPath(String path) => _engine.inspectPath(path);
 
   /// Back to Home: no project open.
   void deselect() {

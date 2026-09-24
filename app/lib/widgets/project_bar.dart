@@ -110,6 +110,19 @@ class ProjectBar extends StatelessWidget {
               ),
               const SizedBox(width: Sp.m),
               DocStamp(status, hot: status == 'STOPPED', sign: false, quiet: status == 'ARCHIVED'),
+              // What the live run is doing, at a glance: which seat has it and where it is.
+              if (work.now.isNotEmpty) ...[
+                const SizedBox(width: Sp.m),
+                Flexible(
+                  flex: 2,
+                  child: Text(
+                    work.now.toUpperCase(),
+                    overflow: TextOverflow.ellipsis,
+                    softWrap: false,
+                    style: k.copyWith(color: ink),
+                  ),
+                ),
+              ],
               const Spacer(),
               if (work.crew.isNotEmpty) ...[
                 Flexible(
@@ -150,16 +163,20 @@ class ProjectBar extends StatelessWidget {
               // shown run, and only when nothing is live.
               if (work.anyLive)
                 FilledButton.icon(
-                  onPressed: busy ? null : work.hold,
-                  icon: const Icon(Icons.pause, size: 15),
-                  label: const Text('HOLD'),
+                  onPressed: busy || work.holding ? null : work.hold,
+                  icon: work.holding
+                      ? const SizedBox.square(dimension: 13, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.pause, size: 15),
+                  label: Text(work.holding ? 'HOLDING' : 'HOLD'),
                   style: _primary,
                 )
               else if (shown != null && !shown.archived)
                 FilledButton.icon(
                   onPressed: busy ? null : work.resume,
-                  icon: const Icon(Icons.play_arrow, size: 15),
-                  label: const Text('RESUME'),
+                  icon: work.working == 'Resuming'
+                      ? const SizedBox.square(dimension: 13, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.play_arrow, size: 15),
+                  label: Text(work.working == 'Resuming' ? 'RESUMING' : 'RESUME'),
                   style: _primary,
                 ),
               if (shown != null) ...[

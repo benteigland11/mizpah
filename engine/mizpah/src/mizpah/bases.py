@@ -23,7 +23,9 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -192,15 +194,53 @@ def list_bases() -> list[dict[str, Any]]:
     return out
 
 
-def apply(config: dict[str, Any], name: str) -> dict[str, Any]:
+SNAPSHOTS = '.snapshots'
+
+
+def snapshot(name: str) -> Path:
+    """Freeze a base for one run, so editing the base (by hand, in an editor, by the Deputy) never reaches a gym
+    already running in it: a copy under `.snapshots/<name>@<stamp>-<pid>`, copy-on-write where the disk can (btrfs,
+    xfs: a 240 MB venv in half a second, no space until a file changes), a plain copy elsewhere. The run mounts it
+    at the base's own path, so every absolute path baked into it (venv shebangs) still resolves. Snapshots of runs
+    whose process is gone are removed first."""
+    source = path_of(name)
+    load(name)   # must exist
+    root = bases_root()/SNAPSHOTS
+    root.mkdir(exist_ok=True)
+    prune_snapshots()
+    target = root/(name+'@'+time.strftime('%Y%m%dT%H%M%S', time.gmtime())+'-'+str(os.getpid()))
+    subprocess.run(['cp', '-a', '--reflink=auto', str(source), str(target)], check=True, capture_output=True)
+    return target
+
+
+def prune_snapshots() -> list[str]:
+    """Remove the snapshots whose run's process has ended."""
+    root = bases_root()/SNAPSHOTS
+    gone = []
+    for folder in (root.iterdir() if root.is_dir() else ()):
+        try:
+            pid = int(folder.name.rsplit('-', 1)[1])
+            os.kill(pid, 0)
+            continue   # its run is alive
+        except ProcessLookupError:
+            pass
+        except (IndexError, ValueError, PermissionError):
+            continue
+        shutil.rmtree(folder, ignore_errors=True)
+        gone.append(folder.name)
+    return gone
+
+
+def apply(config: dict[str, Any], name: str, frozen: Path | None = None) -> dict[str, Any]:
     """Bind the base into the sandbox config: read-only at its own path, its env with `$BASE` filled in,
-    `venv/bin` first on PATH when the base has one, and `MIZPAH_BASE` for the enabler text to point at."""
+    `venv/bin` first on PATH when the base has one, and `MIZPAH_BASE` for the enabler text to point at. With
+    [frozen] (a `snapshot`), that copy is what is mounted there, so the run keeps the base as it was when it
+    started."""
     base = load(name)
     root = base['path']
     sandbox = config['mizpah'].setdefault('sandbox', {})
-    binds = list(sandbox.get('read_only_binds') or ())
-    if root not in binds:
-        binds.append(root)
+    binds = [b for b in (sandbox.get('read_only_binds') or ()) if b != root and not b.endswith(':'+root)]
+    binds.append(root if frozen is None else str(frozen)+':'+root)
     sandbox['read_only_binds'] = binds
     env = dict(sandbox.get('environment') or {})
     venv = Path(root)/'venv'/'bin'
@@ -225,7 +265,7 @@ def apply(config: dict[str, Any], name: str) -> dict[str, Any]:
     if base['network'] and isinstance(network, dict):
         allowed = list(network.get('allowed_domains') or ())
         network['allowed_domains'] = allowed+[h for h in base['network'] if h not in allowed]
-    config['mizpah']['base'] = base
+    config['mizpah']['base'] = dict(base, snapshot=str(frozen)) if frozen is not None else base
     return config
 
 

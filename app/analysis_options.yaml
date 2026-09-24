@@ -10,7 +10,14 @@
 include: package:flutter_lints/flutter.yaml
 
 analyzer:
+  language:
+    # Casts from dynamic must be spelled out: JSON off disk is untyped and
+    # this is where a wrong shape surfaces as a compile error, not a crash.
+    strict-casts: true
   exclude:
+    # Cartograph widgets validate themselves; the app consumes them via lib/cg/.
+    - cg/**
+    - lib/cg/**
     - build/**
     - android/**
     - ios/**
@@ -31,6 +38,14 @@ linter:
   # `// ignore_for_file: name_of_lint` syntax on the line or in the file
   # producing the lint.
   rules:
+    prefer_const_constructors: true
+    prefer_const_declarations: true
+    unawaited_futures: true
+    avoid_dynamic_calls: true
+    cancel_subscriptions: true
+    close_sinks: true
+    use_build_context_synchronously: true
+    avoid_slow_async_io: true
     # avoid_print: false  # Uncomment to disable the `avoid_print` rule
     # prefer_single_quotes: true  # Uncomment to enable the `prefer_single_quotes` rule
 

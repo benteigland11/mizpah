@@ -242,7 +242,7 @@ def project_environment(project: Path) -> str:
     return str(brief.get('environment') or '').strip()
 
 
-def apply_project_config(config: dict[str, Any], project: Path) -> dict[str, Any]:
+def apply_project_config(config: dict[str, Any], project: Path, freeze: bool = False) -> dict[str, Any]:
     """Layer the project's `.mizpah/config.json` over the loaded user config: the sandbox keys a project may
     own (workspace mode, cache dirs, network, extra binds), and — when the task chose its own — the model
     behind each seat (`models.worker` / `models.controller`, written by `mizpah-provider use --project`).
@@ -265,7 +265,9 @@ def apply_project_config(config: dict[str, Any], project: Path) -> dict[str, Any
     environment = project_environment(project) or pc.get('base')
     if environment:
         from . import bases
-        bases.apply(config, str(environment))   # the environment the gym runs in: bound read-only, env set
+        # The environment the gym runs in: bound read-only, env set. A run freezes it (`freeze`): edits to the
+        # environment reach the next run, never one already going.
+        bases.apply(config, str(environment), frozen=bases.snapshot(str(environment)) if freeze else None)
     for role in ('worker', 'controller'):
         spec = (pc.get('models') or {}).get(role)
         if isinstance(spec, dict) and spec:

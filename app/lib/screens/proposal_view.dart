@@ -16,7 +16,6 @@ class ProposalView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
     final brief = manager.draft!;
     final open = manager.openProposals;
     final ix = open.indexWhere((p) => p.id == manager.viewingProposal);
@@ -40,6 +39,7 @@ class ProposalView extends StatelessWidget {
               if (open.isNotEmpty) ...[
                 IconButton(
                   icon: const Icon(Icons.chevron_left),
+                  tooltip: 'Previous change request',
                   onPressed: ix > 0
                       ? () => manager.openProposal(open[ix - 1].id)
                       : null,
@@ -50,6 +50,7 @@ class ProposalView extends StatelessWidget {
                 ),
                 IconButton(
                   icon: const Icon(Icons.chevron_right),
+                  tooltip: 'Next change request',
                   onPressed: ix >= 0 && ix < open.length - 1
                       ? () => manager.openProposal(open[ix + 1].id)
                       : null,
@@ -61,7 +62,7 @@ class ProposalView extends StatelessWidget {
         if (manager.error != null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Text(manager.error!, style: TextStyle(color: cs.error)),
+            child: OpsError(manager.error!),
           ),
         Expanded(
           child: SingleChildScrollView(
@@ -116,7 +117,7 @@ class _Memo extends StatelessWidget {
         ),
         const SizedBox(height: 28),
         _HeaderRow('To', 'Head of Operations, ${brief.title}'),
-        _HeaderRow('From', 'Controller'),
+        const _HeaderRow('From', 'Controller'),
         _HeaderRow('Date', when),
         _HeaderRow(
           'Re',
@@ -129,7 +130,7 @@ class _Memo extends StatelessWidget {
         const SizedBox(height: 28),
         for (final e in proposal.patch.entries)
           if (!e.key.startsWith('removed_')) ...[
-            _Change(
+            ProposalChange(
               brief: brief,
               key_: e.key,
               value: e.value,
@@ -211,8 +212,10 @@ class _HeaderRow extends StatelessWidget {
 }
 
 /// The change, stated in a sentence, then shown as a diff of the section.
-class _Change extends StatelessWidget {
-  const _Change({
+/// Public: the document sheet draws a change request's amendment with it.
+class ProposalChange extends StatelessWidget {
+  const ProposalChange({
+    super.key,
     required this.brief,
     required this.key_,
     required this.value,
@@ -289,7 +292,41 @@ class _Change extends StatelessWidget {
       case 'removed_need':
       case 'removed_deliverable':
       case 'removed_non_goal':
+      case 'was_budget_points':
+      case 'budget_before':
         return const SizedBox.shrink();
+      // A budget ask is a delta, added to the budget as it stands when
+      // accepted. Drawn as the number before and after — a CR that cut a
+      // 120-point budget to 3 showed as "NOTE: 3" and was signed.
+      case 'budget_delta':
+        final delta = (value as num?)?.toInt() ?? 0;
+        final before = (proposalPatch['budget_before'] as num?)?.toInt() ??
+            brief.budgetPoints ??
+            (proposalPatch['was_budget_points'] as num?)?.toInt() ??
+            0;
+        final after = before + delta;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _lead(context, delta >= 0 ? 'Add ${delta.abs()} points to the ' : 'Take ${delta.abs()} points from the ',
+                'Points budgeted', proposalPatch.containsKey('budget_before') ? ' (as applied):' : ' (as it stands now):'),
+            const SizedBox(height: 12),
+            ReplaceDiff(before: '$before points', after: '$after points', style: diffStyle(context)),
+          ],
+        );
+      // Before deltas a proposal wrote the number itself; kept for the record
+      // of briefs decided that way, and marked when it was a cut.
+      case 'budget_points':
+        final to = (value as num?)?.toInt() ?? 0;
+        final was = (proposalPatch['was_budget_points'] as num?)?.toInt() ?? brief.budgetPoints ?? 0;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _lead(context, 'Set the ', 'Points budgeted', to < was ? ' — a cut, written as a number (older form):' : ' (older form, written as a number):'),
+            const SizedBox(height: 12),
+            ReplaceDiff(before: '$was points', after: '$to points', style: diffStyle(context)),
+          ],
+        );
       case 'mission':
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,

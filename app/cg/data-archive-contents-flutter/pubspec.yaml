@@ -1,0 +1,19 @@
+name: archive_contents
+description: Archive Contents - a Cartograph widget.
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # --- cartograph-deps start (generated from widget.json - do not edit) ---
+  archive: ">=4.0.0"
+  # --- cartograph-deps end ---
+  # --- cartograph-composed start (blueprint deps - do not edit) ---
+  # --- cartograph-composed end ---
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter

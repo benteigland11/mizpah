@@ -8,6 +8,7 @@ class Brief {
     required this.mission,
     required this.budgetPoints,
     required this.budgetNotes,
+    required this.environment,
     required this.needs,
     required this.nonGoals,
     required this.deliverables,
@@ -20,6 +21,11 @@ class Brief {
   String mission;
   int? budgetPoints;
   String budgetNotes;
+
+  /// The gym environment the run happens in, by name (a saved environment
+  /// the engine binds into every task: toolchain, packages, env). Empty:
+  /// none. Chosen on the draft, next to the crew; the brief carries it.
+  String environment;
   List<Entry> needs;
   List<Entry> nonGoals;
   List<Entry> deliverables;
@@ -32,6 +38,7 @@ class Brief {
     'mission',
     'budget_points',
     'budget_notes',
+    'environment',
     'needs',
     'non_goals',
     'deliverables',
@@ -44,6 +51,7 @@ class Brief {
     mission: j['mission'] as String? ?? '',
     budgetPoints: j['budget_points'] as int?,
     budgetNotes: j['budget_notes'] as String? ?? '',
+    environment: j['environment'] as String? ?? '',
     needs: Entry.list(j['needs']),
     nonGoals: Entry.list(j['non_goals']),
     deliverables: Entry.list(j['deliverables']),
@@ -63,6 +71,9 @@ class Brief {
 
   int get version => rest['version'] as int? ?? 1;
 
+  /// draft until issued; active while the loop may route it.
+  String get status => rest['status'] as String? ?? 'active';
+
   /// Queued changes. Read-only here: they're applied by the engine on
   /// accept, never edited in the document.
   List<Proposal> get proposals => [
@@ -78,6 +89,7 @@ class Brief {
     'mission': mission,
     'budget_points': budgetPoints,
     'budget_notes': budgetNotes,
+    'environment': environment,
     'needs': [for (final e in needs) e.value],
     'non_goals': [for (final e in nonGoals) e.value],
     'deliverables': [for (final e in deliverables) e.value],
@@ -336,6 +348,7 @@ class Proposal {
   /// One human line per patch key, in `terra brief propose` vocabulary.
   List<(String, String)> get patchLines => [
     for (final e in patch.entries)
+      if (e.key != 'was_budget_points' && e.key != 'budget_before')
       switch (e.key) {
         'add_need' => ('NEED', '${e.value}'),
         'add_non_goal' => ('NON-GOAL', '${e.value}'),
@@ -348,6 +361,16 @@ class Proposal {
         ),
         'mission' => ('MISSION', '${e.value}'),
         'note' => ('NOTE', '${e.value}'),
+        'budget_delta' => (
+          'BUDGET',
+          '${(e.value as num) >= 0 ? '+' : ''}${e.value} points'
+              '${patch['was_budget_points'] != null ? ' (${patch['budget_before'] ?? patch['was_budget_points']} → ${((patch['budget_before'] ?? patch['was_budget_points']) as num) + (e.value as num)})' : ''}',
+        ),
+        'budget_points' => (
+          'BUDGET',
+          'set to ${e.value} points${patch['was_budget_points'] != null ? ' (was ${patch['was_budget_points']})' : ''}',
+        ),
+        'was_budget_points' || 'budget_before' => ('', ''),
         _ => (e.key.toUpperCase(), '${e.value}'),
       },
   ];

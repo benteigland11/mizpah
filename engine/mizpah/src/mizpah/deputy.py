@@ -22,6 +22,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+from string import Template
 import re
 import shutil
 import sys
@@ -30,7 +31,7 @@ from typing import Any
 
 from . import draft as draft_module, init as init_module, prompts
 from .worker import (
-    FocusedSession, ModelClient, ModelTransportError, NetworkPolicy, ReviewPolicy, SandboxedShell, SessionPolicy,
+    FocusedSession, ModelClient, ModelTransportError, NetworkPolicy, RejectedGeneration, ReviewPolicy, SandboxedShell, SessionPolicy,
     SessionSettings, ShellConfig, ShellLimits, client_for, load_config, observe_model, string,
 )
 from cg.bp_focused_agent_session_python.src.focused_agent_session import ContextCapacityExceeded, GenerationRetryExceeded
@@ -213,13 +214,49 @@ def shell_for(config: dict[str, Any], root: Path) -> SandboxedShell:
 
 
 PROMPTS_DIR = Path(__file__).parents[4]/'prompts'   # the repo's, when no config names one
+DEFAULT_ADMINISTRATOR = 'Administrator'
+FIRST_BUILD_TITLE = 'Head of Engineering'   # the first build's placeholder; the app reads it as the default too
+
+
+def app_settings_file() -> Path:
+    """The app's settings (`app.json` under the app's config dir; `MIZPAH_APP_SETTINGS` names another)."""
+    env = os.environ.get('MIZPAH_APP_SETTINGS')
+    if env:
+        return Path(env)
+    try:
+        from cg.infra_app_paths_python.src.app_paths import resolve_app_paths
+        return resolve_app_paths('mizpah').config_dir/'app.json'
+    except ImportError:
+        return Path(os.environ.get('XDG_CONFIG_HOME') or Path.home()/'.config')/'mizpah'/'app.json'
+
+
+def _signer() -> dict[str, str]:
+    """The app's signer settings, read fresh each time so a change in Settings reaches the Deputy at its next turn."""
+    try:
+        settings = json.loads(app_settings_file().read_text()) or {}
+    except (OSError, ValueError):
+        settings = {}
+    return {k: str(settings.get(k) or '').strip() for k in ('signer_title', 'signer_name')}
+
+
+def administrator() -> str:
+    """The title the seat addresses; the default when none is set or the first build's placeholder stands."""
+    title = _signer()['signer_title']
+    return DEFAULT_ADMINISTRATOR if not title or title == FIRST_BUILD_TITLE else title
+
+
+def principal() -> str:
+    """Who the seat talks to, by name and title — "Ben, the Administrator" — or "the Administrator" with no name."""
+    name = _signer()['signer_name']
+    return (name+', the ' if name else 'the ')+administrator()
 
 
 def policy_text(config: dict[str, Any] | None = None) -> str:
-    """The system prompt: the pieces `prompts/order_deputy.txt` lists, composed like the other seats'
-    (`mizpah.prompts.compose`) from the config's `prompts_dir`."""
+    """The system prompt: the pieces `prompts/deputy/order.txt` lists (the glossary from the folder above),
+    composed like the other seats' (`mizpah.prompts.compose`) from the config's `prompts_dir`; `$administrator`
+    in them is the signer's title from the app's settings, `$principal` the signer by name and title."""
     folder = Path(config['prompts_dir']) if config is not None and config.get('prompts_dir') else PROMPTS_DIR
-    return prompts.compose('deputy', folder)
+    return Template(prompts.compose('deputy', folder)).safe_substitute(administrator=administrator(), principal=principal())
 
 
 def settings_for(config: dict[str, Any], assignment: str) -> SessionSettings:
@@ -404,10 +441,35 @@ def say(config: dict[str, Any], text: str, *, turn_cap: int | None = None) -> di
                     session.continue_with(heard)
                 else:
                     session.interject(heard)
-        outcome = session.run(maximum_worker_turns=cap, stop_when=lambda: (root/'STOP').exists())
+        # A dropped call is asked again under the Deputy's patience (shorter than a worker's: a person is
+        # waiting); one TLS blip used to end the turn and the person typed it again.
+        from . import ops
+        failures, failed_at, started_turns = ops.streak(config, role='deputy'), None, session.progress.turns
+        while True:
+            try:
+                outcome = session.run(maximum_worker_turns=max(1, cap-(session.progress.turns-started_turns)),
+                                      stop_when=lambda: (root/'STOP').exists())
+                break
+            except RejectedGeneration:
+                raise
+            except ModelTransportError as error:
+                turn = session.progress.turns
+                if failed_at is not None and turn > failed_at:
+                    failures.succeeded()
+                failed_at = turn
+                if (root/'STOP').exists():
+                    raise
+                error.recorded = True   # ride_out writes the outage line; the handler below must not write a second
+                if not ops.ride_out(failures, error, role='deputy', spec=deputy_spec(config), config=config, root=root,
+                                    health=ops.Health(config, root), turn=turn):
+                    raise
+                discarded = session.discard_pending()
+                if discarded:
+                    (root/'discarded.jsonl').open('a').write(json.dumps(discarded)+'\n')
     except ModelTransportError as error:
         from . import ops
-        ops.record_outage(root, 'deputy', deputy_spec(config), error, 1)
+        if not getattr(error, 'recorded', False):
+            ops.record_outage(root, 'deputy', deputy_spec(config), error, 1)
         discarded = session.discard_pending()   # the torn call is not replayed; the next turn starts clean
         if discarded:
             (root/'discarded.jsonl').open('a').write(json.dumps(discarded)+'\n')

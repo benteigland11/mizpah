@@ -106,6 +106,12 @@ class NetworkPolicy:
                 raise ValueError('network tools must be absolute host paths')
 
 
+def split_bind(bind: str) -> tuple[str, str]:
+    """A read-only bind as (host source, sandbox target): `path` mounts at its own path, `source:target` at
+    another."""
+    source, sep, target = bind.partition(':')
+    return (source, target) if sep else (bind, bind)
+
 @dataclass(frozen=True)
 class ShellConfig:
     """Host paths are explicit; virtual paths belong to the sandbox protocol."""
@@ -119,8 +125,10 @@ class ShellConfig:
     shell_name: str = 'bash'
     python_name: str = 'python3'
     # Host trees mounted read-only at their own path, for a toolchain that lives
-    # outside the runtime root. Environment entries are added after the fixed
-    # sandbox variables; a PATH entry is prepended to the sandbox PATH.
+    # outside the runtime root; `source:target` mounts a tree at another path
+    # (a frozen copy of a toolchain where the live one sits, so the absolute
+    # paths inside it still resolve). Environment entries are added after the
+    # fixed sandbox variables; a PATH entry is prepended to the sandbox PATH.
     read_only_binds: tuple[str, ...] = ()
     environment: dict[str, str] = field(default_factory=dict)
     # Keep the host network namespace (package installs, registries). The name
@@ -177,7 +185,8 @@ class ShellConfig:
         object.__setattr__(self, 'read_only_binds', tuple(self.read_only_binds))
         reserved = {'/', '/usr', '/bin', '/lib', '/lib64', '/work', '/tmp', '/proc', '/dev', '/input', '/runner', '/svc'}
         for bind in self.read_only_binds:
-            if not Path(bind).is_absolute() or Path(bind).as_posix() in reserved:
+            source, target = split_bind(bind)
+            if not Path(source).is_absolute() or not Path(target).is_absolute() or Path(target).as_posix() in reserved:
                 raise ValueError('Read-only binds must be absolute host paths outside the sandbox layout')
         for name, value in self.environment.items():
             if not name or '=' in name or not isinstance(value, str):
@@ -752,7 +761,7 @@ class SandboxedShell:
             '--ro-bind', config.runtime_root, '/usr',
             '--symlink', 'usr/bin', '/bin', '--symlink', 'usr/lib', '/lib', '--symlink', 'usr/lib64', '/lib64',
             '--ro-bind', helper, '/runner',
-            *[part for bind in config.read_only_binds for part in ('--ro-bind', bind, bind)],
+            *[part for bind in config.read_only_binds for part in ('--ro-bind', *split_bind(bind))],
             *[part for entry in (config.network_files if networked else ())
               if Path(entry).exists() for part in ('--ro-bind', str(Path(entry).resolve()), entry)],
             '--proc', '/proc', '--remount-ro', '/proc', '--dev', '/dev', '--remount-ro', '/dev',
@@ -780,7 +789,7 @@ class SandboxedShell:
             # /work after the writable bind, so it shadows it: a directory the command may read but not change
             # in a workspace it otherwise owns (an issued project among the Deputy's drafts).
             for bind in config.read_only_binds:
-                source = Path(bind).resolve()
+                source = Path(split_bind(bind)[0]).resolve()
                 if source != root and source.is_relative_to(root) and source.is_dir():
                     argv += ['--ro-bind', str(source), WORKSPACE_MOUNT+'/'+source.relative_to(root).as_posix()]
             for state in config.state_dirs:

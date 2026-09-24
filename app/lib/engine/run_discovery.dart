@@ -221,7 +221,15 @@ class RunDiscovery {
     final archived = record?['archived'] == true;
     var project = record?['project'] as String?;
     if (project == null || !isProject(project)) {
-      project = _byConvention(session);
+      // A session inside a project's own state folder is that project's,
+      // whatever run.json names: a copied or moved project (an archive of a
+      // gym) kept its sessions, and its record still points at the old path.
+      final state = session.parent.parent;
+      final home = state.parent.path;
+      project = session.parent.uri.pathSegments.where((s) => s.isNotEmpty).last == 'sessions' &&
+              stateDir(home) == state.path && isProject(home)
+          ? home
+          : _byConvention(session);
     }
     if (project == null) return null;
 

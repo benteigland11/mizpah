@@ -366,8 +366,8 @@ def test_completed_arguments_are_excerpted_only_after_their_result_arrives():
     s.append_tool_result('a', 'write', json.dumps(dict(status='ok')), arguments_archive='.tool-output/a.args.json')
     first = s.payload()['messages']
     content = json.loads(first[2]['tool_calls'][0]['function']['arguments'])['content']
-    assert content.startswith('x'*20) and 'all 500 characters (1 lines)' in content and 'were applied' in content
-    assert 'saved at .tool-output/a.args.json' in content and len(content) < 300
+    # An applied call stays verbatim: the worker's working memory (v8c), and nothing in its own words to copy.
+    assert content == 'x'*500 and 'transcript note' not in content
     assert PersistentSession.from_state(s.export_state()).argument_archives == {'a': '.tool-output/a.args.json'}
     with pytest.raises(ValueError):
         s2 = retained('latest'); s2.accept(response('', [call('z')])); s2.append_tool_result('z', 'measure', 'r', arguments_archive='')
@@ -378,7 +378,7 @@ def test_completed_arguments_are_excerpted_only_after_their_result_arrives():
     second = s.payload()['messages']
     assert second[2] == first[2]
     rejected = second[4]['tool_calls'][0]['function']['arguments']
-    # A rejected call is never described as applied (it was, until 2026-09-22: "applied … Nothing to redo").
+    # A rejected call is projected and never described as applied (it was, until 2026-09-22: "applied … Nothing to redo").
     assert 'NOT applied' in rejected and 'says rejected' in rejected and 'were applied' not in rejected and 'saved at' not in rejected
     assert s.export_state()['policy']['argument_excerpt_characters'] == 20
 
@@ -390,17 +390,20 @@ def test_argument_projection_disabled_by_default_and_handles_shapes():
     messages = [dict(role='assistant', content=None, tool_calls=[
                     dict(id='one', type='function', function=dict(name='t', arguments=dict(nested=dict(text='y'*50, n=3), items=['z'*50, 'short']))),
                     dict(id='two', type='function', function=dict(name='t', arguments='not json '+'w'*50))]),
-                dict(role='tool', tool_call_id='one', content='r'), dict(role='tool', tool_call_id='two', content='r')]
+                dict(role='tool', tool_call_id='one', content='{"status": "rejected"}'), dict(role='tool', tool_call_id='two', content='{"status": "rejected"}')]
     out = project_completed_arguments(messages, 10)
     args = out[0]['tool_calls'][0]['function']['arguments']
-    assert args['nested']['n'] == 3 and args['nested']['text'].startswith('y'*10) and 'all 50 characters' in args['nested']['text']
-    assert args['items'][1] == 'short' and 'all 50 characters' in args['items'][0]
-    assert out[0]['tool_calls'][1]['function']['arguments'].startswith('not json ') and 'all 59 characters' in out[0]['tool_calls'][1]['function']['arguments']
+    assert args['nested']['n'] == 3 and args['nested']['text'].startswith('y'*10) and 'of its 50 characters' in args['nested']['text']
+    assert args['items'][1] == 'short' and 'of its 50 characters' in args['items'][0]
+    assert out[0]['tool_calls'][1]['function']['arguments'].startswith('not json ') and 'of its 59 characters' in out[0]['tool_calls'][1]['function']['arguments']
     multi = project_completed_arguments([dict(role='assistant', content=None, tool_calls=[dict(id='m', type='function',
         function=dict(name='t', arguments=json.dumps(dict(content='first line\nsecond line\nthird'))))]),
-        dict(role='tool', tool_call_id='m', content='r')], 12)
+        dict(role='tool', tool_call_id='m', content='{"status": "error"}')], 12)
     shown = json.loads(multi[0]['tool_calls'][0]['function']['arguments'])['content']
     assert shown.startswith('first line\n[transcript note') and '(3 lines)' in shown and 'second line' not in shown
+    applied = [dict(role='assistant', content=None, tool_calls=[dict(id='ok', type='function', function=dict(name='t', arguments=dict(text='y'*50)))]),
+               dict(role='tool', tool_call_id='ok', content='{"status": "ok"}')]
+    assert project_completed_arguments(applied, 10) == applied
     assert project_completed_arguments(messages, None) == messages
     with pytest.raises(ValueError): project_completed_arguments(messages, -1)
 

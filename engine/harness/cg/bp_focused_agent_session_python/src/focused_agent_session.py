@@ -83,6 +83,23 @@ def _looks_like_handoff(text: str) -> bool:
     return structured and len(lines) >= 3
 
 
+# A tool call written as text: the chat template's own markup (Qwen/Ornith `<tool_call>` / `<function=`) or a JSON
+# call naming a worker tool. A local server does not always parse it into `tool_calls`, and a handoff that holds one
+# carries an action no tool will run.
+TEXT_TOOL_CALL = re.compile(r'<tool_call>|<function=|"name"\s*:\s*"(?:bash|read|write|edit)"\s*,\s*"(?:arguments|parameters)"')
+
+
+def _handoff_problem(turn: Any) -> str | None:
+    """Why a handoff reply is not the handoff: `tool` (it called a tool, parsed or written as text), `incomplete`
+    (cut off or empty), `plan` (it says what it would do), or None."""
+    content = (turn.message.get('content') or '').strip()
+    if turn.message.get('tool_calls') or TEXT_TOOL_CALL.search(content):
+        return 'tool'
+    if turn.finish_reason != 'stop' or not content:
+        return 'incomplete'
+    return None if _looks_like_handoff(content) else 'plan'
+
+
 @dataclass(frozen=True)
 class ControllerSettings:
     system_prompt: str
@@ -1463,24 +1480,46 @@ class FocusedSession:
         if response is None:
             return
         turn = parse_turn(response)
-        if turn.finish_reason != 'stop' or turn.message.get('tool_calls') or not (turn.message.get('content') or '').strip():
-            raise ValueError('The worker did not produce a complete tool-free handoff')
-        if not _looks_like_handoff(turn.message['content']):
+        problem = _handoff_problem(turn)
+        if problem in ('plan', 'tool'):
             # "I'll read the notes on disk, then write the handoff": a plan to act where no tool can run. Once
             # accepted (engrave, 2026-09-22) the next window opened on two lines of intent and had to find the
-            # worker's own notes on disk. Ask once more, with the reply in view.
-            payload['messages'].append(dict(role='assistant', content=turn.message['content']))
-            payload['messages'].append(dict(role='user', content=
-                'That is a plan to write the handoff, not the handoff. No tool runs in this reply; write it now, '
-                'from what this window holds, organized as asked.'))
-            self._event('handoff_retry', dict(window=self.session.window_index, reply=turn.message['content'][:500]))
+            # worker's own notes on disk. A tool call is the same reply acted out: Ornith wrote `<tool_call>` as
+            # text at the handoff with or without its tools sent (2026-09-24). Ask once more; a plan stays in view,
+            # a call does not (a call in the history invites another).
+            if problem == 'plan':
+                payload['messages'].append(dict(role='assistant', content=turn.message['content']))
+                nudge = ('That is a plan to write the handoff, not the handoff. No tool runs in this reply; write it '
+                         'now, from what this window holds, organized as asked.')
+            else:
+                nudge = ('Your reply called a tool. No tool runs in this reply and the call was not made; write the '
+                         'handoff now as text, from what this window holds, organized as asked.')
+            payload['messages'].append(dict(role='user', content=nudge))
+            self._event('handoff_retry', dict(window=self.session.window_index, problem=problem,
+                                              reply=(turn.message.get('content') or '')[:500]))
             response = self._complete(self.worker, payload, 'handoff', policy.context_capacity,
                                       client.count(payload, 'handoff')['tokens'], policy.output_headroom_tokens)
             if response is None:
                 return
             turn = parse_turn(response)
-            if turn.finish_reason != 'stop' or turn.message.get('tool_calls') or not (turn.message.get('content') or '').strip():
-                raise ValueError('The worker did not produce a complete tool-free handoff')
+            problem = _handoff_problem(turn)
+            if problem == 'tool':
+                # Still calling: take the tools away (as the handoff did before it kept them for the cache) and ask
+                # a last time.
+                for key in ('tools', 'tool_choice', 'parallel_tool_calls'):
+                    payload.pop(key, None)
+                self._event('handoff_retry', dict(window=self.session.window_index, problem='tool_without_tools',
+                                                  reply=(turn.message.get('content') or '')[:500]))
+                response = self._complete(self.worker, payload, 'handoff', policy.context_capacity,
+                                          client.count(payload, 'handoff')['tokens'], policy.output_headroom_tokens)
+                if response is None:
+                    return
+                turn = parse_turn(response)
+                problem = _handoff_problem(turn)
+            if problem == 'plan':
+                problem = None   # asked once; a thin handoff is still the worker's own
+        if problem:
+            raise ValueError('The worker did not produce a complete tool-free handoff')
         transition = self.session.rollover(turn.message['content'], source_archive=source_archive)
         self._event('worker_handoff', transition)
         self.state.update(phase='worker', pending_io=None, input_cursor=0, handoffs=self.state['handoffs']+1)

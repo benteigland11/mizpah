@@ -43,7 +43,12 @@ class WireResponse:
 
 
 class ModelTransportError(RuntimeError):
-    """A recorded failed exchange; callers must not infer safe replay."""
+    """A recorded failed exchange; callers must not infer safe replay. `response` is the wire response when one
+    came back (its status and evidence, e.g. a server's retry_after), else None."""
+
+    def __init__(self, message: str, response: 'WireResponse | None' = None) -> None:
+        super().__init__(message)
+        self.response = response
 
 
 class RejectedGeneration(ModelTransportError):
@@ -71,6 +76,7 @@ class DirectJsonTransport:
         status: int | None = None
         raw = b''
         error = None
+        evidence = None
         try:
             try:
                 response = urlopen(request, timeout=timeout)
@@ -78,13 +84,15 @@ class DirectJsonTransport:
                 response = exc
             with response:
                 status = response.status
+                if not 200 <= status < 300 and response.headers.get('Retry-After'):
+                    evidence = dict(retry_after=response.headers.get('Retry-After'))
                 raw = response.read(self.config.maximum_response_bytes+1)
                 if len(raw) > self.config.maximum_response_bytes:
                     raw = raw[:self.config.maximum_response_bytes]
                     error = 'Response exceeded configured byte limit'
         except (OSError, URLError, TimeoutError) as exc:
             error = f'{type(exc).__name__}: {exc}'
-        return WireResponse(status, raw.decode('utf-8', errors='replace'), time.monotonic()-started, error)
+        return WireResponse(status, raw.decode('utf-8', errors='replace'), time.monotonic()-started, error, evidence=evidence)
 
 
 class ModelClient:
@@ -118,7 +126,7 @@ class ModelClient:
                 and response.evidence and response.evidence.get('upstream_closed') is True):
             raise RejectedGeneration(response)
         if response.error or response.status is None or not 200 <= response.status < 300:
-            raise ModelTransportError(response.error or f'HTTP status {response.status}')
+            raise ModelTransportError(response.error or f'HTTP status {response.status}', response)
         try:
             parsed = json.loads(response.body, parse_constant=_reject_constant)
         except (ValueError, TypeError) as exc:
@@ -277,6 +285,11 @@ def project_completed_arguments(messages: list[dict[str, Any]], excerpt_characte
             saved = archives.get(call.get('id'))
             read_it = (' The call as sent is saved at '+saved+'; read it in ranges with `read` (offset/limit).' if saved else '')
             status = outcome.get(call.get('id'))
+            if status not in ('rejected', 'error'):
+                # An applied call stays verbatim: it is the worker's working memory (v8c — projecting applied edits
+                # erased it), and a note inside its own arguments was copied into its next writes by a small model
+                # (Ornith, eight refused writes, 2026-09-23; Grok on compose the day before).
+                continue
             if status in ('rejected', 'error'):
                 # A refused or failed call was noted as "applied … Nothing to redo" for as long as it stayed in the
                 # window: the worker was told a write that never landed was in the workspace (audit, 2026-09-22).

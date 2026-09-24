@@ -1,0 +1,22 @@
+name: midi_file_viewer
+description: midi-file-viewer - a Cartograph widget.
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # --- cartograph-deps start (generated from widget.json - do not edit) ---
+  # --- cartograph-deps end ---
+  # --- cartograph-composed start (blueprint deps - do not edit) ---
+  general_midi_names: { path: cg/data-general-midi-names-flutter }
+  piano_roll: { path: cg/frontend-piano-roll-flutter }
+  standard_midi_file_reader: { path: cg/data-standard-midi-file-reader-flutter }
+  timeline_lanes: { path: cg/frontend-timeline-lanes-flutter }
+  # --- cartograph-composed end ---
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter

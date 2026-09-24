@@ -160,7 +160,7 @@ class RunInbox {
   /// Bump when the paperwork's shape or wording changes: every stored
   /// inbox.json then rebuilds on its next read instead of by hand.
   // Bump when the documents change shape: every cached inbox rebuilds.
-  static const builderVersion = 22;
+  static const builderVersion = 23;
 
   /// What the desk is built from, as one string: a change here means the
   /// paperwork must be rebuilt; the same string means the cache holds.
@@ -859,15 +859,17 @@ class RunInbox {
     // whatever the route says: the route's `done` comes at `route complete`,
     // and the review, a red round and the write-up follow it in the same
     // session. The agents tab says WORKING for that stretch; this says the
-    // same, as ROUTE DONE, so the two never disagree.
+    // same, IN PROGRESS — the route's `done` is the worker's claim, and a
+    // reviewer can send it back for another hour of work.
     final live = res.isEmpty && opened && _loopLive;
-    final inProgress = opened && (status == 'in_progress' || (res.isEmpty && status == 'ready'));
+    // A filed report ends the work order whatever the route still says: a
+    // worker that blocks leaves the route `in_progress` (the controller has
+    // not answered yet), and the sheet read IN PROGRESS over a BLOCKED report.
+    final inProgress = opened && res.isEmpty && (status == 'in_progress' || status == 'ready' || (live && status == 'done'));
     final verdict = !opened
         ? status
         : inProgress
         ? 'in_progress'
-        : live && status == 'done'
-        ? 'route_done'
         : (res['verdict'] as String? ?? status);
     // The worker's verdicts: complete (gate green) · blocked_by_worker ·
     // stopped (from outside) · incomplete (finished with the gate red).
@@ -878,7 +880,6 @@ class RunInbox {
       'stopped' => 'STOPPED',
       'incomplete' => 'GATE RED',
       'in_progress' => 'IN PROGRESS',
-      'route_done' => 'ROUTE DONE · WRITING UP',
       'ready' => 'QUEUED',
       'cancelled' => 'CANCELLED',
       _ => verdict.toUpperCase(),
@@ -1036,7 +1037,7 @@ class RunInbox {
       at: at,
       from: _from('Worker', 'worker'),
       status: stamp,
-      hot: opened ? (!inProgress && verdict != 'complete' && verdict != 'route_done') : status == 'blocked',
+      hot: opened ? (!inProgress && verdict != 'complete') : status == 'blocked',
       header: [
         ('Effort class', cls),
         if (!opened && (rt['priority'] as String? ?? '').isNotEmpty)

@@ -139,3 +139,23 @@ def test_the_brief_names_the_environment_and_the_host_resolves_it(data_home: Pat
     with pytest.raises(SystemExit) as stop:
         draft.authorize(project)
     assert 'orchestra' in str(stop.value) and 'no saved environment' in str(stop.value)
+
+
+def test_a_run_freezes_its_base_and_edits_after_start_do_not_reach_it(data_home: Path) -> None:
+    folder = Path(bases.create('studio', note='a synth')['path'])
+    (folder/'tool.sh').write_text('echo one\n')
+    frozen = bases.snapshot('studio')
+    # An editor saving in place after the run started: the frozen copy keeps what the run began with.
+    with open(folder/'tool.sh', 'r+') as handle:
+        handle.write('echo two\n')
+    assert (frozen/'tool.sh').read_text() == 'echo one\n'
+    config = {'mizpah': {'sandbox': {'read_only_binds': [str(folder)]}}}
+    bases.apply(config, 'studio', frozen=frozen)
+    # Mounted where the base sits, so paths baked into it still resolve; the live base is not bound at all.
+    assert config['mizpah']['sandbox']['read_only_binds'] == [str(frozen)+':'+str(folder)]
+    assert config['mizpah']['sandbox']['environment']['MIZPAH_BASE'] == str(folder)
+    assert config['mizpah']['base']['snapshot'] == str(frozen)
+    # A snapshot outlives nothing but its run: one whose process has gone is removed on the next snapshot.
+    dead = frozen.with_name('studio@20260101T000000-999999999')
+    frozen.rename(dead)
+    assert bases.prune_snapshots() == [dead.name] and not dead.exists()

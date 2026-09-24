@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'src'))
 sys.path.insert(0, str(ROOT.parent.parent))
 
-from mizpah import deputy, draft  # noqa: E402
+from mizpah import deputy, draft, prompts  # noqa: E402
 
 
 @pytest.fixture
@@ -145,7 +145,7 @@ def test_the_sandbox_is_the_environments_directory_with_package_hosts(tmp_path: 
     from mizpah.worker import load_config
     monkeypatch.setattr(bases, 'bases_root', lambda: tmp_path/'bases')
     (tmp_path/'bases').mkdir()
-    config = load_config(ROOT/'config.luna.json')
+    config = load_config(ROOT/'config.openai.json')
     shell = deputy.shell_for(config, tmp_path/'root')
     assert shell.config.workspace_dir == str(tmp_path/'bases')
     assert shell.config.services is None and shell.config.share_network is False
@@ -204,22 +204,35 @@ def test_authorize_refuses_a_repository_that_is_not_a_git_top_or_already_a_proje
     assert 'git repository' in str(refused.value) and (gyms/'ornith-landing').exists()
 
 
-def test_the_prompt_is_composed_from_the_folder_in_order(tmp_path: Path) -> None:
+def test_the_prompt_is_the_listed_pieces_glossary_first(tmp_path: Path) -> None:
     text = deputy.policy_text()
-    files = sorted(p for p in deputy.PROMPT_DIR.glob('*.md') if p.name != 'README.md')
-    assert [p.name[:2] for p in files] == sorted(p.name[:2] for p in files) and len(files) >= 6
-    assert text.startswith('You are the Deputy.') and text.rstrip().endswith('this policy do.')
-    assert 'composed from these files' not in text   # README.md stays out
-    # Each file's opening line lands in order, one blank line between subjects.
-    heads = [p.read_text().strip().split('\n')[0] for p in files]
-    assert [text.index(h) for h in heads] == sorted(text.index(h) for h in heads)
+    names = [n for n, _ in prompts.pieces_of('deputy', deputy.PROMPTS_DIR)]
+    assert names[:2] == ['glossary', 'glossary_deputy'] and names[-1] == 'policy_deputy'
+    assert text.startswith('# Glossary') and '## Deputy\n' in text and text.rstrip().endswith('no praise of the question.')
+    assert all(not wip for _, wip in prompts.pieces_of('deputy', deputy.PROMPTS_DIR))   # nothing of it is still in wip/
     assert '\n\n\n' not in text
-    # A config may point the folder elsewhere.
-    (tmp_path/'one.md').write_text('Only this.\n')
-    cfg = dict(mizpah=dict(deputy_prompt_dir='prompt'), mizpah_config_path=str(tmp_path/'x'/'config.json'))
-    (tmp_path/'x').mkdir()
-    (tmp_path/'x'/'prompt').symlink_to(tmp_path)
-    assert deputy.policy_text(cfg) == 'Only this.\n'
+    # A config's prompts_dir is where the pieces come from.
+    (tmp_path/'deputy').mkdir()
+    (tmp_path/'deputy'/'order.txt').write_text('one\n')
+    (tmp_path/'deputy'/'one.md').write_text('Only this.\n')
+    assert deputy.policy_text(dict(prompts_dir=str(tmp_path))) == 'Only this.\n'
+
+
+def test_the_title_is_the_signers_from_settings_read_each_time(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path/'deputy').mkdir()
+    (tmp_path/'deputy'/'order.txt').write_text('one\n')
+    (tmp_path/'deputy'/'one.md').write_text('You talk to $principal; the $administrator; $BASE and "$@" are left alone.\n')
+    cfg = dict(prompts_dir=str(tmp_path))
+    settings = tmp_path/'app.json'
+    monkeypatch.setenv('MIZPAH_APP_SETTINGS', str(settings))
+    assert deputy.policy_text(cfg) == 'You talk to the Administrator; the Administrator; $BASE and "$@" are left alone.\n'   # no file: the default
+    settings.write_text(json.dumps(dict(signer_title='Requestor', signer_name='Ben')))
+    assert deputy.policy_text(cfg).startswith('You talk to Ben, the Requestor; the Requestor;')             # hot: no restart
+    settings.write_text(json.dumps(dict(signer_title='  ')))
+    assert deputy.policy_text(cfg).startswith('You talk to the Administrator;')                               # blank: the default
+    settings.write_text(json.dumps(dict(signer_title='Head of Engineering')))
+    assert deputy.policy_text(cfg).startswith('You talk to the Administrator;')                               # the first build's placeholder, as the app reads it
+    assert '$administrator' not in deputy.policy_text() and '$principal' not in deputy.policy_text()            # the real pieces are all filled
 
 
 def test_a_gym_is_set_up_in_an_environment_chosen_out_loud(gyms: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

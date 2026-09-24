@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import '../models/budget.dart';
 import '../models/databook.dart';
+import '../models/environment.dart';
 import '../models/document.dart';
 import '../models/procedure.dart';
 
@@ -27,6 +28,8 @@ import 'run_inbox.dart';
 import 'run_tool.dart';
 import 'storage_scan.dart' as scan;
 import '../models/storage.dart';
+import 'environments_read.dart';
+import 'environments_read.dart' as env_fs;
 import 'desk_notices.dart';
 import 'file_settings_store.dart';
 import '../models/route.dart';
@@ -478,6 +481,13 @@ class LocalEngine implements Engine {
     final env = {...Platform.environment, 'TERRA_DIRNAME': dirName};
     // The crew as pinned in the project config goes on the brief with the
     // signature (issued_crew): the paper says what it was signed to run on.
+    // A task keeps the crew it first runs with: pin every seat it has not
+    // chosen from the engine config now, so the brief is signed on it and a
+    // later change of the defaults never swaps the model under the task.
+    if (engineConfig.isNotEmpty) {
+      await runTool(_pythonExecutable, ['-m', 'mizpah.init', 'pin', '--config', engineConfig, r.project],
+          workingDirectory: engine.mizpahDir);
+    }
     final crew = _pinnedCrew(r.project);
     final act = await runTool(terraExecutable, ['brief', 'set', '--status', 'active', ...await _signedBy(r.project),
         if (crew.isNotEmpty) ...['--crew', jsonEncode(crew)]],
@@ -1119,19 +1129,6 @@ class LocalEngine implements Engine {
     await _resumeIfStopped(run);
   }
 
-  /// The loop config a session was started with: recorded in run.json by
-  /// loops from 2026-09-20 on; for older sessions derived from the harness
-  /// config it names (…/harness/tools/config.X.json → engine/mizpah/config.X.json).
-  String? _loopConfig(Map<String, dynamic> rj) {
-    final direct = rj['mizpah_config'] as String?;
-    if (direct != null && direct.isNotEmpty && File(direct).existsSync()) return direct;
-    final harness = rj['config'] as String?;
-    if (harness == null || harness.isEmpty) return null;
-    final name = harness.split('/').last;
-    final guess = engine.config(name);
-    return File(guess).existsSync() ? guess : null;
-  }
-
   /// A run whose loop is not alive is relaunched on its own session root:
   /// its tasks resume, and the brief it routes against is the one on disk
   /// now (with the decision just made).
@@ -1174,20 +1171,18 @@ class LocalEngine implements Engine {
 
   Future<void> _resumeIfStopped(RunProject run) async {
     if (run.running) return;
-    final rf = File('${run.session}/run.json');
-    final rj = rf.existsSync()
-        ? jsonDecode(rf.readAsStringSync()) as Map<String, dynamic>
-        : const <String, dynamic>{};
-    final config = _loopConfig(rj);
-    if (config == null) {
-      throw StateError('no loop config known for ${run.id}; cannot resume');
+    // The same path as a first start: the app's engine config, with the crew
+    // the project pinned (its .mizpah/config.json) layered over it. A run no
+    // longer names a config file of its own; the per-model files drifted.
+    if (engineConfig.isEmpty) {
+      throw StateError('no engine config set; cannot resume ${run.id}');
     }
-    final engineDir = File(config).parent.path;
+    final engineDir = engine.mizpahDir;
     await Process.start(_pythonExecutable, [
       '-m',
       'mizpah.loop',
       '--config',
-      config,
+      engineConfig,
       '--project',
       run.project,
       '--root',
@@ -1214,6 +1209,8 @@ class LocalEngine implements Engine {
     // parsed in a fresh isolate on every tick, watched or not moving).
     final journal = File(session.startsWith('controller')
         ? '${r.session}/controller.jsonl'
+        : session == 'host'
+        ? '${r.session}/host.live.json'
         : '${r.session}/tasks/$session/events/session.jsonl');
     // A controller step in progress moves this file, not the journal.
     final live = File('${r.session}/controller.live.json');
@@ -1265,6 +1262,56 @@ class LocalEngine implements Engine {
     return TraceWindow(turns: w.turns, start: w.start, end: w.end, fileLength: w.fileLength, wire: _wire(r.session, session));
   }
 
+  @override
+  Future<List<EnvironmentInfo>> readEnvironmentDetails() {
+    // Every task the desk knows, by the environment its brief names.
+    final tasks = <String, String?>{
+      for (final e in _briefs.entries) e.key: (e.value['environment'] as String?),
+    };
+    return Isolate.run(() => readEnvironments(tasks: tasks));
+  }
+
+  String _taskRoot(String id) {
+    final path = _paths[id] ?? _runs[id]?.project;
+    if (path == null || path.isEmpty) throw ArgumentError('no task $id');
+    return path;
+  }
+
+  @override
+  Future<void> openTaskInEditor(String id, [String path = '']) async {
+    final root = _taskRoot(id);
+    await env_fs.openPathInEditor(root, env_fs.insideRoot(root, path) ?? root);
+  }
+
+  @override
+  Future<List<FileNode>> listTaskFiles(String id, String path) async => env_fs.listDirUnder(_taskRoot(id), path);
+
+  @override
+  Future<EnvFile> readTaskFile(String id, String path) async => env_fs.readFileUnder(_taskRoot(id), path);
+
+  @override
+  Future<List<int>> readTaskFileBytes(String id, String path) async => env_fs.readBytesUnder(_taskRoot(id), path);
+
+  @override
+  Future<List<FileNode>> listEnvironmentFiles(String name, String path) async => listEnvironmentDir(name, path);
+
+  @override
+  Future<EnvFile> readEnvironmentFile(String name, String path) async => env_fs.readEnvironmentFile(name, path);
+  @override
+  Future<void> createEnvironment(String name) async => env_fs.createEnvironment(name);
+  @override
+  Future<void> openEnvironmentInEditor(String name, String path) => env_fs.openInEditor(name, path);
+
+  @override
+  Future<List<Turn>> readTraceRules(String id, String session, {required int before}) async {
+    final r = _runs[id];
+    if (r == null || r.session.isEmpty || before <= 0) return const [];
+    final (project, root) = (r.project, r.session);
+    return Isolate.run(() => RunFloor(project: Directory(project), session: Directory(root))
+        .workerWindow(session, from: 0, end: before, rulesOnly: true)
+        .turns);
+  }
+
   static Wire? _wire(String session, String task) => Wire.read(File('$session/tasks/$task/events/stream.json'));
 
   @override
@@ -1289,6 +1336,7 @@ class LocalEngine implements Engine {
   BriefSummary _summary(String id, Map<String, dynamic> brief) {
     final r = _runs[id];
     var state = 'idle';
+    DateTime? endedAt;
     var attention = (brief['proposals'] as List? ?? const [])
         .where((p) => (p as Map)['status'] == 'open')
         .length;
@@ -1303,6 +1351,7 @@ class LocalEngine implements Engine {
       final newest = (_sessions[id] ?? const <RunSession>[]).firstOrNull;
       final f = File('${newest?.path ?? r.session}/loop.json');
       if (f.existsSync()) {
+        if (!r.running) endedAt = f.lastModifiedSync().toUtc();
         try {
           final loop = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
           stop = loop['stop'] as String?;
@@ -1324,6 +1373,7 @@ class LocalEngine implements Engine {
       path: _paths[id] ?? '',
       state: state,
       attention: attention,
+      endedAt: endedAt,
     );
   }
 
@@ -1490,6 +1540,7 @@ List<Turn> _readTurns((String, String, String) args) {
   if (seat.startsWith('controller')) {
     return floor.controllerTurns(decision: int.tryParse(seat.split(':').last));
   }
+  if (seat == 'host') return floor.hostTurns();
   return floor.workerTurns(seat);
 }
 

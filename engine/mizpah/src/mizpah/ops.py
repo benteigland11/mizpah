@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -33,7 +34,8 @@ def settings(config: dict[str, Any]) -> dict[str, Any]:
     # engine config serves every model; an explicit ops.model_unit still wins.
     seat_unit = (config.get('worker') or {}).get('model_unit')
     return dict(model_unit=seat_unit, restart_after_seconds=60, restart_cooldown_seconds=600, disk_high_percent=92,
-                notify_command=None, network_patience_seconds=3600) | dict(config['mizpah'].get('ops') or {})
+                notify_command=None, network_patience_seconds=3600, patience_seconds=1800,
+                deputy_patience_seconds=180, retry_cap_seconds=60) | dict((config.get('mizpah') or {}).get('ops') or {})
 
 
 # ---------------------------------------------------------------- health
@@ -64,6 +66,9 @@ def outage_kind(error: BaseException | str) -> tuple[str, str]:
         return 'server_down', 'nothing is listening at its address'
     if 'http status 5' in low or ' 502' in low or ' 503' in low or ' 504' in low:
         return 'server_error', 'the server answered with an error'
+    if ('http status 401' in low or 'http status 403' in low or 'refreshfailed' in low or 'notsignedin' in low
+            or 'quarantinedcredential' in low):
+        return 'unauthorized', 'the provider refused our credential (sign in again)'
     if 'http status 4' in low and 'http status 429' not in low:
         return 'bad_request', 'the server refused the request as malformed (a config problem on our side, not an outage)'
     if 'http status 429' in low or 'rate limit' in low:
@@ -73,12 +78,84 @@ def outage_kind(error: BaseException | str) -> tuple[str, str]:
     return 'transport', 'the transport failed'
 
 
-BACKOFF_BASE_SECONDS = 15.0
+def failure_class(kind: str) -> str:
+    """How a patience streak treats an outage kind: a reply too big says nothing about the server (ask again at
+    once); a malformed request or a refused credential cannot be fixed by asking again; the rest pass."""
+    if kind == 'reply_too_big':
+        return 'immediate'
+    if kind in ('bad_request', 'unauthorized'):
+        return 'fatal'
+    if kind == 'rate_limited':
+        return 'rate_limited'
+    return 'transient'
 
 
-def backoff_seconds(attempt: int, *, cap: float = 300.0) -> float:
-    """The wait before retry `attempt` (1-based): 15, 30, 60, 120, 240 … capped."""
-    return float(min(cap, BACKOFF_BASE_SECONDS * (2 ** max(0, int(attempt) - 1))))
+def retry_after(error: BaseException) -> float | None:
+    """The server's Retry-After, in seconds, when the failed response carried one (seconds or an HTTP date)."""
+    seen = error
+    while seen is not None:
+        response = getattr(seen, 'response', None)
+        value = ((getattr(response, 'evidence', None) or {}).get('retry_after') if response is not None else None)
+        if value:
+            try:
+                return max(0.0, float(value))
+            except ValueError:
+                from email.utils import parsedate_to_datetime
+                try:
+                    return max(0.0, parsedate_to_datetime(str(value)).timestamp()-time.time())
+                except (TypeError, ValueError):
+                    return None
+        seen = seen.__cause__
+    return None
+
+
+def streak(config: dict[str, Any], *, role: str = 'worker') -> Any:
+    """A patience streak for one seat: the failures since its last good exchange, spent against a time budget
+    (`ops.patience_seconds`, half an hour; the Deputy, whom a person is waiting on, `ops.deputy_patience_seconds`).
+    It replaced a count of six per burst that never reset on success, so three drops an hour apart on
+    compose_piece_mid (2026-09-22) had climbed to a minute's wait and were halfway to failing the task."""
+    from cg.universal_failure_streak_patience_python.src.failure_streak_patience import FailureStreak, PatiencePolicy
+    knobs = settings(config)
+    patience = knobs['deputy_patience_seconds'] if role == 'deputy' else knobs['patience_seconds']
+    return FailureStreak(PatiencePolicy(patience_seconds=float(patience), cap_seconds=float(knobs['retry_cap_seconds'])))
+
+
+def ride_out(failures: Any, error: BaseException, *, role: str, spec: dict[str, Any], config: dict[str, Any],
+             root: Path, health: Any, task: str | None = None, turn: int | None = None) -> bool:
+    """One failed exchange: record it, wait as its kind deserves, and say whether to ask again (True) or give up.
+
+    No route to the host is the network's outage, waited for and not counted. Otherwise the streak decides:
+    a transient drop waits 2 s, 5 s, 15 s, 30 s, then a minute (`ops.retry_cap_seconds`) until the patience is
+    spent; a rate limit waits what the server asked; a malformed request or a refused credential stops at once.
+    The model is watched through every wait (`Health.watch`), so one that was down is asked again within seconds
+    of answering."""
+    kind, _ = outage_kind(error)
+    host = provider_host(spec, config)
+    if kind != 'reply_too_big' and not network_reachable(host):
+        record_outage(root, role, spec, error, failures.attempts, task=task, turn=turn,
+                      action='the network is down; waiting for it, not counted')
+        return bool(health.wait_for_network(host))
+    decision = failures.failed(failure_class(kind), retry_after_seconds=retry_after(error))
+    if not decision.retry:
+        action = ('asking again cannot fix this: the step fails' if decision.reason == 'not retryable'
+                  else 'patience spent after '+str(int(decision.elapsed_seconds))+' s and '+str(decision.attempt)+' tries: the step fails')
+    elif decision.delay_seconds == 0:
+        action = 'asked again at once'
+    else:
+        action = ('asked again after '+str(round(decision.delay_seconds, 1))+' s ('+decision.reason
+                  +'), or as soon as the model answers again if it is down')
+    record_outage(root, role, spec, error, decision.attempt, task=task, turn=turn,
+                  waited_seconds=decision.delay_seconds or None, action=action)
+    if not decision.retry:
+        return False
+    if kind == 'reply_too_big':
+        return True
+    left = max(decision.delay_seconds, failures.policy.patience_seconds-failures.elapsed_seconds)
+    if not health.watch(spec, at_least=decision.delay_seconds, at_most=left):
+        record_outage(root, role, spec, error, decision.attempt, task=task, turn=turn,
+                      action='the model did not answer again within the patience: the step fails')
+        return False
+    return True
 
 
 def record_outage(root: Path, role: str, spec: dict[str, Any], error: BaseException | str, outage: int, *,
@@ -134,6 +211,28 @@ def network_reachable(host: str | None, timeout: float = 5.0) -> bool:
         return False
 
 
+def provider_answers(session: Any, *, timeout_seconds: float = 10.0) -> tuple[bool, str]:
+    """(up, why) from the model list read as the seat reads it, signed in: the answer comes from behind the
+    provider's auth layer, as a completion's does, where an unsigned read is refused at the front door with a
+    401 that says only that the host is there. A 4xx on the signed read is a live service refusing (the
+    credential is the next call's matter, not an outage); a 5xx, a socket error or a page that is not the list
+    is down. With no usable credential the unsigned read is all there is."""
+    try:
+        session.list_model_info(timeout_seconds=timeout_seconds)
+        return True, 'model list answered'
+    except LookupError as error:
+        if not str(error).startswith('model list'):   # NotSignedIn is a LookupError too: no credential, not an answer
+            return session.reachable(timeout_seconds=timeout_seconds)
+        code = re.search(r'http (\d{3})', str(error))
+        if code and int(code.group(1)) < 500:
+            return True, str(error)[:120]
+        return False, str(error)[:120]
+    except OSError as error:   # URLError and TimeoutError are OSErrors
+        return False, type(error).__name__+': '+str(error)[:120]
+    except Exception:  # noqa: BLE001 — not signed in, quarantined, refresh refused: the front door is all we can ask
+        return session.reachable(timeout_seconds=timeout_seconds)
+
+
 class Health:
     """One per run. `wait_for_model` is what the outage loops call instead of sleeping on /health alone."""
 
@@ -147,39 +246,69 @@ class Health:
     def _record(self, **fields: Any) -> None:
         self.log.open('a').write(json.dumps(dict(at=time.time(), **fields))+'\n')
 
-    def wait_for_model(self, base_url: str | None, *, wait_seconds: float, attempt: int = 1) -> bool:
-        """True when the server answers within wait_seconds; starts its unit once it has been down long enough.
+    def watch(self, spec: dict[str, Any], *, at_least: float, at_most: float, poll_seconds: float = 5.0) -> bool:
+        """The wait before a torn call is asked again, watching the model the whole time.
 
-        A subscription client (no base_url) is waited for with exponential backoff — 15 s, 30 s, 60 s, 120 s,
-        240 s, capped at wait_seconds — so a blip costs a quarter minute and a real outage gets minutes to
-        recover before the retries are spent; a flat minute did neither. Nothing here can restart it."""
-        if not base_url:
-            time.sleep(backoff_seconds(attempt, cap=wait_seconds))
-            return True
-        down_since = time.time()
-        deadline = down_since+wait_seconds
-        while time.time() <= deadline:
-            if model_up(base_url):
+        While the check says the model is up (a blip, or a failure the check cannot see) the wait is `at_least`,
+        the streak's backoff, so re-sent prompts stay paced. Once the check has seen it down, the wait ends the
+        moment it answers again: a trace resumes within `poll_seconds` of the model coming back, not at the end
+        of a five-minute sleep (the old ladder slept 15 s to 240 s blind, then looked). False when it is still
+        down at `at_most`. The check spends no tokens: /health for a local server (whose unit is restarted once
+        it has been down long enough), the signed model list for a hosted one, a TCP connect otherwise."""
+        check = self._check(spec)
+        started = time.time()
+        down_since: float | None = None
+        while True:
+            elapsed = time.time()-started
+            up = check()
+            if up and (down_since is not None or elapsed >= at_least):
+                if down_since is not None:
+                    self._record(event='model_back', endpoint=model_label(spec), after=round(time.time()-down_since))
                 return True
-            unit = self.ops['model_unit']
-            if (unit and time.time()-down_since >= self.ops['restart_after_seconds']
-                    and time.time()-self.last_restart >= self.ops['restart_cooldown_seconds']):
-                self.last_restart = time.time()
-                # An active unit that does not answer is wedged (llama-server after two SIGINTs sits in teardown
-                # with its listener closed and never exits, so Restart= never fires): restart, not start.
-                active = subprocess.run(['systemctl', '--user', 'is-active', unit], capture_output=True, text=True,
-                                        timeout=30, check=False).stdout.strip() == 'active'
-                verb = 'restart' if active else 'start'
-                started = subprocess.run(['systemctl', '--user', verb, unit], capture_output=True, text=True,
-                                         timeout=180, check=False)
-                self._record(event='model_unit_'+verb+'ed', unit=unit, ok=started.returncode == 0,
-                             error=(started.stderr or '').strip()[:300])
-                notify(self.config, self.root, 'model server '+verb+'ed',
-                       unit+' was down '+str(int(time.time()-down_since))+' s ('+('active but silent' if active else 'inactive')+'); '+verb+'ed it')
-            time.sleep(5)
-        self._record(event='model_down', base_url=base_url, waited=wait_seconds)
-        notify(self.config, self.root, 'model server down', base_url+' did not answer for '+str(int(wait_seconds))+' s')
-        return False
+            if not up:
+                if down_since is None:
+                    down_since = time.time()
+                    self._record(event='model_down', endpoint=model_label(spec))
+                self._restart_if_due(spec, down_since)
+            if elapsed >= at_most:
+                self._record(event='model_still_down', endpoint=model_label(spec), waited=round(elapsed))
+                notify(self.config, self.root, 'model down', model_label(spec)+' did not answer for '+str(int(elapsed))+' s')
+                return False
+            time.sleep(max(0.0, min(poll_seconds, (at_least-elapsed) if up else poll_seconds, at_most-elapsed)))
+
+    def _check(self, spec: dict[str, Any]) -> Any:
+        base_url = (spec.get('endpoint') or {}).get('base_url')
+        if base_url:
+            return lambda: model_up(base_url)
+        host = provider_host(spec, self.config)
+        session = None
+        if spec.get('provider') == 'subscription' and spec.get('subscription'):
+            try:
+                from . import providers
+                session = providers.session_for(spec['subscription'], self.config, open_browser=False)
+                session = session if session.profile.models_url else None
+            except Exception:  # noqa: BLE001 — no profile, nothing but the host to watch
+                session = None
+        return lambda: network_reachable(host) and (session is None or provider_answers(session)[0])
+
+    def _restart_if_due(self, spec: dict[str, Any], down_since: float) -> None:
+        unit = self.ops['model_unit']
+        if not ((spec.get('endpoint') or {}).get('base_url') and unit
+                and time.time()-down_since >= self.ops['restart_after_seconds']
+                and time.time()-self.last_restart >= self.ops['restart_cooldown_seconds']):
+            return
+        self.last_restart = time.time()
+        # An active unit that does not answer is wedged (llama-server after two SIGINTs sits in teardown
+        # with its listener closed and never exits, so Restart= never fires): restart, not start.
+        active = subprocess.run(['systemctl', '--user', 'is-active', unit], capture_output=True, text=True,
+                                timeout=30, check=False).stdout.strip() == 'active'
+        verb = 'restart' if active else 'start'
+        started = subprocess.run(['systemctl', '--user', verb, unit], capture_output=True, text=True,
+                                 timeout=180, check=False)
+        self._record(event='model_unit_'+verb+'ed', unit=unit, ok=started.returncode == 0,
+                     error=(started.stderr or '').strip()[:300])
+        notify(self.config, self.root, 'model server '+verb+'ed',
+               unit+' was down '+str(int(time.time()-down_since))+' s ('+('active but silent' if active else 'inactive')+'); '+verb+'ed it')
 
     def wait_for_network(self, host: str | None, *, patience_seconds: float | None = None) -> bool:
         """True at once when the host answers a connect; otherwise wait for the network to come back, up to
@@ -192,7 +321,7 @@ class Health:
         self._record(event='network_down', host=host)
         notify(self.config, self.root, 'network down', 'no route to '+str(host)+'; waiting up to '+str(int(patience))+' s')
         while time.time()-down_since <= patience:
-            time.sleep(15)
+            time.sleep(5)
             if network_reachable(host):
                 self._record(event='network_back', host=host, after=round(time.time()-down_since))
                 notify(self.config, self.root, 'network back', str(host)+' answers after '+str(int(time.time()-down_since))+' s')

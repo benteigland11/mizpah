@@ -1,0 +1,31 @@
+{
+  "meta": {
+    "id": "data-general-midi-names-flutter",
+    "name": "General MIDI names",
+    "version": "1.0.0",
+    "domain": "data",
+    "tags": [
+      "midi",
+      "general-midi",
+      "music",
+      "instruments",
+      "pitch"
+    ]
+  },
+  "description": "Fixed General MIDI tables: program number to instrument name and family (all 128), percussion note to kit piece (GM1 plus GM2 27-87), note number to pitch name spelled with sharps or flats by key signature (C4 = 60 by default, ASCII option), black-key test, and key-signature names ('E\u266d major'). Pure Dart, no dependencies.",
+  "tech_stack": {
+    "language": "flutter",
+    "dependencies": []
+  },
+  "custom_notes": "",
+  "library_notes": {
+    "general": "Single responsibility - one widget does one thing. No global state. No project-specific code, hardcoded paths, credentials, or environment-specific values. Expose variation points as constructor parameters or function arguments - no hardcoded thresholds, colors, sizes, or behavior flags. URLs and endpoints belong in examples as demonstration data, not in src/ - if a widget needs a URL to operate, it must be a parameter the caller provides. All dependencies must be declared in widget.json tech_stack.dependencies. Widgets cannot depend on other widgets - they must be fully self-contained. If you need logic from another widget, copy it into src/ directly. Examples must run and exit cleanly with no user input, no network calls, and no external services or API keys - use fake/hardcoded data. The widget's own declared dependencies are fine and will be installed by the validator before the example runs. Do not modify library_notes - it is managed by Cartograph and will be restored on checkin.",
+    "language": "No project-specific names, identifiers, or terminology anywhere in src/, tests/, or examples/ - use generic names like 'item', 'value', 'example.com'. Layout: pubspec.yaml at the widget root (the widget OWNS it, but the two marked blocks inside dependencies: are generated - never edit between the cartograph-deps / cartograph-composed markers, and never remove them), src/ holds the library sources (import sibling src/ files by RELATIVE path only), tests/ holds flutter_test tests (files end in _test.dart and import the widget as package:<module>/<module>.dart), examples/ holds example_usage.dart. lib/ is a GENERATED copy of src/ made at validation time because Flutter's coverage collector only reports libraries under lib/ - never write to lib/ or commit it, and never add files there. Example validation deviates from standard: Flutter UI code cannot run on the bare Dart VM, so examples execute through the flutter_test harness (flutter test examples/example_usage.dart) and must wrap their demonstration in at least one test()/testWidgets() block with fake/hardcoded data - no user input, no network calls, no external services. Tests run with flutter test and lcov line coverage of src/ must reach 80%. Widgets may be Flutter UI or pure Dart logic; prefer importing package:flutter/widgets.dart over material.dart so consumers choose their design system. Dependencies are declared in widget.json as 'package>=version' (e.g. 'collection>=1.18.0') and written into pubspec.yaml by the validator. Widgets are libraries: no print/debugPrint/stdout output, no exit(), no blocking sleep() in src/ (all blocked); Platform.environment, top-level numeric consts, unlisted package imports, and hardcoded URLs/IPs/paths/credentials produce warnings. src/ must pass flutter analyze with no errors.",
+    "domain": "Transformation logic must be pure and stateless - same input always produces same output, no side effects. Accept the broadest practical input type (bytes, str, file-like, path) and let the caller choose. Expose encoding, delimiter, schema, and other format details as parameters. Raise descriptive errors on malformed input rather than silently coercing or dropping data."
+  },
+  "validation": {
+    "engine_version": 1,
+    "validated_at": "2026-09-24T02:26:34.102452+00:00",
+    "runtime": "flutter 3.47.1"
+  }
+}

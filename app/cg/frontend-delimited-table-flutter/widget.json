@@ -1,0 +1,33 @@
+{
+  "meta": {
+    "id": "frontend-delimited-table-flutter",
+    "name": "Delimited table",
+    "version": "1.0.1",
+    "domain": "frontend",
+    "tags": [
+      "csv",
+      "tsv",
+      "table",
+      "viewer",
+      "data"
+    ]
+  },
+  "description": "CSV, TSV and other delimited text as a table. parseDelimited sniffs the delimiter (comma, tab, semicolon, pipe) outside quotes, parses with the csv package (quoted fields, embedded newlines, BOM), guesses whether the first row is a header (else lettered A, B, C columns), marks numeric columns, pads ragged rows and caps the row count. DelimitedTableView keeps the header fixed, numbers the rows, right-aligns numeric columns, sizes columns from their content within limits, scrolls sideways when wide and builds rows lazily. Every colour and size in DelimitedTableStyle.",
+  "tech_stack": {
+    "language": "flutter",
+    "dependencies": [
+      "csv>=8.0.0"
+    ]
+  },
+  "custom_notes": "",
+  "library_notes": {
+    "general": "Single responsibility - one widget does one thing. No global state. No project-specific code, hardcoded paths, credentials, or environment-specific values. Expose variation points as constructor parameters or function arguments - no hardcoded thresholds, colors, sizes, or behavior flags. URLs and endpoints belong in examples as demonstration data, not in src/ - if a widget needs a URL to operate, it must be a parameter the caller provides. All dependencies must be declared in widget.json tech_stack.dependencies. Widgets cannot depend on other widgets - they must be fully self-contained. If you need logic from another widget, copy it into src/ directly. Examples must run and exit cleanly with no user input, no network calls, and no external services or API keys - use fake/hardcoded data. The widget's own declared dependencies are fine and will be installed by the validator before the example runs. Do not modify library_notes - it is managed by Cartograph and will be restored on checkin.",
+    "language": "No project-specific names, identifiers, or terminology anywhere in src/, tests/, or examples/ - use generic names like 'item', 'value', 'example.com'. Layout: pubspec.yaml at the widget root (the widget OWNS it, but the two marked blocks inside dependencies: are generated - never edit between the cartograph-deps / cartograph-composed markers, and never remove them), src/ holds the library sources (import sibling src/ files by RELATIVE path only), tests/ holds flutter_test tests (files end in _test.dart and import the widget as package:<module>/<module>.dart), examples/ holds example_usage.dart. lib/ is a GENERATED copy of src/ made at validation time because Flutter's coverage collector only reports libraries under lib/ - never write to lib/ or commit it, and never add files there. Example validation deviates from standard: Flutter UI code cannot run on the bare Dart VM, so examples execute through the flutter_test harness (flutter test examples/example_usage.dart) and must wrap their demonstration in at least one test()/testWidgets() block with fake/hardcoded data - no user input, no network calls, no external services. Tests run with flutter test and lcov line coverage of src/ must reach 80%. Widgets may be Flutter UI or pure Dart logic; prefer importing package:flutter/widgets.dart over material.dart so consumers choose their design system. Dependencies are declared in widget.json as 'package>=version' (e.g. 'collection>=1.18.0') and written into pubspec.yaml by the validator. Widgets are libraries: no print/debugPrint/stdout output, no exit(), no blocking sleep() in src/ (all blocked); Platform.environment, top-level numeric consts, unlisted package imports, and hardcoded URLs/IPs/paths/credentials produce warnings. src/ must pass flutter analyze with no errors.",
+    "domain": "All appearance values (colors, spacing, typography, shadows) must be exposed as parameters or CSS custom properties - hardcoded values lock consumers into your choices. Provide sensible defaults but every visual value must be overridable. No inline styles for anything that could vary by theme."
+  },
+  "validation": {
+    "engine_version": 1,
+    "validated_at": "2026-09-24T03:49:07.437202+00:00",
+    "runtime": "flutter 3.47.1"
+  }
+}

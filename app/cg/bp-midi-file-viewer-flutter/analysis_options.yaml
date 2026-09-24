@@ -1,0 +1,13 @@
+# lib/ is a generated copy of src/ (see the engine notes in pubspec.yaml)
+# and cg/ holds composed widgets in blueprint sandboxes - analyze neither.
+analyzer:
+  exclude:
+    - "lib/**"
+    - "cg/**"
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**

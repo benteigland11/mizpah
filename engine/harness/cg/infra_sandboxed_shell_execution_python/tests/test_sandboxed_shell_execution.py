@@ -96,6 +96,19 @@ def test_launch_contract_adds_read_only_binds_and_environment(tmp_path):
                     environment={'A=B': 'x'})
 
 
+def test_a_source_target_bind_mounts_a_tree_at_another_path(tmp_path):
+    config = ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits(),
+                         read_only_binds=('/data/bases/.snapshots/piano@1:/data/bases/piano', '/opt/toolchain'))
+    argv = SandboxedShell(config).command_argv(str(tmp_path), 'example-unit')
+    frozen = argv.index('/data/bases/.snapshots/piano@1')
+    assert argv[frozen-1:frozen+2] == ['--ro-bind', '/data/bases/.snapshots/piano@1', '/data/bases/piano']
+    assert argv[argv.index('/opt/toolchain')+1] == '/opt/toolchain'
+    for bad in ('/data/snap:relative', 'relative:/data/x', '/data/snap:/work'):
+        with pytest.raises(ValueError):
+            ShellConfig('/bin/bwrap', '/bin/systemd-run', '/bin/systemctl', '/runtime', str(tmp_path), limits(),
+                        read_only_binds=(bad,))
+
+
 def test_a_read_only_bind_inside_the_workspace_shadows_it_under_work(tmp_path):
     workspace = tmp_path/'gyms'
     issued = workspace/'issued-project'

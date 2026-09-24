@@ -1,0 +1,41 @@
+{
+  "id": "bp-midi-file-viewer-flutter",
+  "name": "midi-file-viewer",
+  "language": "flutter",
+  "version": "0.1.0",
+  "description": "Open a Standard MIDI File and see all of it: MidiFileViewer(bytes) reads the file, names each part by its General MIDI instrument (kit pieces on channel 10), and lays out a multi-part piano roll with a drum grid, tempo, sustain-pedal, velocity and controller lanes on one shared zoom/pan viewport, a parts panel (instrument, colour, note count, show/hide), a one-line header summary (duration, bars, meter, key, tempo range, parts, notes, pedal presses), and a bars/beats vs seconds axis toggle that follows tempo changes and defaults to seconds when the tempo varies. No playback.",
+  "tags": [
+    "midi",
+    "piano-roll",
+    "music",
+    "viewer",
+    "timeline"
+  ],
+  "dependencies": [
+    {
+      "id": "data-standard-midi-file-reader-flutter",
+      "version": "1.0.0"
+    },
+    {
+      "id": "data-general-midi-names-flutter",
+      "version": "1.0.0"
+    },
+    {
+      "id": "frontend-piano-roll-flutter",
+      "version": "1.0.0"
+    },
+    {
+      "id": "frontend-timeline-lanes-flutter",
+      "version": "1.0.0"
+    }
+  ],
+  "domains": [
+    "data",
+    "frontend"
+  ],
+  "validation": {
+    "engine_version": 1,
+    "validated_at": "2026-09-24T02:34:34.423784+00:00",
+    "runtime": "flutter 3.47.1"
+  }
+}
