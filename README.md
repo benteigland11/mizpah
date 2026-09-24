@@ -12,6 +12,12 @@ You write a brief. Agents turn it into questions ("does the left hand ever stret
 octave?"), answer each with a measurement, and keep the methods and code that worked, so the next
 task starts ahead of the last one.
 
+![Over 10,000 turns the instructions drift; without a controller the agent's error drifts with them, with one it stays at zero](docs/images/controller-drift.png)
+
+*The whole game in one picture (simulated, five runs). Over a long task, the instructions an agent works
+from drift (top, black). Left alone, its error drifts with them (middle). With a controller correcting
+against the brief, the prompt it gets stays on course (top, colours) and so does the work (bottom).*
+
 <!-- screenshot: the desk, with the inbox, a brief and a running task -->
 
 ## Try it
