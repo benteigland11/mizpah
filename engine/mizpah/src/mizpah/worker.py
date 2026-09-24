@@ -1941,11 +1941,11 @@ COMMAND_TOOLS: tuple[dict[str, Any], ...] = (
                                                         language=string('implementation language', default='python'),
                                                         top_k=dict(type='integer', description='how many hits', default=3)),
                          required=['query'])),
-    dict(name='cartograph_inspect', description='Show a widget: its description, API, dependencies and (with source) '
-         'the code and examples, straight from the library. Use it to decide between install and create.',
+    dict(name='cartograph_inspect', description='Show a widget: its description, API signatures, examples and '
+         'dependencies, straight from the library. Use it to decide between install and create, and to call it.',
          command='cartograph inspect {widget_id} {source}',
          parameters=dict(type='object', properties=dict(widget_id=string('id from search, e.g. data-csv-mean-python'),
-                                                        source=dict(type='boolean', description='include source files', flag='--source')),
+                                                        source=dict(type='boolean', description='the full source files; only to change the widget', flag='--source')),
                          required=['widget_id'])),
     dict(name='cartograph_install', description='Install a widget into this project under cg/<dir>/; then import it with '
          'sys.path.insert(0, "cg/<dir>") and from src.<module> import <fn> (read cg/<dir>/examples/ first).',

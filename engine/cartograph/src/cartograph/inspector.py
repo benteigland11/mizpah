@@ -48,6 +48,68 @@ def _read_dir(dirpath, prefix_filter=None):
     return out
 
 
+_DECLARATION = __import__("re").compile(
+    r"^(?:export\s+)?(?:(?:pub|public|async|static|abstract|final)\s+)*"
+    r"(?:def|class|function|fn|func|interface|type|enum|struct|trait|module|[A-Z][\w<>,?\[\] ]*\s+[a-z]\w*\s*\()\b.*")
+
+
+def _python_api(text):
+    """Public top-level functions and classes (with their public methods): signature and first docstring line."""
+    import ast
+
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as error:
+        return [f"(does not parse: {error.msg}, line {error.lineno})"]
+
+    def sig(node, indent=""):
+        prefix = "async def " if isinstance(node, ast.AsyncFunctionDef) else "def "
+        ret = f" -> {ast.unparse(node.returns)}" if node.returns else ""
+        doc = (ast.get_docstring(node) or "").strip().splitlines()
+        return f"{indent}{prefix}{node.name}({ast.unparse(node.args)}){ret}" + (f"  # {doc[0]}" if doc else "")
+
+    out = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and not node.name.startswith("_"):
+            out.append(sig(node))
+        elif isinstance(node, ast.ClassDef) and not node.name.startswith("_"):
+            bases = f"({', '.join(ast.unparse(b) for b in node.bases)})" if node.bases else ""
+            doc = (ast.get_docstring(node) or "").strip().splitlines()
+            out.append(f"class {node.name}{bases}" + (f"  # {doc[0]}" if doc else ""))
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
+                        not item.name.startswith("_") or item.name == "__init__"):
+                    out.append(sig(item, "    "))
+        elif isinstance(node, ast.Assign) and all(isinstance(t, ast.Name) and t.id.isupper() for t in node.targets):
+            out.append(f"{', '.join(t.id for t in node.targets)} = {ast.unparse(node.value)[:80]}")
+    return out
+
+
+def _api(src_dir):
+    """The public surface of a widget's src/, per file: what to call and how, without the bodies.
+    Python is read with ast; other languages by their declaration lines."""
+    api = {}
+    if not os.path.isdir(src_dir):
+        return api
+    for fpath in sorted(glob.glob(os.path.join(src_dir, "**", "*.*"), recursive=True)):
+        name = os.path.relpath(fpath, src_dir)
+        if "__pycache__" in name or os.path.basename(name) == "__init__.py":
+            continue
+        try:
+            with open(fpath, encoding="utf-8") as f:
+                text = f.read()
+        except (OSError, UnicodeDecodeError):
+            continue
+        if name.endswith(".py"):
+            lines = _python_api(text)
+        else:
+            lines = [line.strip().rstrip("{").strip() for line in text.splitlines()
+                     if _DECLARATION.match(line.strip()) and not line.strip().startswith(("_", "private "))]
+        if lines:
+            api[name] = lines
+    return api
+
+
 def _get_versions(widget_path, all_versions=False):
     """Return version list from history/ directory, newest first."""
     history_dir = os.path.join(widget_path, "history")
@@ -112,6 +174,7 @@ def inspect(carto, widget_id, show_source=False, show_all_versions=False,
     }
 
     result["kind"] = "widget"
+    result["api"] = _api(os.path.join(read_path, "src"))
     if show_source:
         result["source"] = _read_dir(os.path.join(read_path, "src"))
     if show_reviews:
@@ -163,6 +226,7 @@ def inspect_blueprint(carto, blueprint_id, show_source=False,
         "versions": _get_versions(bp_path, all_versions=show_all_versions),
         "examples": _read_dir(os.path.join(read_path, "examples")),
     }
+    result["api"] = _api(os.path.join(read_path, "src"))
     if show_source:
         result["source"] = _read_dir(os.path.join(read_path, "src"))
     return result

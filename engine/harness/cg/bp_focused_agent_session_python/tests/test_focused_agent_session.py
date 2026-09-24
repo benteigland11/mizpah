@@ -2056,3 +2056,36 @@ def test_a_cut_or_stopped_command_says_whether_it_finished_and_where_the_rest_is
     assert _marked_cut('x'*10, 600) == 'x'*10
     marked = _marked_cut('y'*700, 600)
     assert marked.startswith('y'*600) and 'cut at 600 of 700 characters' in marked and 'not the end' in marked
+
+
+class BatchEditTransport(FileToolTransport):
+    """Scripted worker: a file, one edit call with several changes, a batch whose second change misses, a mixed call."""
+
+    def __init__(self):
+        super().__init__()
+        self.script = [
+            ('write', dict(path='notes.py', content='alpha = 1\nbeta = 1\ngamma = 1\n')),
+            ('edit', dict(path='notes.py', edits=[dict(old_text='alpha = 1', new_text='alpha = 2'),
+                                                  dict(old_text='alpha = 2\nbeta = 1', new_text='alpha = 2\nbeta = 2')])),
+            ('edit', dict(path='notes.py', edits=[dict(old_text='gamma = 1', new_text='gamma = 2'),
+                                                  dict(old_text='delta = 1', new_text='delta = 2')])),
+            ('edit', dict(path='notes.py', old_text='alpha', new_text='a', edits=[dict(old_text='beta', new_text='b')])),
+        ]
+
+
+def test_one_edit_call_carries_several_changes_all_or_none(tmp_path):
+    settings, _, shell, controller, _, ct = setup(tmp_path, total=0, enabled=False, rollover=False)
+    settings = replace(settings, worker_tools=('bash', 'read', 'write', 'edit'))
+    transport = BatchEditTransport()
+    worker = ModelClient(EndpointConfig('http://example.invalid', 5, 1000000, {}, '/complete', '/template', '/tokenize', False, True), transport=transport)
+    item = FocusedSession.create(tmp_path/'session', settings, worker=worker, shell=shell, controller=controller)
+    assert item.run()['status'] == 'complete'
+    edit = next(t['function'] for t in transport.requests[0]['tools'] if t['function']['name'] == 'edit')
+    assert 'edits' in edit['parameters']['properties'] and edit['parameters']['required'] == ['path']
+    outcomes = [json.loads(m['content']) for m in transport.requests[-1]['messages'] if m.get('role') == 'tool']
+    assert outcomes[1]['status'] == 'ok' and outcomes[1]['edits'] == 2 and outcomes[1]['replacements'] == 2
+    assert outcomes[2]['status'] == 'error' and 'edits[2]' in outcomes[2]['error'] and 'nothing was changed' in outcomes[2]['error']
+    assert outcomes[3]['status'] == 'error' and 'not both' in outcomes[3]['error']
+    saved = FocusedSession.open(tmp_path/'session', worker=worker, shell=shell, controller=controller)
+    # the second batch left gamma alone: all or none
+    assert read_workspace_file(saved.workspace(), 'notes.py', byte_limit=1000000, file_limit=1000) == b'alpha = 2\nbeta = 2\ngamma = 1\n'

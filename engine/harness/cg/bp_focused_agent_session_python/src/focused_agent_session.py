@@ -335,15 +335,44 @@ def write_tool(create_only: bool = False, bounded: bool = False) -> dict[str, An
 def edit_tool(bounded: bool = False, requires_read: bool = False) -> dict[str, Any]:
     description = ('Replace exact text in one existing UTF-8 workspace file. old_text must occur exactly '
                    'expected_occurrences times (default 1); otherwise nothing changes and the mismatch is reported. '
+                   'Several changes to the file go in one call as edits, a list of {old_text, new_text}: applied in '
+                   'order, each to the file as the ones before it left it, and all or none. '
                    + ('old_text is one or two lines copied from a read of the current file (an edit without such a '
                       'read is refused); ' if requires_read else '')
-                   + ('new_text is one function body, branch or test — a few lines; a longer change is refused '
-                      'unexecuted, so add helpers first, one per call. ' if bounded else '')
+                   + ('Each new_text is one function body, branch or test — a few lines; a longer one is refused '
+                      'unexecuted. ' if bounded else '')
                    + 'Prefer this over rewriting a whole file.')
+    change = dict(type='object', properties=dict(old_text=dict(type='string'), new_text=dict(type='string'),
+                                                 expected_occurrences=dict(type='integer', minimum=1)),
+                  required=['old_text', 'new_text'], additionalProperties=False)
     return dict(type='function', function=dict(name='edit', description=description,
         parameters=dict(type='object', properties=dict(path=dict(type='string'), old_text=dict(type='string'),
-            new_text=dict(type='string'), expected_occurrences=dict(type='integer', minimum=1)),
-            required=['path', 'old_text', 'new_text'], additionalProperties=False)))
+            new_text=dict(type='string'), expected_occurrences=dict(type='integer', minimum=1),
+            edits=dict(type='array', items=change, minItems=1)),
+            required=['path'], additionalProperties=False)))
+
+
+def edit_changes(args: dict[str, Any]) -> list[dict[str, Any]]:
+    """The replacements one edit call asks for: `edits`, or the single old_text/new_text. Refuses a mix and any
+    malformed change before anything is touched."""
+    single = {'old_text', 'new_text', 'expected_occurrences'} & set(args)
+    if not isinstance(args.get('path'), str) or not set(args) <= {'path', 'edits'} | single:
+        raise ValueError('edit requires a path string and either old_text/new_text or edits')
+    if 'edits' in args:
+        if single:
+            raise ValueError('edit takes either old_text/new_text or edits, not both')
+        changes = args['edits']
+        if not isinstance(changes, list) or not changes:
+            raise ValueError('edits must be a nonempty list of {old_text, new_text}')
+    else:
+        changes = [{k: args[k] for k in single}]
+    for i, change in enumerate(changes, start=1):
+        if (not isinstance(change, dict) or not {'old_text', 'new_text'} <= set(change)
+                or not set(change) <= {'old_text', 'new_text', 'expected_occurrences'}
+                or not all(isinstance(change[k], str) for k in ('old_text', 'new_text'))):
+            where = f'edits[{i}] ' if 'edits' in args else ''
+            raise ValueError(where+'requires old_text and new_text strings and an optional expected_occurrences integer')
+    return changes
 
 
 IMAGE_TYPES = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp'}
@@ -1258,9 +1287,7 @@ class FocusedSession:
                         self.state.setdefault('read_hashes', {})[args['path']] = hashlib.sha256(data).hexdigest()
                     report = dict(path=args['path'], created=args['path'] not in existing, bytes_written=len(data))
                 else:
-                    keys = {'path', 'old_text', 'new_text'}
-                    if not keys <= set(args) <= keys | {'expected_occurrences'} or not all(isinstance(args[k], str) for k in keys):
-                        raise ValueError('edit requires path, old_text and new_text strings and an optional expected_occurrences integer')
+                    changes = edit_changes(args)
                     self._refuse_protected(args['path'])
                     if self.settings.edit_requires_read:
                         try:
@@ -1274,19 +1301,40 @@ class FocusedSession:
                         if current is not None and seen != current:
                             raise ValueError(args['path']+' has changed since you last read it: read the region again '
                                              'and copy old_text from the current lines')
-                    _refuse_transcript_note(args['new_text'])
                     limit = self.settings.maximum_edit_characters
-                    size = len(args['old_text'])+len(args['new_text'])
-                    if limit is not None and size > limit:
-                        old_share = len(args['old_text'])/max(1, size)
-                        side = ('old_text is the large part: anchor on one or two lines instead of a whole block'
-                                if old_share >= 0.4 else
-                                'new_text is the large part: add one function, branch, test or section per edit')
-                        raise ValueError('edit text is too long for one call; '+side+
-                                         '. If replacing a block, delete it with bash first and rebuild it in pieces')
+                    for i, change in enumerate(changes, start=1):
+                        _refuse_transcript_note(change['new_text'])
+                        size = len(change['old_text'])+len(change['new_text'])
+                        if limit is not None and size > limit:
+                            old_share = len(change['old_text'])/max(1, size)
+                            side = ('old_text is the large part: anchor on one or two lines instead of a whole block'
+                                    if old_share >= 0.4 else
+                                    'new_text is the large part: add one function, branch, test or section per change')
+                            raise ValueError(('edits['+str(i)+'] ' if len(changes) > 1 else '')+'edit text is too long; '+side+
+                                             '. If replacing a block, delete it with bash first and rebuild it in pieces')
                     space, scratch = self._space(args['path'])
-                    snapshot, report = edit_workspace_file(space, _name(args['path']) if scratch else args['path'],
-                        args['old_text'], args['new_text'], expected_occurrences=args.get('expected_occurrences', 1), **options)
+                    target = _name(args['path']) if scratch else args['path']
+                    original = read_workspace_file(space, target, **options) if len(changes) > 1 else None
+                    snapshot, reports = space, []
+                    try:
+                        for i, change in enumerate(changes, start=1):
+                            try:
+                                snapshot, one = edit_workspace_file(snapshot, target, change['old_text'], change['new_text'],
+                                    expected_occurrences=change.get('expected_occurrences', 1), **options)
+                            except WorkspaceEditError as error:
+                                if len(changes) > 1:
+                                    raise WorkspaceEditError(error.code, f'edits[{i}]: {error} — nothing was changed') from None
+                                raise
+                            reports.append(one)
+                    except WorkspaceEditError:
+                        if original is not None:
+                            write_workspace_file(space, target, original, **options)   # all or none
+                        raise
+                    report = dict(reports[-1], replacements=sum(r['replacements'] for r in reports),
+                                  previous_bytes=reports[0]['previous_bytes'])
+                    if len(changes) > 1:
+                        report['edits'] = len(changes)
+                        report['matched'] = sorted({r['matched'] for r in reports})
                     if scratch:
                         snapshot = None   # the scratch tree is not the workspace: nothing to put
                         self.state.setdefault('read_hashes', {})[args['path']] = hashlib.sha256(

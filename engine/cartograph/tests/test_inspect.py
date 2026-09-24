@@ -93,3 +93,32 @@ def test_list_popular_fields(carto):
         assert "name" in item
         assert "version" in item
         assert "install_count" in item
+
+
+def test_inspect_shows_the_api_and_keeps_source_opt_in(tmp_path):
+    from cartograph.inspector import _api
+
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "__init__.py").write_text("")
+    (src / "mean.py").write_text(
+        'LIMIT = 10\n\n'
+        'def column_mean(rows: list[dict], key: str) -> float:\n    """Mean of one column."""\n    return 0.0\n\n'
+        'def _helper():\n    pass\n\n'
+        'class Table:\n    """Rows with a header."""\n    def __init__(self, rows):\n        self.rows = rows\n'
+        '    def mean(self, key):\n        return 0.0\n    def _private(self):\n        pass\n')
+    api = _api(str(src))
+    assert api == {"mean.py": [
+        "LIMIT = 10",
+        "def column_mean(rows: list[dict], key: str) -> float  # Mean of one column.",
+        "class Table  # Rows with a header.",
+        "    def __init__(self, rows)",
+        "    def mean(self, key)",
+    ]}
+
+
+def test_inspect_result_carries_api_without_source(carto):
+    wid = carto.widgets[0]["id"]
+    plain = carto.inspect(wid)
+    assert "api" in plain and "source" not in plain
+    assert "source" in carto.inspect(wid, show_source=True)
