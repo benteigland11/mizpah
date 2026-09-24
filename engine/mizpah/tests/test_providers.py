@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from cg.bp_subscription_provider_session_python.src.subscription_provider_session import HttpResponse
-from mizpah import provider_cli, providers
+from mizpah import provider_cli, providers, user_config
 from mizpah.worker import client_for
 
 
@@ -111,7 +111,8 @@ def test_cli_models_and_use(tmp_path: Path, capsys: pytest.CaptureFixture, monke
     assert 'listed' in json.loads(capsys.readouterr().out)['error']
     assert provider_cli.main(['--config', str(engine), 'use', 'xai_api', 'grok-4.5', '--role', 'worker']) == 0
     assert json.loads(capsys.readouterr().out)['roles'] == ['worker']
-    written = json.loads(harness.read_text())
+    written = user_config.harness(engine)[0]
+    assert json.loads(harness.read_text())['worker']['provider'] == 'llama_client'   # the repository's file is not the user's
     worker = written['worker']
     assert worker['provider'] == 'subscription' and worker['subscription'] == 'xai_api' and 'known_issues' not in worker
     assert worker['endpoint']['base_url'] == 'https://api.x.ai/v1' and worker['endpoint']['maximum_response_bytes'] == 5
@@ -201,7 +202,7 @@ def test_added_local_server_follows_reachability_and_use_writes_llama_client(tmp
         assert provider_cli.main(['--config', str(engine), 'use', 'box', 'local-70b', '--effort', 'high']) == 0
         out = json.loads(capsys.readouterr().out)
         assert out['transport'] == 'llama_client' and out['effort'] is None  # no ladder: effort is not sent
-        worker = json.loads(harness.read_text())['worker']
+        worker = user_config.harness(engine)[0]['worker']
         assert worker['provider'] == 'llama_client' and 'subscription' not in worker
         assert worker['endpoint']['base_url'] == base and worker['endpoint']['tokenize_path'] == '/tokenize'
         assert worker['generation'] == {'model': 'local-70b', 'top_k': 4} and worker['known_issues']['repetition']
@@ -216,7 +217,7 @@ def test_added_local_server_follows_reachability_and_use_writes_llama_client(tmp
     capsys.readouterr()
     assert provider_cli.main(['--config', str(engine), 'remove', 'box']) == 0
     assert json.loads(capsys.readouterr().out) == {'event': 'removed', 'provider': 'box'}
-    assert 'box' not in json.loads(engine.read_text())['providers']
+    assert 'box' not in user_config.engine(engine)['providers']
     assert provider_cli.main(['--config', str(engine), 'remove', 'box']) == 2
 
 
@@ -269,7 +270,7 @@ def test_openai_local_kind_goes_through_the_session_transport(tmp_path: Path, ca
         capsys.readouterr()
         assert provider_cli.main(['--config', str(engine), 'use', 'ollama', 'm']) == 0
         assert json.loads(capsys.readouterr().out)['transport'] == 'subscription'
-        worker = json.loads(harness.read_text())['worker']
+        worker = user_config.harness(engine)[0]['worker']
         assert worker['provider'] == 'subscription' and worker['subscription'] == 'ollama'
         assert worker['endpoint']['completion_path'] == '/chat/completions'
     finally:
@@ -333,14 +334,14 @@ def test_configure_set_edits_any_endpoint_field(tmp_path: Path, capsys: pytest.C
             'template_path': '/tpl', 'local_kind': 'llama'}
         assert provider_cli.main(['--config', str(engine), 'use', 'box', 'm']) == 0
         capsys.readouterr()
-        worker = json.loads(harness.read_text())['worker']
+        worker = user_config.harness(engine)[0]['worker']
         assert worker['endpoint']['completion_path'] == '/v2/chat' and worker['endpoint']['tokenize_path'] == '/tok'
         assert worker['endpoint']['template_path'] == '/tpl' and worker['endpoint']['headers'] == {'Content-Type': 'application/json', 'X-Box': '1'}
         assert worker['endpoint']['timeout_seconds'] == 120
         # invalid results are refused and nothing is written
         assert provider_cli.main(['--config', str(engine), 'configure', 'box', '--set', 'wire=grpc']) == 2
         assert 'valid profile' in json.loads(capsys.readouterr().out)['error']
-        assert json.loads(engine.read_text())['providers']['box']['wire'] == 'chat_completions'
+        assert user_config.engine(engine)['providers']['box']['wire'] == 'chat_completions'
         assert provider_cli.main(['--config', str(engine), 'configure', 'box', '--set', 'colour=red']) == 2
         capsys.readouterr()
         assert provider_cli.main(['--config', str(engine), 'configure', 'box', '--set', 'tokenize_path=']) == 0

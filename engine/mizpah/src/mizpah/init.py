@@ -61,8 +61,8 @@ def pin_crew(project: Path, engine_config: Path, roles: tuple[str, ...] = ('work
     spec copied into `.mizpah/config.json` (`models.<role>`), so the run uses what the brief was signed on
     whatever the defaults become later. A choice the task already made stays. Returns the crew as labels."""
     import copy
-    engine = json.loads(Path(engine_config).read_text())
-    harness = json.loads((Path(engine_config).parent/engine['harness_config']).read_text())
+    from . import user_config
+    harness, _ = user_config.harness(engine_config)   # the seats as this machine chose them
     project = Path(project).resolve()
     pc = project_config(project) or default_config()
     models = pc.setdefault('models', {})
