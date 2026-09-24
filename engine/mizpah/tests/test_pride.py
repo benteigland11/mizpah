@@ -91,3 +91,20 @@ def test_the_judge_sees_its_last_three_looks_as_history(tmp_path):
     first, last = client.calls[0]['messages'][0]['content'], client.calls[-1]['messages'][0]['content']
     assert 'Earlier looks' not in first
     assert last.count('not proud. one visual idea') == 3 and 'context, not a verdict to repeat' in last
+
+
+def test_a_model_that_cannot_see_is_sent_no_images(tmp_path):
+    prompts.set_messages_dir(PROMPTS)
+    (tmp_path/'shot.png').write_bytes(b'\x89PNG\r\n\x1a\n')
+    (tmp_path/'index.html').write_text('<h1>Thread</h1>')
+
+    class Blind(Client):
+        def capabilities(self):
+            return dict(vision=False)
+    client = Blind('{"proud": true, "why": "clean"}')
+    root = tmp_path/'sess'
+    root.mkdir()
+    out = pride.review(client, dict(controller=dict(generation={}), mizpah={}), tmp_path, root,
+                       dict(deliverables=['index.html', 'shot.png']))
+    sent = client.calls[0]['messages'][0]['content']
+    assert out['proud'] is True and isinstance(sent, str) and 'cannot view images' in sent and '<h1>Thread</h1>' in sent

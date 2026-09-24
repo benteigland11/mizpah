@@ -94,11 +94,30 @@ def _image(path: Path) -> dict[str, Any]:
     return dict(type='image_url', image_url=dict(url=f'data:image/{kind};base64,'+base64.b64encode(path.read_bytes()).decode()))
 
 
-def render(path: Path, scratch: Path) -> tuple[str, list[dict[str, Any]]]:
+def can_see(client: Any) -> bool:
+    """Whether the judging model takes images, from what its server reports (never from its name). A local model
+    without a vision projector was sent the page's screenshots and its server answered 500 (Ornith, 2026-09-23)."""
+    try:
+        return bool(client.capabilities().get('vision'))
+    except Exception:  # noqa: BLE001 — a model that cannot say is sent text only, the safe reading
+        return False
+
+
+def render(path: Path, scratch: Path, vision: bool = True) -> tuple[str, list[dict[str, Any]]]:
     """One asset as the model can take it in: text as text, pictures as pictures, a score's pages and a video's
-    frames as pictures, MIDI as its notes. What cannot be shown is said, not hidden."""
+    frames as pictures, MIDI as its notes. What cannot be shown is said, not hidden. A model that cannot see gets a
+    PDF's text, a video's streams, and a line saying an image is there."""
     suffix = path.suffix.lower()
     head = f'## {path.name}'
+    if not vision and suffix in IMAGE_EXTENSIONS:
+        return f'{head}\n(an image; the model judging here cannot view images — judge the rest)', []
+    if not vision and suffix == '.pdf':
+        text = subprocess.run(['pdftotext', '-layout', str(path), '-'], capture_output=True, text=True).stdout if shutil.which('pdftotext') else ''
+        return f'{head}\n(a PDF; the model judging here cannot view its pages — its text follows)\n{text[:TEXT_ASSET_CHARS]}', []
+    if not vision and suffix in ('.mp4', '.mov', '.webm'):
+        info = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'stream=codec_type,codec_name,width,height,r_frame_rate:format=duration',
+                               '-of', 'compact', str(path)], capture_output=True, text=True).stdout if shutil.which('ffprobe') else ''
+        return f'{head}\n(a video; the model judging here cannot view frames — its streams follow)\n{info}', []
     if suffix in ('.mid', '.midi'):
         try:
             return f'{head} (MIDI, as notes: name@beat/length-in-beats v velocity)\n{midi_text(path.read_bytes())}', []
@@ -173,7 +192,8 @@ def judge(client: Any, config: dict[str, Any], files: list[Path], earlier: list[
     """The fresh conversation: the brief, the assets, the question and the last few looks at earlier versions."""
     from cg.backend_persistent_model_session_python.src.persistent_model_session import parse_turn
     with tempfile.TemporaryDirectory() as scratch:
-        parts = [render(p, Path(scratch)) for p in files]
+        vision = can_see(client)
+        parts = [render(p, Path(scratch), vision) for p in files]
         text = prompts.message('pride_controller', assets='\n\n'.join(t for t, _ in parts), history=history_text(list(earlier)), brief=brief_text(brief or {}))
         images = [image for _, imgs in parts for image in imgs]
         content: Any = [dict(type='text', text=text)]+images if images else text
