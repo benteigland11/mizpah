@@ -94,6 +94,10 @@ def test_cli_load_and_start(tmp_path: Path, monkeypatch, capsys: pytest.CaptureF
     assert [step["do"] for step in whole["steps"]] == ["Do first.", "Do second.", "Do third."]
     assert main(["load", "item", "--titles", "--full"]) == 1
     capsys.readouterr()
+    for alias in ("show", "get"):
+        assert main([alias, "item"]) == 0
+        assert json.loads(capsys.readouterr().out)["title"] == "Item"
+    capsys.readouterr()
     assert main(["start", "item", "--title", "Second"]) == 0
     started = json.loads(capsys.readouterr().out)
     assert started["at"] == "Second"

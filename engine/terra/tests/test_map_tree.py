@@ -338,7 +338,7 @@ def test_land_stops_at_the_first_refusal_and_names_the_way_past(tmp_path: Path, 
     create_session_map(tmp_path, "exp")
     rids = _sampled_unknown(tmp_path, "thin", map_id="exp", samples=1)
     set_active_map_id("exp")
-    steps, rec, blocked = _land(tmp_path, "thin", rids, [], "med", True)
+    steps, rec, blocked = _land(tmp_path, "thin", rids, [], "med", True, ladder=False)
     assert steps[-1].startswith("graduated") and blocked.startswith("promote:") and "terra known ladder thin" in blocked
     with scoped_map("global"):
         assert not known_path(tmp_path, "thin").is_file()   # nothing adopted past the refusal
@@ -355,3 +355,47 @@ def test_replace_run_swaps_the_evidence_and_keeps_the_known(tmp_path: Path, monk
     unlink_run_known(tmp_path, "size", rids[0])
     rec = link_run_known(tmp_path, "size", rids[2])
     assert rids[0] not in rec["run_ids"] and rids[2] in rec["run_ids"] and rec["stats"]["n"] == 2
+
+
+def test_land_climbs_the_ladder_when_a_reading_needs_more_samples(tmp_path: Path, monkeypatch):
+    """One sample of a reading: land re-runs its probe at the same target until promote can hold."""
+    from terra.cli import _land
+
+    monkeypatch.chdir(tmp_path)
+    create_session_map(tmp_path, "exp")
+    rids = _sampled_unknown(tmp_path, "one", map_id="exp", samples=1)
+    set_active_map_id("exp")
+    steps, rec, blocked = _land(tmp_path, "one", rids, [], "med", True)
+    assert blocked is None, (steps, blocked)
+    assert any(s.startswith("ran ") for s in steps) and "promoted one to med" in steps
+    with scoped_map("global"):
+        assert load_known(tmp_path, "one")["confidence"] == "med"
+
+
+def test_land_ladders_a_variable_reading_with_the_runs_own_target(tmp_path: Path, monkeypatch):
+    from terra.cli import _land
+    from terra.probe_run import load_run
+
+    monkeypatch.chdir(tmp_path)
+    create_session_map(tmp_path, "exp")
+    probe_id = "p_noisy"
+    init_probe(tmp_path, probe_id, purpose="p")
+    pdir = tmp_path / ".terra" / "map" / "probes" / probe_id
+    (pdir / "probe.py").write_text(
+        "import random\n"
+        "KIND = 'watch'\nDURATION_S = 0\nREQUIRED_EXPORTS = ['to', 'status', 'artifacts']\n"
+        "def run(ctx=None):\n"
+        "    ctx = ctx or {}\n"
+        "    to = ctx.get('to') or {'kind': 'default'}\n"
+        "    if ctx.get('dry_run'):\n"
+        "        return {'to': to, 'status': 'ok', 'artifacts': []}\n"
+        "    return {'to': to, 'status': 'ok', 'artifacts': [], 'measures': [{'quantity': 'q', 'value': 4 + random.random() * 0.01}]}\n",
+        encoding="utf-8")
+    with scoped_map("exp"):
+        rid = run_probe(tmp_path, probe_id, to={"kind": "region", "i": 7}).get("id")
+        create_unknown(tmp_path, "noisy", claim="how big is q?", evidence_needed="a reading", map_type="number", quantity="q")
+    set_active_map_id("exp")
+    steps, rec, blocked = _land(tmp_path, "noisy", [rid], [], "med", True)
+    assert blocked is None, (steps, blocked)
+    reruns = [s.split("(")[1].split(")")[0] for s in steps if s.startswith("ran ")]
+    assert reruns and all(load_run(tmp_path, r).get("to") == {"kind": "region", "i": 7} for r in reruns)

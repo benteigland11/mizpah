@@ -809,3 +809,34 @@ def test_route_complete_refuses_while_a_procedure_walk_is_open(project: Path) ->
     r = _run(project, "route", "complete", "t", "--evidence", "x")
     assert r.returncode == 0, r.stderr
     assert json.loads(r.stdout)["data"]["status"] == "done"
+
+
+# --- the verbs workers reach for: --map after the verb, show, promote --to ----------------------------
+
+
+def test_map_after_the_verb_is_the_global_option() -> None:
+    from terra.cli import _hoist_map
+
+    assert _hoist_map(["known", "list", "--map", "t1"]) == ["--map", "t1", "known", "list"]
+    assert _hoist_map(["unknown", "link-run", "--map=t1", "u", "r"]) == ["--map=t1", "unknown", "link-run", "u", "r"]
+    assert _hoist_map(["--map", "t1", "known", "list"]) == ["--map", "t1", "known", "list"]
+    # gate, sitrep and route add keep their own --map
+    assert _hoist_map(["gate", "--map", "t1"]) == ["gate", "--map", "t1"]
+    assert _hoist_map(["route", "add", "x", "--map", "t1"]) == ["route", "add", "x", "--map", "t1"]
+
+
+def test_probe_show_route_show_and_promote_by_flag(project: Path) -> None:
+    init_probe(project, "p1", purpose="reads q")
+    shown = _run(project, "probe", "show", "p1")
+    assert shown.returncode == 0, shown.stderr
+    assert json.loads(shown.stdout)["id"] == "p1" and "probe.py" in json.loads(shown.stdout)["files"]
+    missing = _run(project, "probe", "show", "nope")
+    assert missing.returncode == 1 and "p1" in missing.stderr
+    assert _run(project, "route", "show").returncode == 0
+    add_task(project, "t1", title="a task")
+    one = _run(project, "route", "status", "t1")
+    assert one.returncode == 0 and json.loads(one.stdout)["id"] == "t1"
+    for flag in ("--to", "--confidence"):
+        out = _run(project, "known", "promote", "nothing_here", flag, "med")
+        assert "unrecognized arguments" not in out.stderr and "invalid choice" not in out.stderr
+    assert "name the level" in _run(project, "known", "promote", "nothing_here").stderr

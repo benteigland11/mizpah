@@ -1380,6 +1380,52 @@ def describe_known(project_root: Path, known_id: str) -> dict[str, Any]:
     return {"record": rec}
 
 
+def climb_known(
+    project_root: Path,
+    known_id: str,
+    confidence: str = "med",
+    *,
+    max_runs: int = 6,
+) -> tuple[dict[str, Any], list[str]]:
+    """Re-run the probe of a known's latest run, at the same target, linking each run, until its samples meet
+    `confidence`. Raises ValueError with the ladder's reason when the quantity is determined (identical readings:
+    the next rung is a second method), when no probe produced its runs, or after `max_runs`."""
+    from .number_type import is_determined
+    from .probe_run import load_run, run_probe
+
+    known = load_known(project_root, known_id)
+    run_ids = list(known.get("run_ids") or [])
+    source = None
+    for run_id in reversed(run_ids):
+        try:
+            meta = load_run(project_root, run_id)
+        except (FileNotFoundError, ValueError, OSError):
+            continue
+        probe = meta.get("probe_id") or (meta.get("from") or {}).get("probe_id")
+        if probe:
+            source = (probe, meta.get("to"))
+            break
+    steps: list[str] = []
+    runs = 0
+    while True:
+        stats = known.get("stats") or {}
+        ok, why = can_claim_confidence(stats, confidence, map_type=known.get("type"))
+        if ok:
+            return known, steps
+        if is_determined(stats):
+            raise ValueError(f"determined after {len(known.get('run_ids') or [])} identical run(s): {why}")
+        if source is None:
+            raise ValueError(f"no probe run to repeat: {why}")
+        if runs >= max_runs:
+            raise ValueError(f"{runs} more runs taken and the ladder still says: {why}")
+        stamp = run_probe(project_root, source[0], to=source[1] if source[1] is not None else {"kind": "default"})
+        runs += 1
+        if stamp.get("status") != "ok":
+            raise ValueError(f"run {stamp.get('id')} finished with status {stamp.get('status')}: {stamp.get('error')}")
+        known = link_run_known(project_root, known["id"], stamp["id"])
+        steps.append(f"ran {source[0]} again ({stamp['id']}) and linked it to {known['id']}")
+
+
 def ladder_unknown(
     project_root: Path,
     unknown_id: str,

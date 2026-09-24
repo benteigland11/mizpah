@@ -85,7 +85,7 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="include decayed procedures (a person looking, not a worker)")
     search.set_defaults(handler=_cmd_search)
 
-    load = sub.add_parser("load", help="print the whole procedure: title, description, and every step do")
+    load = sub.add_parser("load", aliases=["show", "get"], help="print the whole procedure: title, description, and every step do")
     load.add_argument("id")
     load.add_argument("--titles", action="store_true", help="outline only: step titles without their do")
     load.add_argument("--full", action="store_true", help="deprecated; full output is the default")

@@ -526,8 +526,18 @@ def cmd_route_init(args: argparse.Namespace) -> int:
 
 def cmd_route_status(args: argparse.Namespace) -> int:
     from .agent_io import emit, error, success
-    from .route import route_status
+    from .route import load_route, route_status
 
+    if getattr(args, "task", None):
+        try:
+            tasks = load_route(require_project_root()).get("tasks") or []
+        except (FileNotFoundError, ValueError, OSError) as e:
+            return emit(error(str(e), code="route_status"))
+        found = [t for t in tasks if t.get("id") == args.task]
+        if not found:
+            return emit(error(f"no route task {args.task!r}", code="route_status"))
+        print(json.dumps(found[0], indent=2, default=str))
+        return 0
     try:
         root = require_project_root()
         st = route_status(root)
@@ -2618,12 +2628,16 @@ def _note_cohort_and_convergence(root, rec, run_id: str) -> None:
 
 
 def cmd_known_promote(args: argparse.Namespace) -> int:
+    confidence = args.confidence or getattr(args, "confidence_flag", None)
+    if not confidence:
+        print("error: name the level: terra known promote <id> med", file=sys.stderr)
+        return 2
     try:
         root = require_project_root()
         rec = promote_known(
             root,
             args.id,
-            args.confidence,
+            confidence,
             status=args.status,
         )
     except (ValueError, FileNotFoundError, OSError) as e:
@@ -2684,13 +2698,14 @@ CONFIDENCE_ORDER = ("low", "med", "high")
 
 
 def _land(root: Path, unknown_or_known: str, runs: list[str], on: list[str], confidence: str,
-          adopt: bool) -> tuple[list[str], dict[str, Any] | None, str | None]:
+          adopt: bool, ladder: bool = True) -> tuple[list[str], dict[str, Any] | None, str | None]:
     """Close a reading in one call: link its runs, graduate, declare what it read, promote, adopt.
 
     Each step is the same library call its own verb makes; the first refusal stops the walk and is returned with
     the command that would get past it. Workers spent a median of nine terra --help lookups and failures per work
     order re-deriving this sequence (35 work orders, 2026-09-22)."""
-    from .knowns import add_dependency, adopt_known, graduate_unknown, link_run_known, load_known, promote_known
+    from .knowns import (add_dependency, adopt_known, climb_known, graduate_unknown, link_run_known, load_known,
+                         promote_known)
     from .paths import get_active_map_id
     from .unknowns import link_run, load_unknown
 
@@ -2731,6 +2746,12 @@ def _land(root: Path, unknown_or_known: str, runs: list[str], on: list[str], con
     rec = load_known(root, known_id)
     have = str(rec.get("confidence") or "low")
     if CONFIDENCE_ORDER.index(have) < CONFIDENCE_ORDER.index(confidence) if have in CONFIDENCE_ORDER else True:
+        if ladder:
+            try:
+                rec, climbed = climb_known(root, known_id, confidence)
+                steps.extend(climbed)
+            except (ValueError, FileNotFoundError, OSError) as e:
+                steps.append(f"ladder stopped: {e}")
         try:
             rec = promote_known(root, known_id, confidence)
             steps.append(f"promoted {known_id} to {confidence}")
@@ -2758,7 +2779,7 @@ def cmd_known_land(args: argparse.Namespace) -> int:
     except (ValueError, FileNotFoundError, OSError) as e:
         return emit(error(str(e), code="known_land"))
     steps, rec, blocked = _land(root, args.id, list(args.run or []), list(args.on or []), args.confidence,
-                                not args.no_adopt)
+                                not args.no_adopt, ladder=not getattr(args, "no_ladder", False))
     data = {"steps": steps, "known": rec}
     if blocked:
         return emit(error("stopped at " + blocked, code="known_land", meta=data))
@@ -3869,6 +3890,23 @@ def _listed_probe(pdir: Path) -> dict[str, Any]:
     }
 
 
+def cmd_probe_show(args: argparse.Namespace) -> int:
+    try:
+        root = require_project_root()
+    except FileNotFoundError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    pdir = probes_root(root) / args.id
+    if not pdir.is_dir():
+        known = sorted(p.name for p in probes_root(root).iterdir() if p.is_dir()) if probes_root(root).is_dir() else []
+        print(f"error: no probe {args.id!r} (probes: {', '.join(known) or 'none'})", file=sys.stderr)
+        return 1
+    row = _listed_probe(pdir)
+    row["files"] = sorted(str(p.relative_to(pdir)) for p in pdir.rglob("*") if p.is_file() and "__pycache__" not in p.parts)
+    print(json.dumps(row, indent=2, default=str))
+    return 0
+
+
 def cmd_probe_list(args: argparse.Namespace) -> int:
     try:
         root = require_project_root()
@@ -4100,6 +4138,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_list = probe_sub.add_parser("list", help="List probes and validation status")
     p_list.add_argument("--json", action="store_true")
     p_list.set_defaults(func=cmd_probe_list)
+
+    p_pshow = probe_sub.add_parser("show", aliases=["get"], help="One probe: its meta, files and validation")
+    p_pshow.add_argument("id")
+    p_pshow.add_argument("--json", action="store_true", help="Accepted no-op — JSON is the default output")
+    p_pshow.set_defaults(func=cmd_probe_show)
 
     p_run = probe_sub.add_parser(
         "run",
@@ -4942,8 +4985,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_kp.add_argument("id")
     p_kp.add_argument(
         "confidence",
+        nargs="?",
         choices=sorted(CONFIDENCE_SET),
         help="Target confidence",
+    )
+    p_kp.add_argument(
+        "--confidence", "--to",
+        dest="confidence_flag",
+        default=None,
+        choices=sorted(CONFIDENCE_SET),
+        help="Same as the positional level",
     )
     p_kp.add_argument(
         "--status",
@@ -4955,7 +5006,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_kland = kn_sub.add_parser(
         "land",
-        help="Close a reading in one call: link its runs, graduate, declare deps, promote, adopt to the parent map; "
+        help="Close a reading in one call: link its runs, graduate, declare deps, re-run the probe until a variable reading can be promoted, promote, adopt to the parent map; "
         "stops at the first refusal and names the command that gets past it",
     )
     p_kland.add_argument("id", help="the unknown (or its known) to land")
@@ -4963,6 +5014,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_kland.add_argument("--on", action="append", default=[], help="file:<path> or known:<id> it depends on (repeatable)")
     p_kland.add_argument("--confidence", default="med", choices=["med", "high"])
     p_kland.add_argument("--no-adopt", action="store_true", help="stay on the task map")
+    p_kland.add_argument("--no-ladder", action="store_true",
+                         help="do not re-run the probe when a variable reading needs more samples to promote")
     p_kland.set_defaults(func=cmd_known_land)
 
     p_krr = kn_sub.add_parser("replace-run", help="Swap a run a known was built on for a corrected one")
@@ -5396,7 +5449,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_ri.add_argument("--force", action="store_true")
     p_ri.set_defaults(func=cmd_route_init)
 
-    p_rst = rt_sub.add_parser("status", help="Counts + next + blocked (JSON)")
+    p_rst = rt_sub.add_parser("status", aliases=["show"], help="Counts + next + blocked (JSON); with a task id, that task")
+    p_rst.add_argument("task", nargs="?", default=None, help="One task's record instead of the summary")
     p_rst.add_argument("--human", action="store_true")
     # Accepted no-op: JSON is already this verb's default. Refusing the
     # flag made argparse exit 2 with EMPTY stdout, which downstream reads
@@ -5768,8 +5822,37 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+# Verbs with their own --map (a scope, not the active map); everywhere else --map is the global option.
+_OWN_MAP_FLAG = {("gate",), ("sitrep",), ("route", "add")}
+
+
+def _hoist_map(argv: list[str]) -> list[str]:
+    """`terra known list --map X` means `terra --map X known list`: the global --map is accepted after the verb."""
+    words = [a for a in argv if not a.startswith("-")]
+    if not words or tuple(words[:1]) in _OWN_MAP_FLAG or tuple(words[:2]) in _OWN_MAP_FLAG:
+        return argv
+    first = argv.index(words[0])
+    head, rest, hoisted = argv[:first], [], []
+    i = first
+    while i < len(argv):
+        a = argv[i]
+        if a == "--map" and i + 1 < len(argv):
+            hoisted = ["--map", argv[i + 1]]
+            i += 2
+            continue
+        if a.startswith("--map="):
+            hoisted = [a]
+            i += 1
+            continue
+        rest.append(a)
+        i += 1
+    if not hoisted or "--map" in head or any(h.startswith("--map=") for h in head):
+        return argv
+    return head + hoisted + rest
+
+
 def main(argv: list[str] | None = None) -> int:
-    argv = list(sys.argv[1:] if argv is None else argv)
+    argv = _hoist_map(list(sys.argv[1:] if argv is None else argv))
     parser = build_parser()
     args = parser.parse_args(argv)
     # Apply --map before any path resolution in the command
