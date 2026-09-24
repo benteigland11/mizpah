@@ -1111,6 +1111,27 @@ def open_checklists(snapshot: bytes) -> list[str]:
     return problems
 
 
+def completion_problem(root: Path | None, task: dict[str, Any], status: str) -> str:
+    """Why the route task is not done, from the worker's own last attempt: what Terra said when it refused, and
+    whether anything retried it since. "has not succeeded" alone left a worker that had fixed the refusal's cause
+    reporting that completion succeeded, when it had never run it again (Luna, social video, 2026-09-24)."""
+    head = 'route task '+task['id']+' is '+status+', not done: `terra route complete` has not succeeded'
+    attempts = []
+    for index, (name, args, result) in enumerate(session_calls(root) if root is not None else []):
+        text = str(args.get('command') or '') if name == 'bash' else json.dumps(args)
+        if (name == 'terra_route_complete' or re.search(r'terra route complete '+re.escape(task['id'])+r'\b', text)) and task['id'] in text:
+            ok = result.get('status') in (None, 'ok') and result.get('exit_code') in (None, 0)
+            said = str(result.get('stderr') or result.get('detail') or result.get('stdout') or '').strip()
+            attempts.append((index, ok, said))
+    if not attempts:
+        return head+' — you have not run it yet. Run `terra route complete '+task['id']+' --run <run_id> --known <known>` for each known this work order owes.'
+    _, ok, said = attempts[-1]
+    if ok:
+        return head+' — your last `terra route complete` returned without error but the route still says '+status+'; run it again and read what it prints.'
+    return (head+' — your last attempt was refused: '+said[:500]+' Nothing has run it again since. If you have fixed that, run '
+            '`terra route complete` again now; if you have not, fix what it names first.')
+
+
 def task_gate(config: dict[str, Any], project: Path, task: dict[str, Any], map_id: str,
               root: Path | None = None) -> dict[str, Any]:
     """The verdict on a claim is Terra's gate on the work order's task map, plus the host's honesty checks on
@@ -1129,7 +1150,7 @@ def task_gate(config: dict[str, Any], project: Path, task: dict[str, Any], map_i
     last = evidence[-1] if evidence else {}
     runs, knowns = list(last.get('runs') or []), list(last.get('knowns') or [])
     if entry['status'] != 'done':
-        problems.append('route task '+task['id']+' is '+entry['status']+', not done: `terra route complete` has not succeeded')
+        problems.append(completion_problem(root, task, entry['status']))
     unknown_ids = task_unknown_ids(task)
     problems += vacuous_truth_problems(project, unknown_ids)
     problems += duplicate_reading_problems(project, unknown_ids)   # two knowns, one float, no shared input: a copy

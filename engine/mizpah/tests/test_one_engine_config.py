@@ -122,3 +122,16 @@ def test_a_hold_after_route_complete_is_resumed_not_skipped(tmp_path, monkeypatc
     monkeypatch.setattr(loop.controller, 'ready_order', lambda project, tasks: [])
     picked = [t['id'] for t in loop.pickable(dict(mizpah=dict(agent='a')), tmp_path, root)]
     assert picked == ['held', 'killed']
+
+
+def test_a_red_completion_says_what_terra_refused_and_that_nothing_retried_it(tmp_path):
+    root = tmp_path/'task'
+    (root/'events').mkdir(parents=True)
+    call = dict(id='c1', type='function', function=dict(name='bash', arguments=json.dumps(
+        dict(command='terra route complete audit --run r1 --known k'))))
+    result = dict(call_id='c1', result=dict(status='ok', exit_code=1, stderr='TERRA ERROR [route_complete]: known k is low: med is the floor of belief'))
+    (root/'events'/'session.jsonl').write_text(json.dumps(dict(event_type='worker_turn', payload=dict(
+        response=dict(tool_calls=[call]), tool_results=[result])))+'\n')
+    text = worker.completion_problem(root, dict(id='audit'), 'in_progress')
+    assert 'known k is low' in text and 'Nothing has run it again since' in text
+    assert 'you have not run it yet' in worker.completion_problem(tmp_path/'none', dict(id='audit'), 'in_progress')
